@@ -1,6 +1,13 @@
 # Claude Code spec — Navigator execution adapters: make "Run analysis" compute the plan
 
-> **◕ STATUS — Phases 1–3 IN PROGRESS/DONE (shipped 1.6.332–1.6.334). Phase 3 continues per workflow; Phase 4 remains.**
+> **◕ STATUS — Phases 1–4 shipped (1.6.332–1.6.379). Phase 3 (more adapters) is the only open lane.**
+> **Phase 4 — DONE (1.6.379).** `run_plan` gained two Qt-free hooks: `should_cancel()` is checked at each
+> **step boundary** (before the step runs) — the first truthy check records the step `'cancelled'` and stops, so
+> nothing runs on a cancelled/stale state (the blocker's stop discipline); `on_progress(done, total)` fires once
+> per disposed step, **monotonic** 1..N. `test_navigator_cancel_progress.py` (`base`, 5) pins both, incl. a
+> real-adapter case proving a cancelled step's computation did not run. The dock's Run drives a determinate
+> `QProgressDialog` with a Cancel button over these hooks (best-effort; headless falls back to a plain run); a
+> cancel stops at the next boundary and the summary says where. `test_navigator_dock` gained a wiring test.
 > **Phase 3 — started (1.6.334).** The finding: Phase 1 proved the mechanism against a *synthetic* step name, but
 > real plans emit toolbox-**module** names — so no adapter fired in production. Fixed by re-keying adapters on the
 > real module names (`image_processing_tools` → `background_removal`, Phase 1's proof now live) and adding the next

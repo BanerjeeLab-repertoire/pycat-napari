@@ -128,14 +128,42 @@ def _render_observations(widget, body_layout):
                                  "color: gray; font-size: 10px; margin-bottom: 4px;"))
 
 
+def _make_run_progress_dialog(central_manager, plan):
+    """A determinate ``QProgressDialog`` over the plan's steps (Phase 4), or ``None`` when Qt / the napari
+    window is unavailable (headless). Its Cancel button drives ``run_plan``'s ``should_cancel``, and its value
+    is advanced by ``on_progress``. Modal to the napari window so a run is not launched twice."""
+    try:
+        from PyQt5.QtWidgets import QProgressDialog
+        from PyQt5.QtCore import Qt
+        from pycat.navigator.execution import execution_order
+        total = len(list(execution_order(plan)))
+        if total <= 0:
+            return None
+        qt = getattr(getattr(getattr(central_manager, "viewer", None), "window", None), "_qt_window", None)
+        dlg = QProgressDialog("Running the guided plan…", "Cancel", 0, total, qt)
+        dlg.setWindowTitle("Guided run")
+        dlg.setWindowModality(Qt.WindowModal)
+        dlg.setMinimumDuration(0)          # show immediately (the run is the point, not a background task)
+        dlg.setValue(0)
+        return dlg
+    except Exception:      # broad-ok: ui_cleanup — no Qt / no window → run without a progress bar
+        return None
+
+
 def run_plan_via_central_manager(central_manager, plan, review=None):
     """Execute a compiled plan against the session's data through the execution-adapter layer, and report
     per-step outcomes. Adapter-covered steps run through the batch handlers (the proven 'same computation'
     route) with the user-reviewed parameters (Phase 2); a step with no adapter yet is reported as 'run from its
     panel' — never invoked with guessed args. ``review`` is the :class:`ParamReview` the dock built from its
     editable form; when ``None`` (a programmatic run), one is built from the plan so parameters are still
-    preset/default-seeded and provenance is still recorded. Safe on an uncovered plan (nothing runs);
-    best-effort, never crashes the UI. This is the wired ``on_run``."""
+    preset/default-seeded and provenance is still recorded.
+
+    Phase 4: a determinate progress bar with a Cancel button tracks the run (``on_progress`` advances it,
+    ``should_cancel`` reads the Cancel button at each step boundary — so a cancel stops the run cleanly at the
+    next boundary, never mid-computation). Built best-effort; headless / no-Qt falls back to a plain
+    synchronous run. Safe on an uncovered plan (nothing runs); never crashes the UI. This is the wired
+    ``on_run``."""
+    dlg = None
     try:
         from pycat.navigator.executor import run_plan
         dr = getattr(getattr(central_manager, "active_data_class", None), "data_repository", None)
@@ -144,15 +172,35 @@ def run_plan_via_central_manager(central_manager, plan, review=None):
         if review is None:
             from pycat.navigator.parameters import build_param_review
             review = build_param_review(plan, ctx=dr)
-        report = run_plan(plan, dr, ctx=dr,
-                          params_by_step=review.params_by_step(),
-                          provenance_by_step=review.provenance_by_step())
+
+        dlg = _make_run_progress_dialog(central_manager, plan)
+
+        def _should_cancel():
+            if dlg is None:
+                return False
+            from PyQt5.QtWidgets import QApplication
+            QApplication.processEvents()      # let a Cancel click register between steps
+            return dlg.wasCanceled()
+
+        try:
+            report = run_plan(plan, dr, ctx=dr,
+                              params_by_step=review.params_by_step(),
+                              provenance_by_step=review.provenance_by_step(),
+                              on_progress=(lambda done, total: dlg.setValue(done)) if dlg is not None else None,
+                              should_cancel=_should_cancel if dlg is not None else None)
+        finally:
+            if dlg is not None:
+                dlg.reset()
+
         ran = [s.name for s in report.ran]
         panel = [s.name for s in report.needs_panel]
         blocked = [s for s in report.steps if s.outcome == "blocked"]
         parts = []
         if ran:
             parts.append("Ran: " + ", ".join(ran) + ".")
+        if report.cancelled:
+            at = next((s.name for s in report.steps if s.outcome == "cancelled"), None)
+            parts.append(f"Cancelled at {at}." if at else "Run cancelled.")
         if blocked:
             parts.append(f"Stopped at {blocked[0].name} — {blocked[0].detail}")
         if panel:
@@ -163,6 +211,11 @@ def run_plan_via_central_manager(central_manager, plan, review=None):
         from napari.utils.notifications import show_info
         show_info(" ".join(parts) or "Nothing to run.")
     except Exception as exc:      # broad-ok: ui_cleanup — a run attempt must never crash the guided panel
+        if dlg is not None:
+            try:
+                dlg.reset()
+            except Exception:      # broad-ok: ui_cleanup — the dialog may already be gone
+                pass
         from pycat.utils.general_utils import debug_log
         debug_log("navigator: run_plan_via_central_manager failed", exc)
 

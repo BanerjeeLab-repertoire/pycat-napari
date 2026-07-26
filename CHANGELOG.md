@@ -1,3 +1,24 @@
+## [1.6.379] - 2026-07-25
+### Added — **Guided runs are cancellable with a determinate progress bar (navigator_execution_adapters Phase 4).**
+The navigator executor `run_plan` gained two Qt-free hooks so a guided run can be observed and stopped without
+a second execution engine:
+
+- `should_cancel()` is checked at **each step boundary, before the step runs**. The first truthy check records
+  the current step `'cancelled'` and stops — it, and everything after it, never runs, so no step ever computes
+  on a cancelled/stale state (the same stop discipline as a blocker). `ExecReport.cancelled` reports it.
+- `on_progress(done, total)` fires once per disposed step, **monotonically** 1..N, so a determinate bar is
+  possible.
+
+The navigator dock's Run button now drives a determinate `QProgressDialog` with a Cancel button over these
+hooks: the bar advances per step, Cancel stops the run at the next boundary, and the summary says where it was
+cancelled. Built best-effort — headless / no-Qt falls back to a plain synchronous run.
+
+- Tests: `tests/navigator/test_navigator_cancel_progress.py` (`base`, 5) — cancel stops at a step boundary
+  (proven on a real adapter whose computation would otherwise mutate state), and progress is monotonic and
+  reaches total (even when cancelled). `tests/test_navigator_dock.py` gained a wiring test: the dock's
+  `on_progress`/`should_cancel` are bound to the dialog and the cancelled-summary is reported. Full
+  `pytest -m "core or base"` green.
+
 ## [1.6.378] - 2026-07-25
 ### Changed — **Extracted the viewer/layer actions from MenuManager (ui_decomposition Part 2, feature 9 — Part 2 feature extraction complete).**
 `_home_fit_view` (53, reset the camera to fit all layers) and `_process_foreign_layers` (48, tag/normalize

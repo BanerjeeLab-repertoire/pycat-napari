@@ -126,7 +126,8 @@ def resolve_batch_step(step_name: str, intent=None) -> Optional[str]:
 @dataclasses.dataclass(frozen=True)
 class StepOutcome:
     """What happened to one step. ``outcome`` is ``'ran'`` / ``'ran_with_caveat'`` / ``'blocked'`` (the run
-    stops here) / ``'skipped'`` (after a blocker) / ``'needs_panel'`` (no adapter yet) / ``'error'``.
+    stops here) / ``'skipped'`` (after a blocker or a cancel) / ``'needs_panel'`` (no adapter yet) / ``'error'``
+    / ``'cancelled'`` (the user cancelled at this step's boundary — it and everything after it did not run).
     ``provenance`` (Phase 2) records how the step was parameterised — the ``PresetApplication.record()`` shape
     (which preset, if any, seeded it and what the user changed) — empty when the step carried no review."""
     name: str
@@ -151,6 +152,11 @@ class ExecReport:
     def needs_panel(self) -> list:
         return [s for s in self.steps if s.outcome == "needs_panel"]
 
+    @property
+    def cancelled(self) -> bool:
+        """True when the run was cancelled at a step boundary (a ``'cancelled'`` outcome is present)."""
+        return any(s.outcome == "cancelled" for s in self.steps)
+
 
 def _build_step_registry() -> dict:
     """The production batch step registry (name → replay handler), built the way `BatchProcessor` does. Only
@@ -168,7 +174,8 @@ def _build_step_registry() -> dict:
 
 def run_plan(plan, state, *, intent=None, ctx=None, image_path=None, output_dir=None, runner=None,
              params_by_step: Optional[dict] = None, provenance_by_step: Optional[dict] = None,
-             on_step: Optional[Callable] = None) -> ExecReport:
+             on_step: Optional[Callable] = None, should_cancel: Optional[Callable] = None,
+             on_progress: Optional[Callable] = None) -> ExecReport:
     """Execute ``plan``'s steps in gate order by driving the batch handlers, threading ``state`` (a dict the
     handlers read/write, exactly as a batch replay). Returns an :class:`ExecReport`.
 
@@ -180,10 +187,27 @@ def run_plan(plan, state, *, intent=None, ctx=None, image_path=None, output_dir=
 
     ``params_by_step`` (Phase 2) overrides the adapter's derived params per step with the user-reviewed values
     (:mod:`pycat.navigator.parameters`); ``provenance_by_step`` records how each ran step was parameterised
-    (the ``PresetApplication.record()`` shape) onto its :class:`StepOutcome`."""
+    (the ``PresetApplication.record()`` shape) onto its :class:`StepOutcome`.
+
+    ``should_cancel`` / ``on_progress`` (Phase 4) make a run cancellable and observable. ``should_cancel()`` is
+    checked at **each step boundary** (before the step runs): the first time it returns truthy the current step
+    is recorded ``'cancelled'`` and it — and everything after it — does not run (identical stop semantics to a
+    blocker, so no step ever runs on cancelled/stale state). ``on_progress(done, total)`` fires once per step
+    after its outcome is recorded, with ``done`` the count of steps disposed so far and ``total`` the plan's
+    step count — **monotonically increasing**, ending at ``total`` unless cancelled earlier."""
     intent = intent if intent is not None else getattr(plan, "intent", None)
     registry = _build_step_registry()
     report = ExecReport()
+
+    order = list(execution_order(plan))
+    total = len(order)
+
+    def _record(outcome):
+        """Append one step outcome and fire the monotonic progress tick (done = steps disposed so far)."""
+        report.steps.append(outcome)
+        if on_progress:
+            on_progress(len(report.steps), total)
+        return outcome
 
     tmp = None
     if output_dir is None:
@@ -194,12 +218,20 @@ def run_plan(plan, state, *, intent=None, ctx=None, image_path=None, output_dir=
 
     try:
         halted = False
-        for es in execution_order(plan):
+        for es in order:
+            # Cancellation is checked at the step boundary, BEFORE the step runs — the current step and
+            # everything after it are left un-run (the same stop discipline as a blocker: never run on a
+            # cancelled/stale state). Only the first boundary records 'cancelled'; the rest are 'skipped'.
+            if not halted and should_cancel and should_cancel():
+                _record(StepOutcome(es.name, "cancelled", "run cancelled"))
+                halted = True
+                continue
+
             if halted or es.status == "skipped":
-                report.steps.append(StepOutcome(es.name, "skipped", es.reason))
+                _record(StepOutcome(es.name, "skipped", es.reason))
                 continue
             if es.status == "blocked":
-                report.steps.append(StepOutcome(es.name, "blocked", es.reason))
+                _record(StepOutcome(es.name, "blocked", es.reason))
                 halted = True
                 continue
 
@@ -211,15 +243,14 @@ def run_plan(plan, state, *, intent=None, ctx=None, image_path=None, output_dir=
                 # never invoke with guessed arguments.
                 detail = ("no execution adapter yet — run this step from its method panel" if adapter is None
                           else "this variant isn't auto-runnable yet — run this step from its method panel")
-                report.steps.append(StepOutcome(es.name, "needs_panel", detail))
+                _record(StepOutcome(es.name, "needs_panel", detail))
                 if on_step:
                     on_step(report.steps[-1])
                 continue
 
             fn = registry.get(batch_step)
             if fn is None:
-                report.steps.append(StepOutcome(es.name, "error",
-                                                f"batch step {batch_step!r} is not registered"))
+                _record(StepOutcome(es.name, "error", f"batch step {batch_step!r} is not registered"))
                 halted = True
                 continue
 
@@ -233,12 +264,12 @@ def run_plan(plan, state, *, intent=None, ctx=None, image_path=None, output_dir=
                 else:
                     fn(state, image_path, params, output_dir)
             except Exception as exc:      # broad-ok: scientific_result — a failed step halts; report it, never silently continue on stale state
-                report.steps.append(StepOutcome(es.name, "error", f"{type(exc).__name__}: {exc}"))
+                _record(StepOutcome(es.name, "error", f"{type(exc).__name__}: {exc}"))
                 halted = True
                 continue
 
             prov = (provenance_by_step or {}).get(es.name, {})
-            report.steps.append(StepOutcome(
+            _record(StepOutcome(
                 es.name, "ran_with_caveat" if es.status == "caveat" else "ran", es.reason, prov))
             if on_step:
                 on_step(report.steps[-1])

@@ -205,6 +205,51 @@ def test_run_plan_via_central_manager_reports_and_is_safe(monkeypatch):
     assert shown and "method panels" in shown[0]
 
 
+def test_run_plan_cancel_and_progress_are_wired_to_the_dialog(qtbot, monkeypatch):
+    """Phase 4: the dock's Run drives the progress dialog — ``on_progress`` advances its value and
+    ``should_cancel`` reads its Cancel button. A cancel at the first boundary stops the run there (nothing
+    runs), the dialog is reset, and the summary says where it was cancelled."""
+    from types import SimpleNamespace
+    import pycat.ui.navigator_dock as nd
+    from pycat.navigator.planner import Plan, PlanStep
+    from pycat.navigator.contracts import ModuleContract, AnalysisIntent
+    from pycat.navigator.capabilities import InformationRole
+    import napari.utils.notifications as notif
+
+    shown = []
+    monkeypatch.setattr(notif, "show_info", lambda m: shown.append(m))
+
+    class _FakeDlg:
+        def __init__(self):
+            self.value = 0
+            self.reset_called = False
+
+        def setValue(self, v):
+            self.value = v
+
+        def wasCanceled(self):
+            return True                       # cancel is pressed by the first boundary check
+
+        def reset(self):
+            self.reset_called = True
+
+    fake = _FakeDlg()
+    monkeypatch.setattr(nd, "_make_run_progress_dialog", lambda cm, plan: fake)
+
+    def _s(name):
+        return PlanStep(module=ModuleContract(name=name, info_role=InformationRole.TRANSFORM),
+                        produces=None, inputs=[], reason="")
+    plan = Plan(intent=AnalysisIntent(target="t", observables=["x"]),
+                steps=[_s("image_processing_tools"), _s("feature_measure")])   # step 1 has an adapter
+    cm = SimpleNamespace(active_data_class=SimpleNamespace(data_repository={}), viewer=None)
+
+    nd.run_plan_via_central_manager(cm, plan)
+
+    assert fake.reset_called                                  # the dialog is always cleaned up
+    assert fake.value == 2                                    # progress ticked through every disposed step
+    assert shown and "Cancelled at image_processing_tools" in shown[0]
+
+
 @pytest.mark.integration
 def test_the_param_review_form_renders_and_edits_flow_to_the_review(qtbot):
     """Phase 2: the plan view surfaces the adapter-covered step's material parameter as an editable control,
