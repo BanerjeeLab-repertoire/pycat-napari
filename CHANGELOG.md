@@ -1,3 +1,13 @@
+## [1.6.400] - 2026-07-26
+### Changed — **Resolver wired on the raw / preprocessed image dropdowns (Outstanding-Work Part D, increment 3).**
+Continuing the layer-binding activation: the clearly-labeled raw and preprocessed IMAGE dropdowns across the
+brightfield, in-vitro (brightfield + fluorescence), and z-stack panels now carry `common.raw_image` /
+`common.preprocessed_image`. These role-only bindings are safe to wire ahead of the mask/labels ones because
+`raw` is provenance-discriminated (`prefer=head_of_lineage`) and both degrade to an EMPTY dropdown when several
+images match — the resolver never makes a silent wrong pick. Nine dropdowns wired across four panels; guard
+`test_increment_3_raw_and_preprocessed_image_dropdowns_are_bound`. (The `common.mask`/`common.labels` fields are
+deferred — multiple masks can coexist, so "newest" needs per-panel judgment.)
+
 ## [1.6.399] - 2026-07-26
 ### Changed — **Layer lineage now recorded for z-stack and brightfield condensate segmentation (Outstanding-Work Part C1, increment 2).**
 `tag_from_operation` stamps a produced layer with the operation that made it AND a `derived_from` edge to its

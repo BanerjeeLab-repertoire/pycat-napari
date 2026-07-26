@@ -60,6 +60,19 @@ def test_increment_2_domain_dropdowns_carry_their_bindings():
 
 
 @pytest.mark.core
+def test_increment_3_raw_and_preprocessed_image_dropdowns_are_bound():
+    """Increment 3: the clearly-labeled raw / preprocessed IMAGE dropdowns across the brightfield, in-vitro,
+    and z-stack panels carry common.raw_image / common.preprocessed_image. `raw` is provenance-discriminated
+    (prefer=head_of_lineage) and both degrade to an EMPTY dropdown when several images match — never a silent
+    wrong pick — so these role-only bindings are safe to wire ahead of the ambiguous mask/labels ones."""
+    for f in ('src/pycat/toolbox/brightfield_ui.py', 'src/pycat/toolbox/invitro_bf_ui.py',
+              'src/pycat/toolbox/invitro_fluor_ui.py', 'src/pycat/toolbox/zstack_segmentation_ui.py'):
+        bound = _wired_bindings(f)
+        assert 'common.raw_image' in bound, f
+        assert 'common.preprocessed_image' in bound, f
+
+
+@pytest.mark.core
 def test_every_wired_binding_is_a_real_key_in_the_binding_table():
     """A dropdown must never point at a binding key that does not exist in layer_bindings.json."""
     import json

@@ -165,7 +165,7 @@ def _add_zstack_bg_removal(ui, layout):
         "independently.</span>"
     ))
 
-    vol_dd = ui.create_layer_dropdown(napari.layers.Image)
+    vol_dd = ui.create_layer_dropdown(napari.layers.Image, binding='common.raw_image')
     form.addRow(label_with_circle("Raw Z-stack (Z,H,W):", dropdown=vol_dd), vol_dd)
 
     ball_sp = QSpinBox(); ball_sp.setRange(2, 200); ball_sp.setValue(15)
@@ -334,8 +334,8 @@ def _add_zstack_condensate_seg(ui, layout):
         "merges overlapping detections across Z into 3D objects.</span>"
     ))
 
-    raw_dd  = ui.create_layer_dropdown(napari.layers.Image)
-    proc_dd = ui.create_layer_dropdown(napari.layers.Image)
+    raw_dd  = ui.create_layer_dropdown(napari.layers.Image, binding='common.raw_image')
+    proc_dd = ui.create_layer_dropdown(napari.layers.Image, binding='common.preprocessed_image')
     cell_dd = ui.create_layer_dropdown(napari.layers.Labels)
     form.addRow("Raw volume:", raw_dd)
     form.addRow("BG-removed volume:", proc_dd)

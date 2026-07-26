@@ -216,7 +216,7 @@ def _ivbf_segmentation(ui, layout):
     grp  = QGroupBox("Step 3 — Segment Droplets")
     form = QFormLayout(grp)
     form.setContentsMargins(9, 20, 9, 6)
-    enh_dd = ui.create_layer_dropdown(napari.layers.Image)
+    enh_dd = ui.create_layer_dropdown(napari.layers.Image, binding='common.preprocessed_image')
     form.addRow(label_with_circle("Enhanced BF image:", dropdown=enh_dd), enh_dd)
 
     method_dd = QComboBox()
@@ -312,7 +312,7 @@ def _ivbf_od_field(ui, layout):
     grp  = QGroupBox("Step 4 — Optical Density & Field Summary")
     form = QFormLayout(grp)
     form.setContentsMargins(9, 20, 9, 6)
-    raw_dd  = ui.create_layer_dropdown(napari.layers.Image)
+    raw_dd  = ui.create_layer_dropdown(napari.layers.Image, binding='common.raw_image')
     mask_dd = ui.create_layer_dropdown(napari.layers.Labels)
     form.addRow("Raw BF image:", raw_dd)
     form.addRow("Droplet mask:", mask_dd)

@@ -353,8 +353,8 @@ def _ivf_segmentation(ui, layout):
     form = QFormLayout(grp)
     form.setContentsMargins(9, 20, 9, 6)
 
-    pre_dd  = ui.create_layer_dropdown(napari.layers.Image)
-    raw_dd  = ui.create_layer_dropdown(napari.layers.Image)
+    pre_dd  = ui.create_layer_dropdown(napari.layers.Image, binding='common.preprocessed_image')
+    raw_dd  = ui.create_layer_dropdown(napari.layers.Image, binding='common.raw_image')
     form.addRow("Preprocessed image:", pre_dd)
     form.addRow("Raw fluorescence image:", raw_dd)
 

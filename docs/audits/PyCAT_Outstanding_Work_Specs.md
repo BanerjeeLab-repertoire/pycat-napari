@@ -511,7 +511,15 @@ spec it as a follow-up, not first.
 
 ## PART D — Light up the resolver on the dropdowns (Stage 2 activation)
 
-> **◐ IN PROGRESS — increment 2 DONE, 1.6.398 (2026-07-26); increment 1 DONE, 1.6.359 (2026-07-25).**
+> **◐ IN PROGRESS — increment 3 DONE, 1.6.400 (2026-07-26); increment 2 DONE, 1.6.398; increment 1 DONE, 1.6.359.**
+> **Increment 3** wired the clearly-labeled raw / preprocessed IMAGE dropdowns across the brightfield, in-vitro
+> (BF + fluor), and z-stack panels → `common.raw_image` / `common.preprocessed_image`. These are safe ahead of
+> the mask/labels ones: `raw` is provenance-discriminated (`prefer=head_of_lineage`) and BOTH degrade to an empty
+> dropdown when several images match, so the resolver never makes a silent wrong pick. Guard
+> `test_increment_3_raw_and_preprocessed_image_dropdowns_are_bound`. **Remaining:** the `common.mask`/`common.labels`
+> droplet/condensate/cell-mask fields (need per-panel judgment — several masks can coexist so "newest" can mis-pick),
+> and the ambiguous coloc-as-image and FRAP/fusion/temperature fields that would need NEW binding keys.
+>
 > Increment 1 wired the object-based coloc mask dropdowns (`ui_analysis_mixin.py`) →
 > `colocalization.channel_a`/`channel_b` (deliberately ambiguous → select nothing, name candidates).
 > **Increment 2** wired the highest-value TAG-DISCRIMINATED dropdowns — the ones that match by `target`/`modality`
@@ -522,9 +530,8 @@ spec it as a follow-up, not first.
 > (modality=brightfield); VPT bead channel (`vpt/panels.py`) → `vpt.bead_stack`; second invitro-fluor input →
 > `invitro_fluor.input_image`. `_layer_row` grew a `binding=` param (forwards to `create_layer_dropdown`); the
 > `test_resolver_wired` sweep now covers both entry points. Regression guard extended
-> (`test_increment_2_domain_dropdowns_carry_their_bindings`). **Remaining:** the broad `common.*` image/mask/labels
-> fields (droplet/condensate masks, raw/preprocessed images across the toolbox), and the ambiguous coloc-as-image
-> and FRAP/fusion/temperature fields that would need NEW binding keys — each wired deliberately per semantics.
+> (`test_increment_2_domain_dropdowns_carry_their_bindings`). (Increment 3 continued with the `common.*` raw/
+> preprocessed image fields — see the header above.)
 
 **Problem.** The resolver + `layer_bindings.json` (16 entries) + `autopopulate` are complete but
 **dormant**: `create_layer_dropdown(..., binding='')` defaults to empty, and **0 of the ~180 call
