@@ -1,3 +1,17 @@
+## [1.6.392] - 2026-07-26
+### Changed — **The planner's quality gate now covers MSD/diffusion measurements (navigator quality-gate, op-by-op extension).**
+The navigator quality gate (which blocks a measurement the data can't support and says why) is extended to the
+condensate-physics diffusion ops — `condensate_physics.compute_msd` and `condensate_physics.fit_anomalous_diffusion`
+each gain a `QualityRequirement(needs_pixel_size=True)`. A diffusion coefficient from MSD is a physical rate
+(µm²/s); a value in pixels²/frame is not a measurement, so the planner now **blocks** a diffusion plan without a
+calibrated pixel size (with the reason in its blockers) and lets it run once a pixel size is present — the same
+gate the bead-tracking microrheology already uses. Purely additive, no wiring change (the gate machinery was
+built in 1.6.279; this attaches a requirement op-by-op, as that spec intends).
+
+- `tests/navigator/test_quality_gate_planning.py` +2 (`base`): a `diffusion` plan without a pixel size is
+  not runnable and names `pixel_size` in its blockers; with one it is runnable. Full navigator suite (154) and
+  `pytest -m "core or base"` green.
+
 ## [1.6.391] - 2026-07-26
 ### Added — **A batch config can activate calibrated concentration by curve path (reliability_index roadmap).**
 `BatchWorker._process_file` now injects a run-level `calibration_curve_path` from the batch config into the

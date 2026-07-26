@@ -17,6 +17,12 @@
 > the `QualityRequirement`s were attached to the `_measure_ops()` entries the planner actually reaches. The
 > remaining measurements can gain a `QualityRequirement` the same way as they're validated; more can be
 > added op-by-op without touching the wiring.
+>
+> **◐ Coverage extended, 1.6.392.** The condensate-physics diffusion ops `condensate_physics.compute_msd` and
+> `condensate_physics.fit_anomalous_diffusion` gained `QualityRequirement(needs_pixel_size=True)` — a diffusion
+> coefficient (µm²/s) without a calibrated pixel size is not a measurement, so the planner now blocks a
+> `diffusion` plan without one (same gate as bead-tracking microrheology). `tests/navigator/
+> test_quality_gate_planning.py` `+2`; no wiring change. More measurements can still be added the same way.
 
 **Date:** 2026-07-21 · **Target tree:** 1.6.269 · Verified against the 1.6.269 tree. **Increment 2 of
 4.** Depends on increment 1 (measurement ops in the catalog). One function, one integration point —

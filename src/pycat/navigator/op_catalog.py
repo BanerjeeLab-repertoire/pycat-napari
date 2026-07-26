@@ -196,13 +196,20 @@ def _measure_ops() -> List[dict]:
              requires=[cap(R.TRAJECTORIES, T)], context=["calibrated"],
              observables=["diffusion", "motion"], propagate=True, preference=0.7,
              purpose="Mean-squared-displacement transport analysis.",
-             api="condensate_physics_tools.compute_msd"),
+             api="condensate_physics_tools.compute_msd",
+             # A diffusion coefficient from MSD is a physical rate (µm²/s); a value in pixels²/frame is not a
+             # measurement. The planner blocks the interpretation without a calibrated pixel size (its context
+             # already declares it 'calibrated') — the same gate as the bead-tracking microrheology.
+             quality=QualityRequirement(needs_pixel_size=True, measurement_key='diffusion')),
         dict(id="condensate_physics.fit_anomalous_diffusion", module="condensate_physics_tools",
              role=InformationRole.INTERPRET, provides=cap(R.MODEL_FIT, T, "observable:diffusion"),
              requires=[cap(R.TRAJECTORIES, T)], context=["calibrated"],
              observables=["diffusion", "viscosity"], propagate=True, preference=0.65,
              purpose="Fit anomalous-diffusion exponent / effective viscosity.",
-             api="condensate_physics_tools.fit_anomalous_diffusion"),
+             api="condensate_physics_tools.fit_anomalous_diffusion",
+             # Same physical-scale requirement: an anomalous-diffusion exponent / effective viscosity in pixel
+             # units is not a measurement — block it without a calibrated pixel size.
+             quality=QualityRequirement(needs_pixel_size=True, measurement_key='diffusion')),
         dict(id="condensate_physics.fit_coarsening", module="condensate_physics_tools",
              role=InformationRole.INTERPRET, provides=cap(R.MODEL_FIT, T, "observable:coarsening"),
              requires=[cap(R.TRAJECTORIES, T)], context=[],

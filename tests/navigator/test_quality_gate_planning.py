@@ -98,6 +98,28 @@ def test_quality_verdicts_live_in_the_existing_gate_report():
     plan = _plan('viscosity', pixel_size=0.1)
     ids = [a.id for _n, a, _s in plan.gate_report]
     assert any(i.startswith('quality:') for i in ids), "quality gates must be folded into gate_report"
+
+
+# ── op-by-op extension: MSD/diffusion is a physical rate, so it needs a calibrated pixel size ────
+def _diffusion_pixel_gates(plan):
+    return {gid: s for gid, (a, s) in _quality_gates(plan).items()
+            if gid.startswith('quality:pixel_size:condensate_physics.')}
+
+
+def test_msd_diffusion_is_blocked_without_a_pixel_size():
+    plan = _plan('diffusion', target='condensate', pixel_size=0)   # a diffusion coefficient in pixels is not physical
+    pix = _diffusion_pixel_gates(plan)
+    assert pix, f"expected a pixel-size gate on the diffusion op: {list(_quality_gates(plan))}"
+    assert all(s is GateStatus.VIOLATED for s in pix.values())
+    assert not plan.is_executable
+    assert any('pixel_size' in b for b in plan.blockers()), plan.blockers()
+
+
+def test_msd_diffusion_is_runnable_with_a_pixel_size():
+    plan = _plan('diffusion', target='condensate', pixel_size=0.1)
+    pix = _diffusion_pixel_gates(plan)
+    assert pix and all(s is GateStatus.SATISFIED for s in pix.values())
+    assert plan.is_executable
     # every gate_report row is the same (name, Assumption, GateStatus) shape — no parallel mechanism
     for name, a, status in plan.gate_report:
         assert isinstance(name, str) and isinstance(status, GateStatus) and hasattr(a, 'severity')
