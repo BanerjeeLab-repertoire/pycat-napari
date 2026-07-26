@@ -359,19 +359,29 @@ def count_molecules_pooled(traces: list, fast: int = 4,
         n_used         : number of traces that passed the R² gate
     """
     all_x, all_y = [], []
+    read_vars = []
     rows = []
     for i, tr in enumerate(traces):
         y = np.asarray(tr, dtype=float)
         bf = fit_bleaching_trace(y)
         used = bool(bf['success'] and bf['r_squared'] >= r2_min)
+        # Mirror count_molecules_single's THREE camera corrections (the pooled path omitted them, so the
+        # docstring-"preferred" estimator was the biased one — an uncorrected pedestal inflates N up to ~2.5×):
+        # (1) subtract the per-trace pedestal BEFORE the variance pairs are built (each trace has its own dark
+        # tail); (2) feed the CORRECTED trace to `_variance_pairs`, so ν is not corrupted; and (3) take the
+        # numerator `y[fast]` from the corrected trace. Pooling the read-variance then lets the ν fit use a
+        # noise floor (a free intercept) instead of a bare through-origin slope.
+        _pedestal, _read_var = _estimate_pedestal_read_noise(y)
+        y_corr = y - _pedestal
         if used:
-            x_v, y_v = _variance_pairs(y, bf, fast=fast)
+            x_v, y_v = _variance_pairs(y_corr, bf, fast=fast)
             if len(x_v) >= 5:
-                all_x.append(x_v); all_y.append(y_v)
+                all_x.append(x_v); all_y.append(y_v); read_vars.append(_read_var)
             else:
                 used = False
         rows.append(dict(trace_index=i,
-                         initial_intensity=float(y[fast]) if len(y) > fast else np.nan,
+                         initial_intensity=float(y_corr[fast]) if len(y_corr) > fast else np.nan,
+                         pedestal=float(_pedestal),
                          bleach_r2=float(bf['r_squared']) if bf['success'] else np.nan,
                          used=used))
 
@@ -379,7 +389,11 @@ def count_molecules_pooled(traces: list, fast: int = 4,
         return dict(nu=np.nan, per_trace=pd.DataFrame(rows), n_used=0)
 
     X = np.concatenate(all_x); Y = np.concatenate(all_y)
-    nu = _slope_through_origin(X, Y)
+    # Pooled ν with the SAME free-intercept-when-a-floor-exists rule the single-trace path uses (shared
+    # fitter), keyed on the pooled traces' median read-variance. `bf` carries no 'p', so `_fit_counting_nu`
+    # uses its 0.97 default exactly as the single path does.
+    _pooled_read_var = float(np.median(read_vars)) if read_vars else 0.0
+    nu = _fit_counting_nu(X, Y, {}, _pooled_read_var)
 
     df = pd.DataFrame(rows)
     df['N'] = np.where((nu and nu > 0) & np.isfinite(df['initial_intensity']),

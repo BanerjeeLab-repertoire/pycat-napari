@@ -121,6 +121,13 @@ code inverts and the missing test never checked.
 
 ## S2 — `count_molecules_pooled` skips the camera corrections the single-trace path performs
 
+> **✅ FIXED, shipped 1.6.394.** The pooled loop now subtracts each trace's pedestal before the variance pairs,
+> feeds the corrected trace to `_variance_pairs`, takes `y[fast]` from the corrected trace, and pools the
+> read-variance so the shared ν fit reuses `_fit_counting_nu` (free-intercept when a floor exists) instead of
+> `_slope_through_origin`. `count_molecules_single` is untouched (byte-identical pin still green).
+> `tests/test_pooled_counting_pedestal.py` (`base`, 4): pedestal invariance (vs the old ~2.5× inflation), pooled
+> ν tracks single, population median recovers the true count with a pedestal, per-trace pedestal reported.
+
 **File:** `toolbox/molecular_counting_tools.py` (`count_molecules_pooled`, ~:315)
 **Severity:** medium science bug — the docstring-"preferred" estimator is the biased one.
 

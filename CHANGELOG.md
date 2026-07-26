@@ -1,3 +1,21 @@
+## [1.6.394] - 2026-07-26
+### Fixed — **Pooled molecule counting now applies the camera corrections the single-trace path performs (1.6.376 audit S2).**
+`molecular_counting_tools.count_molecules_pooled` — the docstring-"preferred" estimator — omitted the three
+corrections `count_molecules_single` applies: it fed the RAW trace to the variance-pair regression (no pedestal
+subtraction, so ν was corrupted), took the numerator `y[fast]` with the pedestal still in it, and fitted ν
+through the origin with no read-noise floor. **An uncorrected pedestal inflated the pooled N up to ~2.5×** — so
+the estimator PyCAT recommends was the biased one.
+
+- The pooled loop now mirrors single exactly: subtract each trace's pedestal (from its own dark tail) BEFORE
+  building the variance pairs, feed the corrected trace to `_variance_pairs`, take `y[fast]` from the corrected
+  trace, and pool the read-variance so the shared ν fit uses the same free-intercept-when-a-floor-exists rule
+  (the two paths now call the identical `_fit_counting_nu`). `count_molecules_single` is untouched (its
+  byte-identical golden-master pin still passes).
+- `tests/test_pooled_counting_pedestal.py` (`base`, 4) — the missing golden-master: the pooled count is
+  pedestal-invariant (the same N with or without an added 800-count pedestal, vs the old ~2.5× inflation), its ν
+  tracks the single-trace fitter on the same data, the population median recovers the true count with a pedestal,
+  and each trace's pedestal is recovered and reported. Full `pytest -m "core or base"` green.
+
 ## [1.6.393] - 2026-07-26
 ### Fixed — **Radial-localization profile: each bin's count is now paired with its OWN area (1.6.376 audit S1, conclusion-inverting).**
 `spatial_metrology_tools.radial_localization_profile` binned the condensate **count** on a radius running
