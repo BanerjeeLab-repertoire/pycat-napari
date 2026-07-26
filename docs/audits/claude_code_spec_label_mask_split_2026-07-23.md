@@ -18,9 +18,17 @@
 > passing unchanged after via `__globals__` patching); `split_touching_objects` stays pinned by
 > `test_group_c_geometry`. `label_and_mask_tools` re-exports the eight public names (every segmentation caller
 > unchanged); `_napari()` copied (a staying label-op uses it). `label_and_mask_tools.py` 949 → 493; recorded in
-> `_DELIBERATE`. **Remaining: `splitting.py` (`assess_and_split_touching`, Step 5), the residual label-ops
+> `_DELIBERATE`. 
+>
+> **Step 5 — splitting.py — DONE, 1.6.382.** `assess_and_split_touching` (228 lines — the assess-whether-to-split
+> decision path, keyed on the neck ratio) moved VERBATIM to `toolbox/masks/splitting.py`. Already strongly pinned
+> by `tests/test_group_c_geometry.py` (verdicts, resulting label counts, neck-ratio physics), so no new test was
+> needed — those pins pass unchanged through the shim (byte-identical proof). `label_and_mask_tools` re-exports
+> it; the `split_assessed` operation's catalog provenance was regenerated to `masks/splitting.py` (provenance
+> only). `label_and_mask_tools.py` 493 → 266; recorded in `_DELIBERATE`. **Remaining: the residual label-ops
 > (`run_update_labels`/`run_convert_labels_to_mask`/`run_label_binary_mask`/`run_expand_labels`/
-> `run_mask_logic_merge`), then the shim + ratchet (Step 6).**
+> `run_mask_logic_merge` + the `_napari` helper) — the last masking concern to home — then the thin shim +
+> ratchet (Step 6).**
 >
 > **Step 2 — the valuable physics move — DONE, 1.6.336.** `neck_geometry` + `fit_elastocapillary_length` (and
 > its nested `_sigmoid`) moved **VERBATIM** to new `toolbox/condensate_physics/wetting.py`, beside the rest of

@@ -1126,6 +1126,11 @@ _DELIBERATE = {
     'label_and_mask_tools.py::run_binary_morph_operation',
     'label_and_mask_tools.py::opencv_contour_func',
     'label_and_mask_tools.py::split_touching_objects',
+    # The assessed-split decision path (two droplets vs arrested fusion vs chain vs single, keyed on the neck
+    # ratio) MOVED VERBATIM to `toolbox/masks/splitting.py` (label_mask_split Step 5); `label_and_mask_tools`
+    # re-exports it (the old import still resolves). No number changed — pinned identical by
+    # `tests/test_group_c_geometry.py` (verdicts, resulting label counts, neck-ratio physics), passing unchanged.
+    'label_and_mask_tools.py::assess_and_split_touching',
 
     # file_io_decomposition (2026-07-24): the channel-naming dialog flow moved out of file_io.py into a
     # `_DialogsMixin` in `file_io/dialogs.py`, co-located with the `ChannelAssignmentDialog` it drives.

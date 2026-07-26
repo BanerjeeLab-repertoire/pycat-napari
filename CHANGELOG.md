@@ -1,3 +1,20 @@
+## [1.6.382] - 2026-07-26
+### Changed — **Extracted the assessed-split decision path from label_and_mask_tools.py (label_mask_split Step 5).**
+`assess_and_split_touching` (228 lines — the morphology-aware decision that assesses *whether* touching masks
+should be split: two droplets vs arrested fusion vs chain/aggregate vs single, keyed on the neck ratio) moves
+**verbatim** to a new `toolbox/masks/splitting.py`, separated from the raw watershed
+(`masks/morphology.split_touching_objects`) it decides over.
+
+- `label_and_mask_tools.py` re-exports the public name, so all callers are unchanged. It was already strongly
+  pinned — `tests/test_group_c_geometry.py` characterizes every verdict, the resulting label counts, and the
+  neck-ratio physics — so per the spec's "no test, no move" discipline no new test was needed; those pins pass
+  **unchanged** through the shim (the byte-identical proof). `label_and_mask_tools.py` drops 493 → 266 lines;
+  `masks/splitting.py` is 247.
+- The navigator `operation_catalog.json` was regenerated: the one `@tags_layer` operation (`split_assessed`)
+  updated its `module`/`source` provenance to `masks/splitting.py` — **only** provenance (89 operations
+  unchanged). The vanished-function guard records the move in `_DELIBERATE`. Full `pytest -m "core or base"`
+  green.
+
 ## [1.6.381] - 2026-07-25
 ### Changed — **Extracted the binary-morphology concern from label_and_mask_tools.py (label_mask_split Step 4).**
 The binary-morphology functions — `generate_cross_structuring_element`, `extend_mask_to_edges`,
