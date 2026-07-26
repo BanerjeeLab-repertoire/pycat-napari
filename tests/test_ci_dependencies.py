@@ -293,6 +293,9 @@ def test_no_undeclared_module_scope_imports():
 _TESTS_DIR = _ROOT / "tests"
 _QT_FIXTURES = {"qtbot", "qapp", "qapp_args", "qtlog", "qtmodeltester"}
 _GUI_MODULES = {"napari", "PyQt5", "PyQt6", "qtpy", "pytestqt"}
+#: The base scientific stack — present in the `base` lane but NOT the numpy-only `core` (minimal) lane. A
+#: `core` test whose file imports any of these at module scope dies at collection in the minimal lane.
+_BASE_SCIENTIFIC_MODULES = {"pandas", "scipy", "skimage", "matplotlib", "cv2", "sklearn", "seaborn", "networkx"}
 
 
 def _mark_names(expr):
@@ -420,6 +423,47 @@ def test_no_core_test_file_imports_the_gui_stack_at_module_scope():
         + "\n\nThe import runs at collection time and fails in the headless core lane (which omits "
           "napari/Qt on purpose), erroring the file's core tests for the wrong reason. Move the GUI "
           "import inside the integration test that needs it."
+    )
+
+
+@pytest.mark.core
+def test_no_core_test_file_imports_the_base_scientific_stack_at_module_scope():
+    """A file containing a `core` test may not import the base scientific stack (pandas / scipy / skimage /
+    matplotlib / cv2 / …) at MODULE SCOPE. `core` is the numpy-only minimal lane; that import runs at
+    COLLECTION time and dies with `ModuleNotFoundError`, aborting the whole `-m core` run before the file can
+    be deselected (the exact pandas-abort this guards). A test that needs pandas is `base`, not `core` — so
+    the fix is to mark the file `base` (it then runs in the `core or base` lane and the minimal lane ignores it
+    without importing), or move the import inside the test that needs it. Unlike the GUI guard, this is scoped
+    to `core` specifically: a `base` test importing pandas is fine — the `base` lane HAS pandas."""
+    offenders = []
+    for path in sorted(_TESTS_DIR.rglob("test_*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+        except SyntaxError:
+            continue
+        module_marks = _module_level_marks(tree)
+        has_core = any(
+            isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name.startswith("test_")
+            and _is_core_selected(n, module_marks)
+            for n in ast.walk(tree))
+        if not has_core:
+            continue
+        for node in tree.body:                       # MODULE SCOPE only
+            names = []
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                names = [node.module]
+            for name in names:
+                if name.split(".")[0] in _BASE_SCIENTIFIC_MODULES:
+                    offenders.append(f"{path.name}  imports '{name}' at module scope")
+
+    assert not offenders, (
+        "These files contain a `core` test but import the base scientific stack at MODULE SCOPE:\n  "
+        + "\n  ".join(offenders)
+        + "\n\n`core` is the numpy-only minimal lane; the import runs at collection time and errors there, "
+          "aborting the run before `-m core` can deselect the file. A test that needs pandas/scipy/skimage is "
+          "`base`, not `core` — mark the file `base`, or move the import inside the test that needs it."
     )
 
 

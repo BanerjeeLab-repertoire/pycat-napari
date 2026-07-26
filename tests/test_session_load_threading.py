@@ -26,7 +26,7 @@ import tifffile
 
 from pycat.file_io import session_loader as sl
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 class _Viewer:

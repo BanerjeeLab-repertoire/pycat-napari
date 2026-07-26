@@ -42,7 +42,7 @@ import skimage as sk
 from pycat.file_io.stack_access import to_unit_float32
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize('source_dtype', [np.uint8, np.uint16, np.uint32])
 def test_the_STACK_loader_and_the_2D_loader_agree_EXACTLY(source_dtype):
     """**The whole point.** The same pixels must produce the same numbers, whichever loader ran.
@@ -70,7 +70,7 @@ def test_the_STACK_loader_and_the_2D_loader_agree_EXACTLY(source_dtype):
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_uint16_frame_lands_in_ZERO_TO_ONE_not_in_RAW_COUNTS():
     """The regression, stated plainly."""
     pixels = np.array([[0, 1000, 65535]], np.uint16)
@@ -87,7 +87,7 @@ def test_a_uint16_frame_lands_in_ZERO_TO_ONE_not_in_RAW_COUNTS():
     assert result[0, 0] == pytest.approx(0.0), "zero must map to 0.0"
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_divisor_is_the_DTYPE_max_not_the_FRAME_max():
     """**A brightening condensate must brighten.**
 
@@ -115,7 +115,7 @@ def test_the_divisor_is_the_DTYPE_max_not_the_FRAME_max():
     assert bright_out.mean() == pytest.approx(4000 / 65535, rel=1e-5)
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_float_frame_is_passed_through_UNCHANGED():
     """Already in the contract's range: do not rescale it a second time."""
     already_unit = np.array([[0.25, 0.5, 0.75]], np.float32)
@@ -126,7 +126,7 @@ def test_a_float_frame_is_passed_through_UNCHANGED():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_NO_lazy_wrapper_hands_out_RAW_COUNTS():
     """**All nine wrappers, checked on the AST — not on the text.**
 

@@ -54,7 +54,7 @@ def _click_point(view, i):
 
 
 # ── the contract ────────────────────────────────────────────────────────────────────────────────
-@pytest.mark.core
+@pytest.mark.base
 def test_the_plot_satisfies_the_selection_view_contract():
     service = _service()
     df = _cell_df()
@@ -71,7 +71,7 @@ def test_the_plot_satisfies_the_selection_view_contract():
         other_state=SelectionState(selected=frozenset({'x/y/z/9/9'}), primary='x/y/z/9/9'))
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_plot_click_selects_the_nearest_object_everywhere():
     service = _service()
     seen = []
@@ -85,7 +85,7 @@ def test_a_plot_click_selects_the_nearest_object_everywhere():
     view.close()
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_an_inbound_selection_rings_the_point_without_emitting():
     service = _service()
     commands = []

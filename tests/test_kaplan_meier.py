@@ -30,7 +30,7 @@ def _tracks(spans):
     return pd.DataFrame(rows)
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_risk_set_removes_between_event_censoring():
     """n_at_risk must equal sum(durations >= t) at every row, even for censoring between event times."""
     km = _km()
@@ -50,7 +50,7 @@ def test_risk_set_removes_between_event_censoring():
     assert row10['n_at_risk'] == 2
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_rmst_mean_exceeds_naive_mean_under_heavy_right_censoring():
     """With heavy right-censoring the RMST mean must exceed the naive durations.mean()."""
     km = _km()
@@ -69,7 +69,7 @@ def test_rmst_mean_exceeds_naive_mean_under_heavy_right_censoring():
     assert df.attrs['mean_lifetime_frames'] > durations.mean()      # RMST ~40 vs naive ~15
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_frame_zero_tracks_are_censored_not_events():
     """A frame-0-born track is left-censored -> it must not create a survival step-down at its duration."""
     km = _km()
@@ -84,7 +84,7 @@ def test_frame_zero_tracks_are_censored_not_events():
     assert set(df[df['n_events'] > 0]['time_frames']) == {5}
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_empty_input_returns_empty_frame():
     km = _km()
     out = km(pd.DataFrame({'track_id': [], 'frame': []}), 100)

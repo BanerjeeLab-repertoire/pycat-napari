@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 from pycat.file_io import session_manifest as sm
 from pycat.file_io.writers import write_session_outputs

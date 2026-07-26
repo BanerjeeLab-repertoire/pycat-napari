@@ -18,7 +18,7 @@ from pycat.ui.brushable_workspace import BrushableImageTier
 from pycat.toolbox.invitro_fluor_ui import _finalize_droplet_table
 from tests.selection_view_contract import assert_selection_view_contract
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _service():
