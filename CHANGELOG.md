@@ -1,3 +1,23 @@
+## [1.6.378] - 2026-07-25
+### Changed — **Extracted the viewer/layer actions from MenuManager (ui_decomposition Part 2, feature 9 — Part 2 feature extraction complete).**
+`_home_fit_view` (53, reset the camera to fit all layers) and `_process_foreign_layers` (48, tag/normalize
+layers that appeared from outside PyCAT) — the two remaining non-declaration action methods — move **verbatim**
+to `ui/viewer_actions.py`.
+
+- Both keep their original signatures (bodies byte-for-byte identical); `MenuManager` keeps thin generic
+  `*args, **kwargs` forwarding wrappers, so every call site resolves unchanged — `_home_fit_view` is wired
+  **externally** in `batch_processor.py` (`.triggered.connect(_mm._home_fit_view)`; the wrapper preserves the
+  attribute), and `_process_foreign_layers` is called from `_setup_menu_bar` via `self`. The menu structure is
+  unchanged — **menu-contract snapshot passes unmodified**.
+- `menu_manager.py` drops 1,198 → 1,105 lines (from 2,344 at the start of Part 2). **This completes the Part 2
+  feature extraction:** every policy/feature/dialog method is now in its own module (`command_palette`,
+  `tag_inspector`, `metadata_dialogs`, `napari_menus`, `session_loader`, `grid_view`, `recorded_steps_dialog`,
+  `viewer_actions`). What remains in `menu_manager.py` is menu **declaration + wiring** (`_setup_menu_bar`,
+  `_add_toolbox_to_menu`, the `_add_*_to_menu` builders) plus the forwarding wrappers — the spec's intended
+  end state. The nominal ≤900 target is bounded below by that declaration core; reaching it would require
+  splitting declaration, which the spec's "move, don't improve" caution explicitly defers. Full `pytest -m
+  "core or base"` green.
+
 ## [1.6.377] - 2026-07-25
 ### Changed — **Extracted the recorded-steps dialog from MenuManager (ui_decomposition Part 2, feature 8).**
 `_show_recorded_steps_dialog` (79, with its nested `_fmt` helper) — the "Recorded Steps" dialog that lists the

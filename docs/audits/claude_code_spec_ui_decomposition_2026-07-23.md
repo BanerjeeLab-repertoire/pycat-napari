@@ -30,12 +30,17 @@
 > maps (1.6.374); ui_modules re-exports the maps from their new home. (6) `grid_view.py` — `_toggle_grid_view`
 > + `_apply_managed_grid` (1.6.375). (7) metadata comparison (`_show_metadata_comparison` +
 > `_gather_compared_metadata` + `_maybe_warn_metadata_diff`) appended to the existing `metadata_dialogs.py`
-> (1.6.376). (8) `recorded_steps_dialog.py` — `_show_recorded_steps_dialog` (1.6.377). **`menu_manager.py`
-> 2,344 → 1,198 lines.** The largest remaining methods are menu **declaration** (`_setup_menu_bar` 325,
-> `_add_toolbox_to_menu` 233) plus the `_add_*_to_menu` builders, which the spec keeps in place. Two
-> non-declaration action methods remain — `_home_fit_view` (53) and `_process_foreign_layers` (48) — earmarked
-> for a final "viewer actions" feature. The ≤900 target is close but bounded below by the declaration core;
-> full closure would mean splitting declaration, which the spec's "move, don't improve" caution defers.
+> (1.6.376). (8) `recorded_steps_dialog.py` — `_show_recorded_steps_dialog` (1.6.377). (9) `viewer_actions.py`
+> — `_home_fit_view` + `_process_foreign_layers` (1.6.378).
+>
+> **✅ Part 2 FEATURE EXTRACTION COMPLETE, 1.6.378. `menu_manager.py` 2,344 → 1,105 lines.** Every
+> policy/feature/dialog method now lives in its own module; what remains is menu **declaration + wiring**
+> (`_setup_menu_bar` 325, `_add_toolbox_to_menu` 233, the `_add_*_to_menu` builders) plus the thin forwarding
+> wrappers — the spec's intended end state. The nominal ≤900 DoD is bounded below by that declaration core:
+> the two big declaration methods alone are 558 lines, and reaching ≤900 would require splitting declaration
+> itself, which the spec's "move, don't improve" caution explicitly defers to a later, separate pass. The
+> menu-contract snapshot passed UNMODIFIED through all nine features, and the full `core`/`base` gate is green
+> at every step.
 
 **Date:** 2026-07-23 · **Target tree:** 1.6.324 · Verified against the 1.6.324 tree. All six big science
 files are now thin shims. These two are what remain of the decomposition programme — and `ui_modules.py`
