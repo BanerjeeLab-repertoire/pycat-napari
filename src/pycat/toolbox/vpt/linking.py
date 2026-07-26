@@ -55,7 +55,6 @@ def estimate_linking_distance_um(bead_stack, coords_by_frame=None,
         n_beads_used — the derived distance plus the quantities behind it
         (anti-black-box: the caller can show what was measured and why).
     """
-    import numpy as np
     from scipy.optimize import curve_fit
     from pycat.file_io.stack_access import materialize_stack
     # Lazy import: detect_beads_frame lives in detection.py, which re-exports this module -- importing it
@@ -202,7 +201,6 @@ def assess_linking_conditions(detections, motion_sigma_um=None,
     dict: ratio, motion_um, nn_spacing_um, level ('safe'/'caution'/'risky'/
         'unsafe'), message.
     """
-    import numpy as np
     from scipy.spatial import cKDTree
 
     if motion_sigma_um is None:

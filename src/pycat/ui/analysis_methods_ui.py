@@ -487,7 +487,7 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
         the source file or loading the whole stack into memory.
         """
         from PyQt5.QtWidgets import (QGroupBox, QFormLayout, QSpinBox,
-                                      QPushButton, QLabel)
+                                      QLabel)
         import numpy as np
 
         group = QGroupBox("Step 2 — Reference Frame & Analysis Range")
@@ -1205,7 +1205,6 @@ class ColocalizationAnalysisUI(AnalysisMethodsUI):
         img_names, mask_names = self._suggest_layers()
         if not img_names and not mask_names:
             return
-        from PyQt5.QtWidgets import QComboBox
         if root_widget is None:
             return  # applied after the main widget exists (see setup_ui)
         ordered = img_names + mask_names

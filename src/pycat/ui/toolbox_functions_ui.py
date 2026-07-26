@@ -599,7 +599,7 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
         clear-frame reference once (it persists across images for the session),
         pick the correction type, and apply it to the active image layer.
         """
-        from PyQt5.QtWidgets import QComboBox, QFileDialog, QLabel
+        from PyQt5.QtWidgets import QFileDialog
         import os as _os
         from napari.utils.notifications import show_warning as _warn, show_info as _info
 

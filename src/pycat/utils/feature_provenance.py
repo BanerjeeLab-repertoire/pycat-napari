@@ -86,7 +86,7 @@ def trace_step_indices(feature_layer_id, lineage, layer_step):
         seen.add(lid)
         if lid in layer_step:
             steps.add(int(layer_step[lid]))
-        for parent in lineage.get(lid, ()):  # noqa: dict.get default () is intentional
+        for parent in lineage.get(lid, ()):  # dict.get default () is intentional
             if parent not in seen:
                 stack.append(parent)
     return tuple(sorted(steps)), ''

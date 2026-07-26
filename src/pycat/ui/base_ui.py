@@ -82,7 +82,7 @@ def _relax_min_widths(widget):
     to elide/wrap lets the layout compress gracefully. Call once on the root widget
     of any dock that lives inside a horizontal-scroll-disabled QScrollArea.
     """
-    from PyQt5.QtWidgets import (QPushButton, QComboBox as _QCB, QLabel as _QLbl)
+    from PyQt5.QtWidgets import (QComboBox as _QCB, QLabel as _QLbl)
     for w in widget.findChildren((QPushButton, _QCB, QLineEdit)):
         try:
             w.setMinimumWidth(0)
@@ -705,7 +705,7 @@ class BaseUIClass:
         the field-status UEX from the temperature workflow. Returns the dropdown.
         Circle is red (required) or yellow (optional) until a real layer is
         selected, then turns green. 'None' placeholders stay red/yellow."""
-        from PyQt5.QtWidgets import QHBoxLayout, QLabel, QWidget
+        from PyQt5.QtWidgets import QLabel, QWidget
         try:
             from pycat.ui.field_status import StatusCircle
         except Exception:

@@ -221,7 +221,6 @@ def _lazy_widgets(ui_instance, form):
         "Adds a whole-stack pass before and after the per-frame pipeline."
     )
     form.addRow(pseudo3d_temporal_cb)
-    import os as _os
     _n_workers = min(8, max(1, _os.cpu_count() - 1))
     build_btn = QPushButton(f"▶  Process Stack  ({_n_workers} parallel workers)")
     build_btn.setToolTip(

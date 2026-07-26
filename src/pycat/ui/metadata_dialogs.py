@@ -17,8 +17,7 @@ def _show_metadata_dialog(self):
     Displays the curated 'common' fields by default, with a checkbox that
     reveals the full raw metadata dump. Also offers a JSON export button.
     """
-    from PyQt5.QtWidgets import (QDialog, QHBoxLayout,
-                                  QTableWidget, QTableWidgetItem, QHeaderView,
+    from PyQt5.QtWidgets import (QDialog, QTableWidget, QTableWidgetItem, QHeaderView,
                                   QFileDialog)
     from napari.utils.notifications import (show_info as _info,
                                             show_warning as _warn)

@@ -31,7 +31,7 @@ _SESSION_METHOD_BY_DATA = {
 
 def _open_session_loader(self):
     """Open a folder browser to select a PyCAT output directory and reload."""
-    from PyQt5.QtWidgets import (QFileDialog, QDialog, QListWidget, QHBoxLayout, QAbstractItemView)
+    from PyQt5.QtWidgets import (QFileDialog, QDialog, QListWidget, QAbstractItemView)
     from pathlib import Path
     from napari.utils.notifications import (
         show_info as napari_show_info,

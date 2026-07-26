@@ -17,7 +17,7 @@ def _show_recorded_steps_dialog(self):
     step expands to reveal the layers/parameters it captured, so the user
     can review exactly what will be replayed.
     """
-    from PyQt5.QtWidgets import (QDialog, QHBoxLayout, QTreeWidget, QTreeWidgetItem,
+    from PyQt5.QtWidgets import (QDialog, QTreeWidget, QTreeWidgetItem,
                                   QHeaderView)
     from napari.utils.notifications import show_info as _info
 
