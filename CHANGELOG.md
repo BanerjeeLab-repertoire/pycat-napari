@@ -1,3 +1,20 @@
+## [1.6.380] - 2026-07-25
+### Changed — **Extracted the mask-measurement concern from label_and_mask_tools.py (label_mask_split Step 3).**
+The measurement functions — `measure_region_props` (the pure regionprops core), `run_measure_binary_mask`,
+`run_measure_region_props`, and the `MeasurementDialog` property picker — move **verbatim** to a new
+`toolbox/masks/measurement.py`, separated from the masking morphology they were filed with.
+
+- `label_and_mask_tools.py` re-exports all four public names, so every caller (batch_step_registry,
+  analysis_methods_ui, brushable_table, menu_manager, …) is unchanged. The guarded Qt import block (the
+  headless-safe `MeasurementDialog` base) moved with the dialog. `label_and_mask_tools.py` drops 1,303 → 949
+  lines; `masks/measurement.py` is 381.
+- **Characterization-test-first, per the spec's thin-coverage discipline:** `tests/test_mask_measurement_
+  characterization.py` (`base`, 6) was written and committed green on the pre-move code, pinning the exact
+  measured numbers at `rtol=1e-9` (area, intensity stats, micron area, relative area/intensity, identity
+  stamping) and patching each function's own `__globals__` so it passes **unchanged** after the move — the
+  byte-identical proof. The vanished-function guard records the move in `_DELIBERATE`. Full `pytest -m "core
+  or base"` green.
+
 ## [1.6.379] - 2026-07-25
 ### Added — **Guided runs are cancellable with a determinate progress bar (navigator_execution_adapters Phase 4).**
 The navigator executor `run_plan` gained two Qt-free hooks so a guided run can be observed and stopped without

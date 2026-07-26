@@ -1100,6 +1100,18 @@ _DELIBERATE = {
     'label_and_mask_tools.py::neck_geometry',
     'label_and_mask_tools.py::fit_elastocapillary_length',
     'label_and_mask_tools.py::_sigmoid',
+    # The measurement concern (`measure_region_props`, `run_measure_binary_mask`, `run_measure_region_props`
+    # and the `MeasurementDialog` property-picker with its methods) MOVED VERBATIM to
+    # `toolbox/masks/measurement.py` (label_mask_split Step 3); `label_and_mask_tools` re-exports the public
+    # names (the old import still resolves). No number changed — pinned identical by
+    # `tests/test_mask_measurement_characterization.py` (written before the move, passing unchanged after).
+    'label_and_mask_tools.py::measure_region_props',
+    'label_and_mask_tools.py::run_measure_binary_mask',
+    'label_and_mask_tools.py::run_measure_region_props',
+    'label_and_mask_tools.py::toggle_scroll_area',      # MeasurementDialog methods, moved with the class
+    'label_and_mask_tools.py::select_all',
+    'label_and_mask_tools.py::deselect_all',
+    'label_and_mask_tools.py::get_selected_props',
 
     # file_io_decomposition (2026-07-24): the channel-naming dialog flow moved out of file_io.py into a
     # `_DialogsMixin` in `file_io/dialogs.py`, co-located with the `ChannelAssignmentDialog` it drives.

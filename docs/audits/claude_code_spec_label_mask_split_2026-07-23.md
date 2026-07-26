@@ -1,8 +1,15 @@
 # Claude Code spec — Split `label_and_mask_tools.py`: physics does not belong in a masking module
 
-> **◐ STATUS — the physics move DONE, shipped 1.6.336 (verified consistent with the 1.6.335 tree: the module
-> was still 1,592 lines with all 7 named functions before this). Masking-half split (morphology / splitting /
-> measurement) remains.**
+> **◐ STATUS — physics move DONE (1.6.336); measurement.py extracted (Steps 1+3, 1.6.380). Remaining:
+> morphology.py, splitting.py, then the shim + ratchet.**
+>
+> **Steps 1 + 3 — measurement.py — DONE, 1.6.380.** Characterization-test-first (coverage was thin):
+> `tests/test_mask_measurement_characterization.py` (`base`, 6) pins `measure_region_props`,
+> `run_measure_binary_mask`, `run_measure_region_props` at `rtol=1e-9` on synthetic inputs, committed green on
+> the pre-move code, patching each function's own `__globals__` so it passes UNCHANGED after the move. Then the
+> whole measurement concern (those three + the `MeasurementDialog` picker + its guarded Qt import block) moved
+> VERBATIM to `toolbox/masks/measurement.py`; `label_and_mask_tools` re-exports the four public names (every
+> caller unchanged). `label_and_mask_tools.py` 1,303 → 949; the move is recorded in `_DELIBERATE`.
 >
 > **Step 2 — the valuable physics move — DONE, 1.6.336.** `neck_geometry` + `fit_elastocapillary_length` (and
 > its nested `_sigmoid`) moved **VERBATIM** to new `toolbox/condensate_physics/wetting.py`, beside the rest of
