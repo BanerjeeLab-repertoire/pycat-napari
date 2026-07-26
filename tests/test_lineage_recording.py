@@ -83,6 +83,45 @@ def test_preprocess_add_site_records_op_and_source_edge():
                for e in edges), edges
 
 
+@pytest.mark.base
+def test_a_segmentation_output_keeps_its_own_role_not_the_source_image_role():
+    """**Regression: the `mark_derived` role-inheritance bug.** A mask/labels layer produced by a
+    segmentation op must carry its OWN role (the op's `produces`), NOT inherit the source image's
+    `role='image'`. The old code branched on `via in ('segment','segmentation')`, but `via` is the OP NAME
+    (`bf_segment`, `cellpose`, `subcellular_segment_3d`, …) — never the literal `'segment'` — so every
+    pipeline segmentation output silently became `role='image'`, and every role-based binding
+    (`cell_segmentation.cell_labels`, `puncta_analysis.puncta_mask`, `common.mask/labels`) failed to match it."""
+    from pycat.toolbox.brightfield_tools import segment_bf_condensates
+    from pycat.utils.tag_registry import tag_from_operation
+    from pycat.utils.layer_tags import get_tag
+
+    viewer = _install_registry_and_viewer()
+    src = viewer.add_image(np.zeros((8, 8), np.float32), name="raw image")
+    mask = viewer.add_labels(np.ones((8, 8), int), name="BF Condensate Mask")
+    tag_from_operation(mask, segment_bf_condensates, source_layer=src)
+
+    assert get_tag(mask, 'role') == 'labels'          # the bug produced 'image' here
+    assert get_tag(mask, 'target') == 'condensate'
+    assert get_tag(mask, 'provenance') == 'segmentation'
+
+
+@pytest.mark.base
+def test_an_image_to_image_derivation_is_not_misclassified_as_a_segmentation():
+    """The complement: a role-PRESERVING derivation (background removal: image→image) must NOT be treated as
+    a segmentation — it keeps an image-like role and `provenance='derived'`, so the fix does not over-trigger."""
+    from pycat.toolbox.image_processing.background import rb_gaussian_background_removal
+    from pycat.utils.tag_registry import tag_from_operation
+    from pycat.utils.layer_tags import get_tag
+
+    viewer = _install_registry_and_viewer()
+    src = viewer.add_image(np.zeros((8, 8), np.float32), name="raw image")
+    bg = viewer.add_image(np.zeros((8, 8), np.float32), name="BG removed")
+    tag_from_operation(bg, rb_gaussian_background_removal, source_layer=src)
+
+    assert get_tag(bg, 'role') not in ('mask', 'labels')     # not misread as a segmentation output
+    assert get_tag(bg, 'provenance') == 'derived'
+
+
 @pytest.mark.core
 def test_increment_2_ui_sites_wire_tag_from_operation():
     """Wiring guard (Outstanding-Work C1 increment 2): the z-stack (bg / cell / condensate) and the two

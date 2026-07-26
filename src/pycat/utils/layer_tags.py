@@ -422,28 +422,48 @@ def get_edges(layer):
     return [dict(e) for e in store['edges']]
 
 
-def mark_derived(new_layer, source_layer, via):
-    """Convenience: record that new_layer is derived_from + supersedes
-    source_layer via an operation (upscale, background_subtract, segment, …),
-    and copy forward the source's identity tags (role/modality/channel) that the
-    derived layer should inherit, tagging the derivation provenance.
+# The roles a SEGMENTATION-type derivation produces: the output is a NEW kind of layer (a mask / labelled
+# objects / an ROI), not another version of the source image. Everything else (image, preprocessed) is a
+# role-PRESERVING image→image derivation that keeps the source's identity.
+_SEGMENTATION_ROLES = {'mask', 'labels', 'host_mask', 'roi'}
 
-    This is what makes autopopulation lineage-aware: the head-of-lineage layer
-    carries the same role/channel as its ancestor plus a 'derived' provenance,
-    so a step querying that role naturally finds the most-derived version.
+
+def mark_derived(new_layer, source_layer, via, produced_role=None):
+    """Convenience: record that new_layer is derived_from source_layer via an operation
+    (upscale, background_subtract, segment, …), set the derived layer's provenance, and — for
+    role-PRESERVING image→image derivations — copy forward the source's identity tags.
+
+    ``produced_role`` is the role the operation OUTPUTS (from the op registry's ``produces``). It is the
+    authority on what the derived layer IS: a segmentation op outputs a ``mask``/``labels`` layer, which must
+    NOT inherit the source image's ``role='image'``. **This is the fix for the bug where every pipeline
+    segmentation output silently carried ``role='image'``** — because ``via`` here is the OP NAME
+    (``'bf_segment'``, ``'cellpose'``, …), which never equalled the literal ``'segment'`` the old branch
+    tested, so masks fell through to the image→image branch and inherited the source's role. When
+    ``produced_role`` is not given (legacy string callers), the old ``via in ('segment','segmentation')``
+    detection still applies.
+
+    This is what makes autopopulation lineage-aware: a role query (``role=labels, target=cell``) now finds
+    the segmentation output, and a head-of-lineage query finds the most-derived image.
     """
     add_edge(new_layer, 'derived_from', source_layer, via=via)
-    # A segmentation output is a mask, not the same role as its source; other
-    # image->image derivations (upscale, background subtract) keep the role.
-    if via in ('segment', 'segmentation'):
-        tag_layer(new_layer, 'role', 'mask', source='derived')
+    is_segmentation = via in ('segment', 'segmentation') or (produced_role in _SEGMENTATION_ROLES)
+    if is_segmentation:
+        # A segmentation output keeps its OWN role (mask / labels / …), not the source image's.
+        tag_layer(new_layer, 'role', produced_role or 'mask', source='derived')
         tag_layer(new_layer, 'provenance', 'segmentation', source='derived')
         # a mask belongs to the image it was segmented from
         add_edge(new_layer, 'belongs_to', source_layer, via=via)
     else:
         add_edge(new_layer, 'supersedes', source_layer, via=via)
-        # inherit identity tags from the source for image->image derivations
-        for k in ('role', 'modality', 'channel'):
+        # A role-preserving image→image derivation: the op's declared output role if known, else inherit
+        # the source's role. Either way modality/channel carry forward from the source.
+        if produced_role is not None:
+            tag_layer(new_layer, 'role', produced_role, source='derived')
+        else:
+            v = get_tag(source_layer, 'role')
+            if v is not None:
+                tag_layer(new_layer, 'role', v, source='derived')
+        for k in ('modality', 'channel'):
             v = get_tag(source_layer, k)
             if v is not None:
                 tag_layer(new_layer, k, v, source='derived')

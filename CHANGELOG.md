@@ -1,3 +1,17 @@
+## [1.6.401] - 2026-07-26
+### Fixed — **Segmentation outputs no longer silently inherit `role='image'` from their source (tag resolver).**
+`mark_derived` decided a derived layer's role with `if via in ('segment', 'segmentation')` — but on the
+`tag_from_operation` path `via` is the OP NAME (`bf_segment`, `cellpose`, `subcellular_segment_3d`, …), which
+never equals the literal `'segment'`. So every pipeline segmentation output fell into the image→image branch
+and **inherited its source image's `role='image'`**, overwriting the correct `mask`/`labels` role. This broke
+all role-based resolution for pipeline-derived layers: the `cell_segmentation.cell_labels`,
+`puncta_analysis.puncta_mask`, and `common.mask`/`common.labels` bindings could not match the very layers they
+target, so those dropdowns silently never autopopulated. `mark_derived` now takes the op's declared output role
+(`produced_role`, from the registry's `produces`) and a segmentation output keeps its own role; image→image
+derivations (upscale, background subtract) still inherit the source's identity as before. Golden-master tests in
+`test_lineage_recording.py` pin both directions. This activates the target-discriminated dropdown bindings
+shipped in 1.6.398.
+
 ## [1.6.400] - 2026-07-26
 ### Changed — **Resolver wired on the raw / preprocessed image dropdowns (Outstanding-Work Part D, increment 3).**
 Continuing the layer-binding activation: the clearly-labeled raw and preprocessed IMAGE dropdowns across the

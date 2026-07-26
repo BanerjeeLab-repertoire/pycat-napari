@@ -512,6 +512,14 @@ spec it as a follow-up, not first.
 ## PART D — Light up the resolver on the dropdowns (Stage 2 activation)
 
 > **◐ IN PROGRESS — increment 3 DONE, 1.6.400 (2026-07-26); increment 2 DONE, 1.6.398; increment 1 DONE, 1.6.359.**
+> **Foundational fix (1.6.401):** wiring the mask/labels bindings surfaced a bug in `layer_tags.mark_derived` —
+> it decided a derived layer's role with `if via in ('segment','segmentation')`, but on the `tag_from_operation`
+> path `via` is the OP NAME (`bf_segment`, `cellpose`, …), so every segmentation output inherited its source
+> image's `role='image'`. That silently broke ALL role-based resolution — the increment-2 target bindings
+> (`cell_segmentation.cell_labels`, `puncta_analysis.puncta_mask`) could not match their own layers. Fixed by
+> passing the op's declared `produces` role through; segmentation outputs now keep their own `mask`/`labels`
+> role. This ACTIVATES the discriminated bindings and unblocks the deferred `common.mask`/`common.labels` work.
+
 > **Increment 3** wired the clearly-labeled raw / preprocessed IMAGE dropdowns across the brightfield, in-vitro
 > (BF + fluor), and z-stack panels → `common.raw_image` / `common.preprocessed_image`. These are safe ahead of
 > the mask/labels ones: `raw` is provenance-discriminated (`prefer=head_of_lineage`) and BOTH degrade to an empty

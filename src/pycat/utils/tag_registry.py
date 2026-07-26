@@ -347,7 +347,10 @@ def tag_from_operation(layer, fn_or_op, *, source_layer=None, target=None, **ext
         tag_layer(layer, key, value, source='pipeline')
 
     if source_layer is not None:
-        mark_derived(layer, source_layer, via=entry['op'])
+        # Pass the op's declared output role so a segmentation output keeps its own role (mask/labels)
+        # instead of inheriting the source image's role. entry['op'] is the op NAME, not the literal
+        # 'segment' the old mark_derived branch tested — which is how masks silently became role='image'.
+        mark_derived(layer, source_layer, via=entry['op'], produced_role=entry['produces'])
 
     return layer
 
