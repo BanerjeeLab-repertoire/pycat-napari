@@ -96,3 +96,39 @@ def test_missing_droplet_mask_skips_gracefully(tmp_path):
              "data_instance": SimpleNamespace(data_repository=_matching_metadata())}
     replay_client_enrichment(state, Path("sampleD.tif"), {}, tmp_path)      # no mask in state
     assert not list(tmp_path.glob("*client_enrichment*"))
+
+
+# ── the reliability-context threading (BatchWorker side) ──────────────────────────────────────────────
+
+def _scored_records():
+    """A consolidated record carrying a SCORED_FAMILY measurement, so the reliability context is computed."""
+    return [("droplet", pd.DataFrame({"partition_coefficient": [1.0, 2.0]}))]
+
+
+def _qc_image():
+    return np.random.default_rng(2).normal(500, 40, (32, 32)).clip(0).astype(np.uint16)
+
+
+def test_reliability_context_threads_the_calibration_verdict():
+    from pycat.batch_processor import BatchWorker
+    verdict = {"valid": True, "level": "warn", "reason": "gain not recorded"}
+    fake = SimpleNamespace(_last_image=_qc_image(), _last_calibration=verdict)
+    ctx = BatchWorker._reliability_context_for(fake, _scored_records(), "a.tif")
+    assert ctx is not None
+    assert ctx["calibration"] == verdict        # the verdict reaches the reliability index
+    assert "image_qc" in ctx
+
+
+def test_reliability_context_omits_calibration_when_no_curve_ran():
+    from pycat.batch_processor import BatchWorker
+    fake = SimpleNamespace(_last_image=_qc_image(), _last_calibration=None)
+    ctx = BatchWorker._reliability_context_for(fake, _scored_records(), "a.tif")
+    assert ctx is not None and "image_qc" in ctx
+    assert "calibration" not in ctx             # stays missing → the grade is honestly capped, never assumed
+
+
+def test_reliability_context_is_none_for_a_non_scored_batch():
+    from pycat.batch_processor import BatchWorker
+    fake = SimpleNamespace(_last_image=_qc_image(), _last_calibration=None)
+    non_scored = [("cell", pd.DataFrame({"area": [10.0]}))]   # no SCORED_FAMILY column
+    assert BatchWorker._reliability_context_for(fake, non_scored, "a.tif") is None

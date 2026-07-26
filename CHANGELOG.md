@@ -1,3 +1,17 @@
+## [1.6.388] - 2026-07-26
+### Changed — **The batch calibration verdict now feeds the reliability index (reliability_index roadmap).**
+Threads the calibration verdict the `client_enrichment` step stashes (1.6.387) into the per-image reliability
+context: `BatchWorker._process_file` stashes `state['_calibration_validity']` into `self._last_calibration`
+(reset per file), and `_reliability_context_for` adds `calibration=` alongside `image_qc` when a curve ran. The
+consolidated table's `_row_reliability_factory` already consumes `reliability_context['calibration']` and
+`_score_calibration` already scores a `{valid, level, reason}` verdict — so a **refused** calibration now
+hard-overrides the measurement to `unreliable`, a `warn` down-weights it, and a run with **no** curve omits the
+factor so the grade stays honestly capped (never assumed passing). No table change.
+- `tests/test_batch_client_enrichment.py` +3 (`base`): the verdict reaches the reliability context; it is
+  omitted when no curve ran; and the context is `None` for a non-scored batch (no QC cost). With the step
+  (1.6.387) + this threading, the reliability `calibration` factor is fully wired end-to-end in the batch;
+  only the config-UI to record a curve path per run remains. Full `pytest -m "core or base"` green.
+
 ## [1.6.387] - 2026-07-26
 ### Added — **Headless calibrated concentration in the batch (reliability_index roadmap).**
 `replay_client_enrichment` replaces the interactive-only `client_enrichment` batch skip-stub with a real

@@ -379,15 +379,20 @@ class BatchWorker(QThread):
         Computes the imaging-QC factor so the reliability/reliability_reasons columns populate, but ONLY
         when the image carries a scored-family measurement (partition / concentration / ΔG), so a
         non-partition batch pays no QC cost. The raw image was stashed by `_process_file` (already
-        materialised), so there is no re-load and no frame-0 risk. Calibration is not threaded through the
-        batch, so it stays in `missing` and the grade is honestly capped — never assumed passing."""
+        materialised), so there is no re-load and no frame-0 risk. The calibration verdict (when the
+        client_enrichment step ran a configured curve) is threaded too, so the `calibration` factor is scored
+        rather than left in `missing`; a run with no curve leaves it out and the grade stays honestly capped."""
         from pycat.utils.consolidated_table import records_have_scored_family
         img = getattr(self, '_last_image', None)
         if img is None or not records_have_scored_family(records):
             return None
         try:
             from pycat.toolbox.data_qc_tools import run_full_qc
-            return {'image_qc': run_full_qc(img)}
+            ctx = {'image_qc': run_full_qc(img)}
+            cal = getattr(self, '_last_calibration', None)
+            if cal is not None:
+                ctx['calibration'] = cal
+            return ctx
         except Exception as _qexc:      # broad-ok: batch_step — reliability QC is additive; its failure
             # must never drop the image from the consolidated table.
             print(f"[PyCAT Batch] reliability QC skipped for {image_name}: {_qexc}")
@@ -413,6 +418,7 @@ class BatchWorker(QThread):
         """
         state: Dict = {}  # shared across all steps for this file
         self._last_image = None   # reset per file so a failed load never leaks the previous image's QC
+        self._last_calibration = None   # ditto for the calibration verdict (set by the client_enrichment step)
         # Propagate the batch-level auto-ball_radius decision so the open_image
         # replay can estimate it per image when appropriate.
         state['_auto_ball_radius'] = getattr(self, '_auto_ball_radius', False)
@@ -445,6 +451,9 @@ class BatchWorker(QThread):
         # Stash the raw image (set by the open_image step) so the consolidation step can compute this
         # image's reliability imaging-QC factor without re-loading it — used only for scored-family images.
         self._last_image = state.get('image')
+        # And the calibration verdict the client_enrichment step stashed (when a curve was configured), so the
+        # reliability index can score the `calibration` factor instead of leaving it in `missing`.
+        self._last_calibration = state.get('_calibration_validity')
 
 
 # ---------------------------------------------------------------------------
