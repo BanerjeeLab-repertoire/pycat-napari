@@ -1,3 +1,15 @@
+## [1.6.398] - 2026-07-26
+### Changed — **Layer-binding resolver activated on the highest-value dropdowns (Outstanding-Work Part D, increment 2).**
+The tag resolver + `layer_bindings.json` were fully built but dormant: passing `binding='<key>'` to a dropdown
+makes it auto-select the layer whose TAGS match (surviving renames/reordering) and select NOTHING when several
+match ambiguously. Increment 1 (1.6.359) wired the coloc channels. Increment 2 wires the highest-value
+tag-discriminated dropdowns — those that match by `target`/`modality`, not merely "newest", so mis-selection risk
+is low: cell-analysis cell mask → `cell_segmentation.cell_labels`, puncta measurement mask →
+`puncta_analysis.puncta_mask`, cell-segmentation input → `cell_segmentation.input_image`, brightfield inputs →
+`brightfield.input_image`, VPT bead channel → `vpt.bead_stack`, invitro-fluor input → `invitro_fluor.input_image`.
+`_layer_row` gained a `binding=` parameter that forwards to `create_layer_dropdown`, and the `test_resolver_wired`
+guard now sweeps both entry points. New guard `test_increment_2_domain_dropdowns_carry_their_bindings`.
+
 ## [1.6.397] - 2026-07-26
 ### Fixed — **Toolbox `create_layer_dropdown` delegators forward the full `(name_hint, binding)` signature (1.6.376 audit S6).**
 There is one canonical `create_layer_dropdown` (`ui/base_ui.py`, tag-aware, with `name_hint` and `binding`); the

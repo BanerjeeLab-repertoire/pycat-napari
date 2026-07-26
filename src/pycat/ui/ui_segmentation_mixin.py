@@ -89,7 +89,7 @@ class _SegmentationWidgetsMixin:
             self._build_cellpose_model_selector(seg_layout)
 
         # ── Shared image dropdown ────────────────────────────────────────
-        image_dropdown = self._layer_row(seg_layout, 'Select image layer:', napari.layers.Image, name_hint='Upscaled Segmentation')
+        image_dropdown = self._layer_row(seg_layout, 'Select image layer:', napari.layers.Image, name_hint='Upscaled Segmentation', binding='cell_segmentation.input_image')
 
         # ── RF-only extras (annotation layer) — shown/hidden by selection ──
         rf_extra = QWidget()

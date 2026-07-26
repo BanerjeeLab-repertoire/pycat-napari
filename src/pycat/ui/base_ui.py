@@ -700,16 +700,17 @@ class BaseUIClass:
             bp.record(step_name, params)
 
     def _layer_row(self, layout, label_text, layer_type, name_hint='',
-                   optional=False):
+                   optional=False, binding=''):
         """Add a status-circle + label + layer-dropdown row to *layout*, matching
         the field-status UEX from the temperature workflow. Returns the dropdown.
         Circle is red (required) or yellow (optional) until a real layer is
-        selected, then turns green. 'None' placeholders stay red/yellow."""
+        selected, then turns green. 'None' placeholders stay red/yellow.
+        ``binding`` forwards to create_layer_dropdown (tag-match autopopulate; see its docstring)."""
         from PyQt5.QtWidgets import QLabel, QWidget
         try:
             from pycat.ui.field_status import StatusCircle
         except Exception:
-            dd = self.create_layer_dropdown(layer_type, name_hint)
+            dd = self.create_layer_dropdown(layer_type, name_hint, binding=binding)
             self.add_text_label(layout, label_text)
             layout.addWidget(dd)
             return dd
@@ -721,17 +722,15 @@ class BaseUIClass:
         # Label on its own row (no marker), then the marker sits inline to the
         # LEFT of the dropdown it applies to.
         self.add_text_label(layout, label_text)
-        dd = self.create_layer_dropdown(layer_type, name_hint)
+        dd = self.create_layer_dropdown(layer_type, name_hint, binding=binding)
         row_w = QWidget()
         row_h = QHBoxLayout(row_w)
         row_h.setContentsMargins(0, 0, 0, 0); row_h.setSpacing(4)
         row_h.addWidget(circle)
         row_h.addWidget(dd, 1)
         layout.addWidget(row_w)
-        # Track whether the user has DELIBERATELY picked an item. QComboBox.activated
-        # fires only on user interaction (not on programmatic setCurrentIndex or the
-        # implicit index-0 default), so we use it to distinguish a real choice from
-        # the dropdown merely defaulting to the first layer.
+        # activated fires only on real user interaction (not programmatic setCurrentIndex
+        # or the index-0 default), so it distinguishes a deliberate pick from a default.
         _user_picked = [False]
         def _mark_user_picked(*_):
             _user_picked[0] = True

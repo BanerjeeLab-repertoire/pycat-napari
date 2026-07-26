@@ -725,7 +725,7 @@ def _ivf_field_summary(ui, layout):
         "into the bottom few µm of a ~200 µm channel, so this single-plane Φ over- "
         "or under-represents the bulk volume fraction depending on focal depth. "
         "Treat it as a 2D coverage metric.</span>"))
-    img_dd  = ui.create_layer_dropdown(napari.layers.Image)
+    img_dd  = ui.create_layer_dropdown(napari.layers.Image, binding='invitro_fluor.input_image')
     mask_dd = ui.create_layer_dropdown(napari.layers.Labels)
     form.addRow("Fluorescence image:", img_dd)
     form.addRow("Droplet mask:", mask_dd)

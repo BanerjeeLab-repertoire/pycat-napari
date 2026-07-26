@@ -34,7 +34,7 @@ class _AnalysisWidgetsMixin:
         """Add a widget for cell analysis, optionally in a separate dock."""
         cell_segmentation_layout = QVBoxLayout()
         self.add_text_label(cell_segmentation_layout, 'Cell/Nuclei Analysis', bold=True) # Add widget title label
-        cell_segmentation_dropdown_labels = self._layer_row(cell_segmentation_layout, 'Select Mask Layer for Cell Analysis:', napari.layers.Labels, name_hint='Cellpose Segmentation')
+        cell_segmentation_dropdown_labels = self._layer_row(cell_segmentation_layout, 'Select Mask Layer for Cell Analysis:', napari.layers.Labels, name_hint='Cellpose Segmentation', binding='cell_segmentation.cell_labels')
         cell_segmentation_dropdown_omit = self._layer_row(cell_segmentation_layout, 'Select Mask Layer to Omit:', napari.layers.Labels, optional=True)
         cell_segmentation_dropdown_omit.insertItem(0, "None")
         cell_segmentation_dropdown_images = self._layer_row(cell_segmentation_layout, 'Select Image for Cell Analysis:', napari.layers.Image, name_hint='Upscaled Fluorescence')
@@ -100,7 +100,7 @@ class _AnalysisWidgetsMixin:
         # green once a real layer is selected.
         puncta_measure_dropdown_labels = self._layer_row(
             measure_puncta_layout, 'Select Puncta Mask for Measurement:',
-            napari.layers.Labels, name_hint='Refined Puncta')
+            napari.layers.Labels, name_hint='Refined Puncta', binding='puncta_analysis.puncta_mask')
         puncta_measure_dropdown_images = self._layer_row(
             measure_puncta_layout, 'Select Image for Puncta Measurement:',
             napari.layers.Image, name_hint='Upscaled Fluorescence')

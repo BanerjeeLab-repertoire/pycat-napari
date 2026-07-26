@@ -166,7 +166,7 @@ class _VptPanelsMixin:
             "eroded host mask are kept.</span>")
         note.setWordWrap(True); form.addRow(note)
 
-        self._bead_dd = self.create_layer_dropdown(napari.layers.Image)
+        self._bead_dd = self.create_layer_dropdown(napari.layers.Image, binding='vpt.bead_stack')
         self._bead_dd.setToolTip("Fluorescence channel showing the probe beads.")
         form.addRow("Bead channel:", self._bead_dd)
 

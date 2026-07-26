@@ -224,7 +224,7 @@ def _add_bf_preprocessing(ui, layout):
     form = QFormLayout(grp)
     form.setContentsMargins(9, 20, 9, 6)
 
-    img_dd = ui.create_layer_dropdown(napari.layers.Image)
+    img_dd = ui.create_layer_dropdown(napari.layers.Image, binding='brightfield.input_image')
     form.addRow(label_with_circle("Brightfield image:", dropdown=img_dd), img_dd)
 
     ref_cb = QCheckBox("Use flat-field reference layer")
@@ -341,7 +341,7 @@ def _add_bf_cell_segmentation(ui, layout):
     note.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Minimum)
     form.addRow(note)
 
-    img_dd = ui.create_layer_dropdown(napari.layers.Image)
+    img_dd = ui.create_layer_dropdown(napari.layers.Image, binding='brightfield.input_image')
     form.addRow(label_with_circle("BF image for segmentation:", dropdown=img_dd), img_dd)
 
     diam_spin = QSpinBox(); diam_spin.setRange(10, 500); diam_spin.setValue(80)

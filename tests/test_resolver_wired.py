@@ -18,13 +18,17 @@ _REPO = pathlib.Path(__file__).resolve().parents[1]
 
 
 def _wired_bindings(rel_path):
-    """Every non-empty binding= string passed to create_layer_dropdown in a source file."""
+    """Every non-empty binding= string passed to a dropdown-builder in a source file.
+
+    Both entry points are swept: create_layer_dropdown (the direct builder) and _layer_row (the
+    status-circle wrapper that forwards binding= to it), so a binding wired through either is validated.
+    """
     src = (_REPO / rel_path).read_text(encoding='utf-8')
     tree = ast.parse(src)
     found = []
     for node in ast.walk(tree):
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                and node.func.attr == 'create_layer_dropdown'):
+                and node.func.attr in ('create_layer_dropdown', '_layer_row')):
             for kw in node.keywords:
                 if kw.arg == 'binding' and isinstance(kw.value, ast.Constant) and kw.value.value:
                     found.append(kw.value.value)
@@ -37,6 +41,22 @@ def test_object_coloc_dropdowns_are_bound_to_the_channel_keys():
     bound = _wired_bindings('src/pycat/ui/ui_analysis_mixin.py')
     assert 'colocalization.channel_a' in bound
     assert 'colocalization.channel_b' in bound
+
+
+@pytest.mark.core
+def test_increment_2_domain_dropdowns_carry_their_bindings():
+    """Increment 2: the highest-value, tag-discriminated dropdowns (cell segmentation in/out, puncta mask,
+    brightfield input, VPT bead stack, invitro-fluor input) now carry their bindings. These discriminate by
+    target/modality (not merely newest), so the resolver auto-selects the right layer or, when ambiguous,
+    none — never a silent wrong pick."""
+    analysis = _wired_bindings('src/pycat/ui/ui_analysis_mixin.py')
+    assert 'cell_segmentation.cell_labels' in analysis
+    assert 'puncta_analysis.puncta_mask' in analysis
+    assert 'cell_segmentation.input_image' in _wired_bindings('src/pycat/ui/ui_segmentation_mixin.py')
+    assert 'brightfield.input_image' in _wired_bindings('src/pycat/toolbox/brightfield_ui.py')
+    assert 'brightfield.input_image' in _wired_bindings('src/pycat/toolbox/invitro_bf_ui.py')
+    assert 'vpt.bead_stack' in _wired_bindings('src/pycat/toolbox/vpt/panels.py')
+    assert 'invitro_fluor.input_image' in _wired_bindings('src/pycat/toolbox/invitro_fluor_ui.py')
 
 
 @pytest.mark.core

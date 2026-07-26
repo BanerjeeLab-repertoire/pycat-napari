@@ -158,7 +158,7 @@ def _ivbf_preprocessing(ui, layout):
     form = QFormLayout(grp)
     form.setContentsMargins(9, 20, 9, 6)
 
-    img_dd = ui.create_layer_dropdown(napari.layers.Image)
+    img_dd = ui.create_layer_dropdown(napari.layers.Image, binding='brightfield.input_image')
     ref_cb = QCheckBox("Use flat-field reference")
     ref_dd = ui.create_layer_dropdown(napari.layers.Image)
     ref_dd.setEnabled(False)

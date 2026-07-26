@@ -505,12 +505,20 @@ spec it as a follow-up, not first.
 
 ## PART D — Light up the resolver on the dropdowns (Stage 2 activation)
 
-> **◐ IN PROGRESS — increment 1 DONE, 1.6.359 (2026-07-25).** Wired the object-based coloc mask dropdowns
-> (`ui_analysis_mixin.py`) → `colocalization.channel_a`/`channel_b` (deliberately ambiguous → select nothing,
-> name candidates). Regression guard `tests/test_resolver_wired.py` (0→N bound; + every wired binding is a
-> real key). **Remaining:** cell-analysis input/labels, puncta mask, VPT bead-stack, common.* image dropdowns
-> — each binding key chosen per dropdown semantics (a wrong key risks silent mis-selection), wired deliberately.
-> Verified 0 bound (bar the pre-existing invitro_fluor site) against the 1.6.358 tree.
+> **◐ IN PROGRESS — increment 2 DONE, 1.6.398 (2026-07-26); increment 1 DONE, 1.6.359 (2026-07-25).**
+> Increment 1 wired the object-based coloc mask dropdowns (`ui_analysis_mixin.py`) →
+> `colocalization.channel_a`/`channel_b` (deliberately ambiguous → select nothing, name candidates).
+> **Increment 2** wired the highest-value TAG-DISCRIMINATED dropdowns — the ones that match by `target`/`modality`
+> (not merely newest), so the mis-selection risk is low and, where several match, the resolver still picks none:
+> cell-analysis cell mask → `cell_segmentation.cell_labels` (target=cell, Part-C-backed); puncta measurement
+> mask → `puncta_analysis.puncta_mask` (target=punctum, Part-C-backed); cell-segmentation input image →
+> `cell_segmentation.input_image`; brightfield inputs (`brightfield_ui`, `invitro_bf_ui`) → `brightfield.input_image`
+> (modality=brightfield); VPT bead channel (`vpt/panels.py`) → `vpt.bead_stack`; second invitro-fluor input →
+> `invitro_fluor.input_image`. `_layer_row` grew a `binding=` param (forwards to `create_layer_dropdown`); the
+> `test_resolver_wired` sweep now covers both entry points. Regression guard extended
+> (`test_increment_2_domain_dropdowns_carry_their_bindings`). **Remaining:** the broad `common.*` image/mask/labels
+> fields (droplet/condensate masks, raw/preprocessed images across the toolbox), and the ambiguous coloc-as-image
+> and FRAP/fusion/temperature fields that would need NEW binding keys — each wired deliberately per semantics.
 
 **Problem.** The resolver + `layer_bindings.json` (16 entries) + `autopopulate` are complete but
 **dormant**: `create_layer_dropdown(..., binding='')` defaults to empty, and **0 of the ~180 call
