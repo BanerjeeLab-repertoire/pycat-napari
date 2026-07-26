@@ -1,3 +1,21 @@
+## [1.6.384] - 2026-07-26
+### Added — **Manuscript figure-panel registry (manuscript_toolbox Part A).**
+New `toolbox/manuscript/panels.py` — a Qt-free registry of `FigurePanel`s that turn PyCAT's rigor/measurement
+work into publication figures. Each panel declares, in plain language, exactly what data it needs
+(`data_requirement`) and reports whether that data is present now (`available(context)`), so **a panel whose
+data is absent is greyed with its requirement as the tooltip — never a dead button, always an instruction.**
+
+- Five panels registered in figure order: **Fig 3 — comparative phenotyping** (fully wired to
+  `comparative_figures.condition_comparison_figure`; generates the replicate-aware superplot from a consolidated
+  long table), **Supp — reliability/rigor** (`reliability_report_section`), **Supp — calibrated thermodynamics**
+  (ΔG via `calibration.delta_g_transfer`), plus **Fig 1 — QC** and **Fig 2 — benchmark**, which grey honestly
+  until their composers/data exist (the registry mechanism is robust to a missing composer — it simply reports
+  `available=False`). Availability is non-gating: a panel's own probe never breaks the gallery.
+- `tests/test_manuscript_panels.py` (`base`, 8): the registry lists the panels in order; every panel states
+  what it needs (no dead buttons); with no data all panels grey; Fig 3 generates a real matplotlib figure
+  end-to-end from a synthetic long table; the ΔG panel returns a `Parameter` with units; availability gates on
+  the right context keys. Full `pytest -m "core or base"` green.
+
 ## [1.6.383] - 2026-07-26
 ### Changed — **`label_and_mask_tools.py` is now a thin re-export shim — label_mask_split COMPLETE.**
 The residual label-editing ops — `run_update_labels`, `run_convert_labels_to_mask`, `run_label_binary_mask`,
