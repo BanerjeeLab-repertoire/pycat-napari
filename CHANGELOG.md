@@ -1,3 +1,14 @@
+## [1.6.395] - 2026-07-26
+### Fixed — **`tortuosity_per_object` measures the main-axis geodesic, not the spanning-tree edge-sum (1.6.376 audit S3).**
+`morphological_complexity_tools.tortuosity_per_object` computed path length as the SUM of every edge in the
+skeleton's minimum spanning tree — so a branched fibril (Y/T) folded its side-branch length into the "path",
+inflating tortuosity — and took end-to-end distance between the raster-order (row-major) first/last skeleton
+pixels, which are not the geodesic endpoints. It now computes the **geodesic diameter**: the shortest path
+between the two farthest degree-1 skeleton endpoints, over the straight-line distance between those same
+endpoints — the same main-axis definition `fibril_tools` already uses. Golden-master
+`tests/test_tortuosity_consistency.py` pins a straight rod ≈ 1.0, an equal-armed right-angle bend ≈ √2, and a
+Y-shape < 1.3 (the old MST-sum inflated well past this). Also removed a pre-existing unused `warnings` import.
+
 ## [1.6.394] - 2026-07-26
 ### Fixed — **Pooled molecule counting now applies the camera corrections the single-trace path performs (1.6.376 audit S2).**
 `molecular_counting_tools.count_molecules_pooled` — the docstring-"preferred" estimator — omitted the three

@@ -18,7 +18,6 @@ Author
 Date: 2025
 """
 from __future__ import annotations
-import warnings
 import numpy as np
 
 from pycat.utils.object_ref import bbox_columns_from_regionprops
@@ -270,7 +269,6 @@ def tortuosity_per_object(
         # Path length via sparse MST of skeleton points — O(N log N) instead
         # of the O(N²) greedy nearest-neighbour traversal.
         from scipy.sparse import csr_matrix
-        from scipy.sparse.csgraph import minimum_spanning_tree
         from scipy.spatial import cKDTree
 
         # Only connect skeleton pixels that are actually adjacent (≤√2 px apart)
@@ -286,14 +284,41 @@ def tortuosity_per_object(
         n = len(skel_pts)
         rows_idx, cols_idx, data = [], [], []
         for i, j in pairs:
-            d = float(np.linalg.norm(skel_pts[i] - skel_pts[j]))
+            d = float(np.linalg.norm((skel_pts[i] - skel_pts[j]).astype(float)))
             rows_idx += [i, j]; cols_idx += [j, i]; data += [d, d]
         adj = csr_matrix((data, (rows_idx, cols_idx)), shape=(n, n))
-        mst = minimum_spanning_tree(adj)
 
-        path_len   = float(mst.sum()) * microns_per_pixel
-        end_to_end = float(np.linalg.norm(
-            (skel_pts[-1] - skel_pts[0]).astype(float))) * microns_per_pixel
+        # ── Geodesic diameter along the skeleton, NOT the MST sum + raster endpoints ────────────────
+        #
+        # The old code summed EVERY MST edge — so a branched (Y/T) fibril folded its side-branch length
+        # into the "path", inflating tortuosity — and took the end-to-end between the RASTER-order first/last
+        # skeleton pixels (row-major scan order), which are not the geodesic endpoints. Both disagreed with
+        # ``fibril_tools.fibril_morphometry`` on the same object. Fix: the MAIN-AXIS tortuosity — the shortest
+        # path between the two farthest skeleton ENDPOINTS (degree-1 nodes) over the straight-line distance
+        # between those same endpoints — which matches fibril_tools' per-segment definition. Keep the two in
+        # step (see fibril_tools.fibril_morphometry).
+        from scipy.sparse.csgraph import shortest_path
+        deg = np.asarray((adj > 0).sum(axis=1)).ravel()
+        endpoints = np.where(deg == 1)[0]
+        if endpoints.size >= 2:
+            D = shortest_path(adj, method='D', indices=endpoints)
+            sub = D[:, endpoints].copy()
+            sub[~np.isfinite(sub)] = -1.0
+            a, b = np.unravel_index(int(np.argmax(sub)), sub.shape)
+            ea, eb = int(endpoints[a]), int(endpoints[b])
+            path_len_px   = float(sub[a, b])
+            end_to_end_px = float(np.linalg.norm((skel_pts[ea] - skel_pts[eb]).astype(float)))
+        else:
+            # A closed loop or degenerate skeleton has no degree-1 ends: fall back to the geodesic diameter
+            # over all nodes so the row still reports a meaningful path length.
+            D = shortest_path(adj, method='D')
+            D[~np.isfinite(D)] = -1.0
+            a, b = np.unravel_index(int(np.argmax(D)), D.shape)
+            path_len_px   = float(D[a, b])
+            end_to_end_px = float(np.linalg.norm((skel_pts[a] - skel_pts[b]).astype(float)))
+
+        path_len   = path_len_px * microns_per_pixel
+        end_to_end = end_to_end_px * microns_per_pixel
         tortuosity = (path_len / end_to_end) if end_to_end > 0 else np.nan
 
         rows.append({

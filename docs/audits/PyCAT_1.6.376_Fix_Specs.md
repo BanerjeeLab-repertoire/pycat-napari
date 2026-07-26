@@ -210,6 +210,12 @@ Old code fails the first assertion (pedestal inflates the pooled N ~2.5×).
 
 ## S3 — `tortuosity_per_object`: sums all branches, raster-order endpoints (consistency defect)
 
+> **✅ FIXED, shipped 1.6.395.** The MST edge-sum + raster-order endpoints are replaced by the geodesic
+> diameter: the shortest path between the two farthest degree-1 skeleton endpoints, over the straight-line
+> distance between those same endpoints. A Y/T branch no longer folds its stub into the path length.
+> Golden-master `tests/test_tortuosity_consistency.py`: straight rod ≈ 1.0, right-angle bend ≈ √2, Y-shape
+> < 1.3 (the old MST-sum inflated well past this).
+
 **File:** `toolbox/morphological_complexity_tools.py:230` (`tortuosity_per_object`)
 **Severity:** medium; disagrees with the correct `fibril_tools.py:335` on the same object.
 
