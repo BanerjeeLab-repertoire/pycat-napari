@@ -148,7 +148,7 @@ _LAZY_STACK_ALLOWED = {
     'toolbox/fibril_tools.py',        # 2D masks/skeletons
     'toolbox/pipeline_snr_tools.py',  # a single frame, by construction
     'toolbox/topology_tools.py',      # 2D envelopes and cell masks
-    'toolbox/label_and_mask_tools.py',# 2D masks
+    'toolbox/masks/labels.py',        # 2D label/mask editing ops (moved from label_and_mask_tools, label_mask_split)
     'utils/brushing.py',              # crops one frame, and indexes it explicitly first
     'ui/coordinate_readout.py',       # reads the pixel under the cursor
     'ui/ui_diagnostics_mixin.py',     # a diagnostic dump

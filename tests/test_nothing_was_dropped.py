@@ -1131,6 +1131,16 @@ _DELIBERATE = {
     # re-exports it (the old import still resolves). No number changed — pinned identical by
     # `tests/test_group_c_geometry.py` (verdicts, resulting label counts, neck-ratio physics), passing unchanged.
     'label_and_mask_tools.py::assess_and_split_touching',
+    # The residual label-editing ops (+ the _napari lazy-import helper) MOVED VERBATIM to
+    # `toolbox/masks/labels.py` (label_mask_split Step 6), which makes label_and_mask_tools.py a thin re-export
+    # shim; `label_and_mask_tools` re-exports every public name (the old import still resolves). No number
+    # changed — pinned identical by `tests/test_mask_labelops_characterization.py` (written before the move).
+    'label_and_mask_tools.py::_napari',
+    'label_and_mask_tools.py::run_update_labels',
+    'label_and_mask_tools.py::run_convert_labels_to_mask',
+    'label_and_mask_tools.py::run_label_binary_mask',
+    'label_and_mask_tools.py::run_expand_labels',
+    'label_and_mask_tools.py::run_mask_logic_merge',
 
     # file_io_decomposition (2026-07-24): the channel-naming dialog flow moved out of file_io.py into a
     # `_DialogsMixin` in `file_io/dialogs.py`, co-located with the `ChannelAssignmentDialog` it drives.

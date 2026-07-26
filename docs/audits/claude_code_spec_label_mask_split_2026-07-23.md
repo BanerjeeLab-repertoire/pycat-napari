@@ -1,7 +1,18 @@
 # Claude Code spec — Split `label_and_mask_tools.py`: physics does not belong in a masking module
 
-> **◐ STATUS — physics move DONE (1.6.336); measurement.py extracted (Steps 1+3, 1.6.380). Remaining:
-> morphology.py, splitting.py, then the shim + ratchet.**
+> **✅ STATUS — COMPLETE (1.6.336–1.6.383). `label_and_mask_tools.py` is a 39-line re-export shim (from 1,592,
+> −98%).** The condensate wetting physics moved to `condensate_physics/wetting.py` (Step 2, 1.6.336) and the
+> masking halves to `toolbox/masks/{measurement (Step 3, 1.6.380), morphology (Step 4, 1.6.381), splitting
+> (Step 5, 1.6.382), labels (Step 6, 1.6.383)}.py` — each a focused module, every move VERBATIM +
+> characterization-pinned (tests written green pre-move, passing unchanged after via `__globals__` patching) +
+> vanished-guard-recorded; mask outputs exactly equal; the `@tags_layer` operation-catalog provenance
+> regenerated per move (provenance only). The per-file line ratchet is locked at the shim size (39). Physics no
+> longer lives in a masking module; masking/splitting/measurement/labels are separate, focused modules.
+>
+> **Step 6 — labels.py + thin shim — DONE, 1.6.383.** The residual label-ops (`run_update_labels`/
+> `run_convert_labels_to_mask`/`run_label_binary_mask`/`run_expand_labels`/`run_mask_logic_merge` + `_napari`)
+> moved VERBATIM to `toolbox/masks/labels.py`; `tests/test_mask_labelops_characterization.py` (`base`, 9) pins
+> them. `label_and_mask_tools.py` 266 → 39 (pure re-export shim); ratchet locked at 39.
 >
 > **Steps 1 + 3 — measurement.py — DONE, 1.6.380.** Characterization-test-first (coverage was thin):
 > `tests/test_mask_measurement_characterization.py` (`base`, 6) pins `measure_region_props`,

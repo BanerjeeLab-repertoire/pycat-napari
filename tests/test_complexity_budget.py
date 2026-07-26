@@ -361,6 +361,11 @@ _FILE_LINE_CEILINGS = {
     # toolbox/condensate_physics/*.py. The ceiling ratchets DOWN as the remaining quantities (msd, moduli,
     # relaxation, intensity, survival) move out.
     "toolbox/condensate_physics_tools.py": 122,
+    # 1,592 -> 39: the full label_mask_split decomposition (1.6.336-1.6.383) moved the physics to
+    # condensate_physics/wetting.py and the masking halves to toolbox/masks/{measurement,morphology,splitting,
+    # labels}.py. label_and_mask_tools.py is now a pure re-export shim (-98%). The ceiling is locked at the
+    # shim size — it cannot grow back.
+    "toolbox/label_and_mask_tools.py": 39,
 }
 
 

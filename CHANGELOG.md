@@ -1,3 +1,24 @@
+## [1.6.383] - 2026-07-26
+### Changed — **`label_and_mask_tools.py` is now a thin re-export shim — label_mask_split COMPLETE.**
+The residual label-editing ops — `run_update_labels`, `run_convert_labels_to_mask`, `run_label_binary_mask`,
+`run_expand_labels`, `run_mask_logic_merge` (plus the `_napari` lazy-import helper) — move **verbatim** to a new
+`toolbox/masks/labels.py`, the last masking concern to find its home. `label_and_mask_tools.py` is now a **39-line
+re-export shim** (from 1,592), re-exporting every public name so all callers (`from
+pycat.toolbox.label_and_mask_tools import ...`) are unchanged.
+
+- **Characterization-test-first:** `tests/test_mask_labelops_characterization.py` (`base`, 9) was committed green
+  on the pre-move code, pinning the exact label/mask outputs (binarize, connected-components, expand, boolean
+  AND/OR/XOR merge, label increment/rename) plus the guard/reject paths, patching each function's own
+  `__globals__` so it passes **unchanged** after the move. The vanished-function guard records the move in
+  `_DELIBERATE`.
+- **This completes `label_mask_split`.** `label_and_mask_tools.py` went 1,592 → 39 lines (−98%): the condensate
+  wetting physics moved to `condensate_physics/wetting.py`, and the masking halves to
+  `toolbox/masks/{measurement, morphology, splitting, labels}.py` — each a focused module, every move verbatim +
+  characterization-pinned + guard-checked. The per-file line ratchet is locked at the shim size (39).
+- The lazy-stack guard's allowlist (`test_silent_fallbacks`) was repointed from `label_and_mask_tools.py` to
+  `masks/labels.py`, following the two `np.asarray(layer.data)` label-editing sites (genuinely 2D) to their new
+  home. Full `pytest -m "core or base"` green.
+
 ## [1.6.382] - 2026-07-26
 ### Changed — **Extracted the assessed-split decision path from label_and_mask_tools.py (label_mask_split Step 5).**
 `assess_and_split_touching` (228 lines — the morphology-aware decision that assesses *whether* touching masks
