@@ -95,6 +95,22 @@ def test_supp_thermodynamics_generates_a_delta_g_when_its_inputs_are_present():
     assert dg.units == "kcal/mol"
 
 
+def test_fig1_qc_tabulates_the_acquisition_qc_report_from_a_sample_image():
+    fig1 = next(p for p in manuscript_panels() if p.key == "fig1_qc")
+    assert panel_is_available(fig1, {}) is False                 # no sample image → greyed
+    assert panel_is_available(fig1, {"qc_image": "not an array"}) is False
+
+    rng = np.random.default_rng(1)
+    img = rng.normal(500, 40, (48, 48)).clip(0).astype(np.uint16)
+    ctx = {"qc_image": img, "pixel_um": 0.1, "na": 1.4, "wavelength_nm": 520}
+    assert panel_is_available(fig1, ctx) is True
+
+    table = fig1.generate(ctx)
+    assert isinstance(table, pd.DataFrame) and not table.empty
+    assert {"name", "status"} <= set(table.columns)              # a QC check table (name + verdict per row)
+    assert set(table["status"]) <= {"good", "warn", "bad", "na", "info"}
+
+
 def test_supp_reliability_gates_on_scored_measurements():
     rel = next(p for p in manuscript_panels() if p.key == "supp_reliability")
     assert panel_is_available(rel, {}) is False

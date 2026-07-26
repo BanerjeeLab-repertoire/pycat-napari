@@ -1,3 +1,15 @@
+## [1.6.386] - 2026-07-26
+### Changed — **Manuscript Fig 1 (QC pipeline) is now wired (manuscript_toolbox).**
+The Fig 1 QC panel — previously greyed for want of a composer at the path the spec named — is re-pointed to
+`data_qc.runner.run_full_qc` (the acquisition-QC orchestrator; data-QC moved to the `data_qc/` package since the
+spec's baseline). `available` gates on a sample image in the context (`qc_image`, a 2-D frame or a stack);
+`generate` runs every applicable QC check and returns the report as a table (name / status / value / unit /
+headline), passing through the acquisition parameters (`pixel_um`, `na`, `wavelength_nm`, …) when present so an
+inapplicable check is reported `na`, never guessed. Four of the five panels now generate; only Fig 2 (benchmark)
+stays honestly greyed (no validation/Dice-F1 suite exists in the tree).
+- `tests/test_manuscript_panels.py` +1 (`base`): Fig 1 greys without a sample image, and with one produces a
+  QC table whose `status` values are the known verdict vocabulary. Full `pytest -m "core or base"` green.
+
 ## [1.6.385] - 2026-07-26
 ### Added — **GIF export path for time-series stacks (manuscript_toolbox — the one genuinely-new video piece).**
 `video_export_tools.export_stack_as_gif(stack, output_path, colormap, fps, contrast_limits, loop, …)` — the GIF

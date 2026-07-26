@@ -91,6 +91,42 @@ def _fig3_generate(context):
                                        replicate_col=replicate_col)
 
 
+# ── panel: Fig 1 — QC pipeline (the QC sub-panel is wired; the schematic stays a template slot) ───────
+
+#: Acquisition parameters ``run_full_qc`` uses to decide which checks apply — passed through from the context
+#: when present (a check that lacks its input is reported ``na``, never guessed).
+_QC_PASSTHROUGH = ("pixel_um", "na", "wavelength_nm", "frame_interval_s", "process_timescale_s",
+                   "n_channels", "is_zstack", "n_source_frames", "modality", "line_time_s")
+
+
+def _qc_image(context):
+    """The sample image the QC panel assesses, from ``context['qc_image']`` — a 2-D frame or a (T/Z, H, W)
+    stack — or ``None``."""
+    img = (context or {}).get("qc_image")
+    try:
+        import numpy as np
+        a = np.asarray(img)
+        if a.ndim in (2, 3) and a.size:
+            return a
+    except Exception:      # broad-ok: optional_probe — a non-array qc_image just greys the panel
+        pass
+    return None
+
+
+def _fig1_available(context):
+    return _qc_image(context) is not None
+
+
+def _fig1_generate(context):
+    """The QC sub-panel: run every applicable acquisition-QC check on the sample image and return the report as
+    a table (name / status / value / unit / headline)."""
+    import pandas as pd
+    from pycat.toolbox.data_qc.runner import run_full_qc
+    a = _qc_image(context)
+    kwargs = {k: context[k] for k in _QC_PASSTHROUGH if context and context.get(k) is not None}
+    return pd.DataFrame(run_full_qc(a, **kwargs))
+
+
 # ── panel: Supp — reliability / rigor (wired) ─────────────────────────────────────────────────────────
 
 def _reliability_available(context):
@@ -134,9 +170,9 @@ def _unavailable_generate(_context):
 _PANELS = (
     FigurePanel(
         key="fig1_qc", title="Fig 1 — QC pipeline", figure_role="main",
-        data_requirement="Run the data-QC pass (Analysis → Data QC) on a sample image; the schematic half is a template slot.",
-        tooltip="Generates the QC sub-panel from a run of the data-QC pass on a sample image.",
-        produces="figure", generate=_unavailable_generate, available=_never),
+        data_requirement="Provide a sample image (a 2-D frame or a stack) as 'qc_image'; the schematic half is a template slot.",
+        tooltip="Runs every applicable acquisition-QC check on a sample image and tabulates the report (the QC sub-panel).",
+        produces="table", generate=_fig1_generate, available=_fig1_available),
     FigurePanel(
         key="fig2_benchmark", title="Fig 2 — benchmark / validation", figure_role="main",
         data_requirement="Run the validation suite (Analysis → Validation) on at least one segmentation case; needs ground-truth masks.",

@@ -17,9 +17,15 @@
 > the MP4 export was already broken in the current env (no test caught it); both paths now use a version-tolerant
 > `_get_cmap`. `tests/test_video_export_gif.py` (`base`, 5). **Fig 1 (QC) IS re-pointable** —
 > `data_qc.runner.run_full_qc` exists (data-QC moved to the `data_qc/` package); **Fig 2 (benchmark) has no
-> composer** in the tree (no validation/Dice-F1 suite found) and stays greyed. **Remaining: re-point Fig 1 to
-> `run_full_qc` (render its report as the QC sub-panel); wire the GIF option into the export widget; Part C timed
-> panels; and the Qt gallery that renders the registry (greyed tooltips + generate-on-click).**
+> composer** in the tree (no validation/Dice-F1 suite found) and stays greyed.
+>
+> **Fig 1 (QC) — WIRED, 1.6.386.** Re-pointed to `data_qc.runner.run_full_qc`: `available` gates on a `qc_image`
+> in the context, `generate` runs every applicable acquisition-QC check and returns the report as a table
+> (name/status/value/unit/headline), passing acquisition params through so an inapplicable check is `na`, never
+> guessed. **Four of five panels now generate; only Fig 2 (benchmark) stays honestly greyed.**
+> `tests/test_manuscript_panels.py` (`base`, 9). **Remaining: wire the GIF option into the export widget; Part C
+> timed panels; and the Qt gallery that renders the registry (greyed tooltips + generate-on-click) — the
+> Qt-gated pieces.**
 >
 > **Date:** 2026-07-23 · **Target tree:** 1.6.324 · Verified against the 1.6.324 tree. The highest-value
 remaining item if the manuscript is the goal: a grouped set of **panel generators** that turn the
