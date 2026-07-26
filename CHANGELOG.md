@@ -1,3 +1,20 @@
+## [1.6.374] - 2026-07-25
+### Changed — **Extracted the session loader from MenuManager (ui_decomposition Part 2, feature 5).**
+`_open_session_loader` (154) and `_load_discovered_session` (37) — the "Load Session" discovery dialog that
+scans a folder for saved PyCAT sessions and reopens the chosen one — move **verbatim** to `ui/session_loader.py`,
+along with the two module-level maps they (and only they) use: `_SESSION_METHOD_SWITCH` (UI class → switch method)
+and `_SESSION_METHOD_BY_DATA` (data key → UI class).
+
+- Both methods keep their original signatures (bodies byte-for-byte identical); `MenuManager` keeps thin generic
+  `*args, **kwargs` forwarding wrappers, so the `_add_file_io_methods_to_menu` action and the internal
+  `_open_session_loader → _load_discovered_session` call both resolve unchanged. The menu structure is unchanged —
+  **menu-contract snapshot passes unmodified**.
+- `ui_modules.py` now re-exports `_SESSION_METHOD_SWITCH` / `_SESSION_METHOD_BY_DATA` from their new home
+  (`session_loader`) rather than `menu_manager`, so `ui_modules._SESSION_METHOD_*` (used by
+  `test_session_load_lazy_image`) keeps working.
+- `menu_manager.py` drops 1,720 → 1,518 lines (from 2,344 at the start of Part 2). Full `pytest -m "core or base"`
+  green. Remaining features: grid view, metadata comparison.
+
 ## [1.6.373] - 2026-07-25
 ### Changed — **Extracted native-menu manipulation from MenuManager (ui_decomposition Part 2, feature 4).**
 `_hide_napari_native_menus` (88) and `_disable_napari_open_actions` (146) — which hide/reorder napari's built-in

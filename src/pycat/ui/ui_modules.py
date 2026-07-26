@@ -128,6 +128,9 @@ from pycat.ui.analysis_methods_ui import (  # noqa: F401
 
 
 
-# MenuManager + its session maps and file-drop filter moved to menu_manager (1.6.149); ALL re-exported.
+# MenuManager + its file-drop filter moved to menu_manager (1.6.149); the session-switch maps moved on
+# with the session-loader feature to ui/session_loader.py (ui_decomposition Part 2). ALL re-exported.
 from pycat.ui.menu_manager import (  # noqa: E402,F401
-    MenuManager, _SESSION_METHOD_SWITCH, _SESSION_METHOD_BY_DATA, _FileDropFilter)
+    MenuManager, _FileDropFilter)
+from pycat.ui.session_loader import (  # noqa: E402,F401
+    _SESSION_METHOD_SWITCH, _SESSION_METHOD_BY_DATA)

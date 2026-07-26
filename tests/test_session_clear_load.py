@@ -45,9 +45,11 @@ def test_clear_with_confirm_False_clears_without_prompting(monkeypatch):
 def test_EVERY_load_handler_CLEARS_before_loading_the_session():
     """AST: every function that calls `load_session` (the Qt-bound handlers) must first call
     `clear_all_without_saving` — otherwise a loaded session stacks onto the current workspace."""
-    src = (pathlib.Path(__file__).resolve().parents[1] / 'src' / 'pycat' / 'ui'
-           / 'menu_manager.py').read_text(encoding='utf-8')
-    tree = ast.parse(src)
+    ui = pathlib.Path(__file__).resolve().parents[1] / 'src' / 'pycat' / 'ui'
+    # The "Load Session" handler (_load_discovered_session) moved to session_loader.py in the
+    # ui_decomposition; scan both files so the contract follows the handler wherever it lives.
+    trees = [ast.parse((ui / fn).read_text(encoding='utf-8'))
+             for fn in ('menu_manager.py', 'session_loader.py')]
 
     # The guard may be invoked directly (clear_all_without_saving) or via the shared
     # clear_before_session_load helper — either satisfies "clears before loading".
@@ -62,7 +64,7 @@ def test_EVERY_load_handler_CLEARS_before_loading_the_session():
                     out.setdefault(nm, c.lineno)     # first (earliest) call of each by source line
         return out
 
-    handlers = [n for n in ast.walk(tree)
+    handlers = [n for tree in trees for n in ast.walk(tree)
                 if isinstance(n, ast.FunctionDef) and 'load_session' in _calls(n)]
     assert handlers, "no load_session caller found — did the handler move?"
     for fn in handlers:
