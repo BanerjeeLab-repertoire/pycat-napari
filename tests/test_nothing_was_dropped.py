@@ -1112,6 +1112,20 @@ _DELIBERATE = {
     'label_and_mask_tools.py::select_all',
     'label_and_mask_tools.py::deselect_all',
     'label_and_mask_tools.py::get_selected_props',
+    # The binary-morphology concern (structuring element, edge-extend, open/close, the binary_morph_operation
+    # orchestrator + its GUI wrapper, the contour-area filter, and the watershed split_touching_objects) MOVED
+    # VERBATIM to `toolbox/masks/morphology.py` (label_mask_split Step 4); `label_and_mask_tools` re-exports the
+    # eight public names (the old import still resolves). No number changed — pinned identical by
+    # `tests/test_mask_morphology_characterization.py` (written before the move) and, for split_touching_objects,
+    # `tests/test_group_c_geometry.py`, both passing unchanged after.
+    'label_and_mask_tools.py::generate_cross_structuring_element',
+    'label_and_mask_tools.py::extend_mask_to_edges',
+    'label_and_mask_tools.py::custom_binary_opening',
+    'label_and_mask_tools.py::custom_binary_closing',
+    'label_and_mask_tools.py::binary_morph_operation',
+    'label_and_mask_tools.py::run_binary_morph_operation',
+    'label_and_mask_tools.py::opencv_contour_func',
+    'label_and_mask_tools.py::split_touching_objects',
 
     # file_io_decomposition (2026-07-24): the channel-naming dialog flow moved out of file_io.py into a
     # `_DialogsMixin` in `file_io/dialogs.py`, co-located with the `ChannelAssignmentDialog` it drives.

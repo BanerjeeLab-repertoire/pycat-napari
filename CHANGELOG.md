@@ -1,3 +1,26 @@
+## [1.6.381] - 2026-07-25
+### Changed — **Extracted the binary-morphology concern from label_and_mask_tools.py (label_mask_split Step 4).**
+The binary-morphology functions — `generate_cross_structuring_element`, `extend_mask_to_edges`,
+`custom_binary_opening`/`custom_binary_closing`, the `binary_morph_operation` orchestrator and its GUI wrapper
+`run_binary_morph_operation`, the `opencv_contour_func` area filter, and the watershed `split_touching_objects`
+— move **verbatim** to a new `toolbox/masks/morphology.py`.
+
+- `label_and_mask_tools.py` re-exports all eight public names, so every caller (the segmentation modules —
+  cellpose, fz, watershed, puncta_refinement, local_thresholding, segmentation_tools — plus
+  feature_analysis_tools) is unchanged. The `_napari()` lazy-import helper is copied (a staying label-op still
+  uses it). `label_and_mask_tools.py` drops 949 → 493 lines; `masks/morphology.py` is 501.
+- **Characterization-test-first:** `tests/test_mask_morphology_characterization.py` (`base`, 8) was committed
+  green on the pre-move code, pinning **exact** mask outputs (array / pixel-count equality, never approximate —
+  a one-pixel difference propagates into every downstream measurement): the cross element, the non-mutating
+  edge-extend, open/close counts, `binary_morph_operation` for every mode, the fill-holes result, the
+  contour-area filter, and the GUI wrapper's relabel path. It patches each function's own `__globals__` so it
+  passes **unchanged** after the move; `split_touching_objects` stays pinned by `test_group_c_geometry`. The
+  vanished-function guard records the move in `_DELIBERATE`.
+- The navigator `operation_catalog.json` (a generated artifact) was regenerated: the six `@tags_layer`
+  operations among the moved functions updated their `module`/`source` provenance from `label_and_mask_tools`
+  to `masks/morphology.py` — **only** provenance, no operation added, dropped, reordered, or otherwise changed.
+  Full `pytest -m "core or base"` green.
+
 ## [1.6.380] - 2026-07-25
 ### Changed — **Extracted the mask-measurement concern from label_and_mask_tools.py (label_mask_split Step 3).**
 The measurement functions — `measure_region_props` (the pure regionprops core), `run_measure_binary_mask`,

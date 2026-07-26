@@ -11,6 +11,17 @@
 > VERBATIM to `toolbox/masks/measurement.py`; `label_and_mask_tools` re-exports the four public names (every
 > caller unchanged). `label_and_mask_tools.py` 1,303 → 949; the move is recorded in `_DELIBERATE`.
 >
+> **Step 4 — morphology.py — DONE, 1.6.381.** The binary-morphology concern (structuring element, edge-extend,
+> open/close, the `binary_morph_operation` orchestrator + its GUI wrapper, `opencv_contour_func`, and the
+> watershed `split_touching_objects`) moved VERBATIM to `toolbox/masks/morphology.py`, characterization-first:
+> `tests/test_mask_morphology_characterization.py` (`base`, 8) pins EXACT mask outputs (committed green pre-move,
+> passing unchanged after via `__globals__` patching); `split_touching_objects` stays pinned by
+> `test_group_c_geometry`. `label_and_mask_tools` re-exports the eight public names (every segmentation caller
+> unchanged); `_napari()` copied (a staying label-op uses it). `label_and_mask_tools.py` 949 → 493; recorded in
+> `_DELIBERATE`. **Remaining: `splitting.py` (`assess_and_split_touching`, Step 5), the residual label-ops
+> (`run_update_labels`/`run_convert_labels_to_mask`/`run_label_binary_mask`/`run_expand_labels`/
+> `run_mask_logic_merge`), then the shim + ratchet (Step 6).**
+>
 > **Step 2 — the valuable physics move — DONE, 1.6.336.** `neck_geometry` + `fit_elastocapillary_length` (and
 > its nested `_sigmoid`) moved **VERBATIM** to new `toolbox/condensate_physics/wetting.py`, beside the rest of
 > the material-state work. Characterization was already in place — `tests/test_group_c_geometry.py` pins the
