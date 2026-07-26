@@ -1,3 +1,17 @@
+## [1.6.377] - 2026-07-25
+### Changed — **Extracted the recorded-steps dialog from MenuManager (ui_decomposition Part 2, feature 8).**
+`_show_recorded_steps_dialog` (79, with its nested `_fmt` helper) — the "Recorded Steps" dialog that lists the
+analysis steps recorded for batch replay with their parameters — moves **verbatim** to
+`ui/recorded_steps_dialog.py`.
+
+- It keeps its original signature (body byte-for-byte identical); `MenuManager` keeps a thin generic
+  `*args, **kwargs` forwarding wrapper. The action is wired **externally** in `batch_processor.py` via
+  `hasattr(_mm, '_show_recorded_steps_dialog')` / `.triggered.connect(_mm._show_recorded_steps_dialog)` — the
+  wrapper preserves that attribute on the instance, so the binding is unchanged. The menu structure is
+  unchanged — **menu-contract snapshot passes unmodified**.
+- `menu_manager.py` drops 1,273 → 1,198 lines (from 2,344 at the start of Part 2). Full `pytest -m "core or
+  base"` green.
+
 ## [1.6.376] - 2026-07-25
 ### Changed — **Extracted metadata comparison from MenuManager (ui_decomposition Part 2, feature 7).**
 `_show_metadata_comparison` (62), `_gather_compared_metadata` (20) and `_maybe_warn_metadata_diff` (16) — the
