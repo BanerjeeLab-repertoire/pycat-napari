@@ -64,8 +64,43 @@ AVAILABLE_COLORMAPS = [
 
 
 # ---------------------------------------------------------------------------
-# Pure export function
+# Pure export functions
 # ---------------------------------------------------------------------------
+
+
+def _sampled_contrast_limits(stack, contrast_limits):
+    """Global ``(min, max)`` for normalisation — the caller's ``contrast_limits`` if given, else sampled from a
+    few frames (0 / ¼ / ½ / ¾ / last) so it stays fast for large lazy stacks (a full-stack min/max would read
+    every frame twice). Guarantees ``max > min`` so a flat stack never divides by zero."""
+    n_frames = stack.shape[0]
+    if contrast_limits is None:
+        sample_indices = sorted(set([0, n_frames // 4, n_frames // 2, 3 * n_frames // 4, n_frames - 1]))
+        sample_indices = [i for i in sample_indices if 0 <= i < n_frames]
+        samples = [np.asarray(stack[i]) for i in sample_indices]
+        lo = float(min(s.min() for s in samples))
+        hi = float(max(s.max() for s in samples))
+    else:
+        lo, hi = contrast_limits
+    if hi <= lo:
+        hi = lo + 1.0
+    return lo, hi
+
+
+def _lut_rgb(frame, cmap, lo, hi):
+    """One frame → an ``(H, W, 3)`` uint8 RGB image: normalise to ``[0, 1]`` over ``(lo, hi)``, apply ``cmap``."""
+    normalized = np.clip((np.asarray(frame).astype(np.float32) - lo) / (hi - lo), 0, 1)
+    return (cmap(normalized)[..., :3] * 255).astype(np.uint8)
+
+
+def _get_cmap(name):
+    """Look up a matplotlib colormap by name across matplotlib versions — ``matplotlib.cm.get_cmap`` was
+    removed in 3.9 in favour of the ``matplotlib.colormaps`` registry."""
+    import matplotlib
+    try:
+        return matplotlib.colormaps[name]
+    except Exception:      # broad-ok: optional_probe — older matplotlib → the legacy accessor
+        import matplotlib.cm as cm
+        return cm.get_cmap(name)
 
 def export_stack_as_mp4(
     stack,
@@ -107,27 +142,10 @@ def export_stack_as_mp4(
     Path — the output file path, for confirmation.
     """
     import imageio.v3 as iio
-    import matplotlib.cm as cm
-    import matplotlib.colors as mcolors
 
     n_frames = stack.shape[0]
-
-    # Determine contrast limits if not provided — sample a few frames
-    # rather than the whole stack to keep this fast for large lazy stacks.
-    if contrast_limits is None:
-        sample_indices = sorted(set([0, n_frames // 4, n_frames // 2,
-                                      3 * n_frames // 4, n_frames - 1]))
-        sample_indices = [i for i in sample_indices if 0 <= i < n_frames]
-        samples = [np.asarray(stack[i]) for i in sample_indices]
-        global_min = float(min(s.min() for s in samples))
-        global_max = float(max(s.max() for s in samples))
-    else:
-        global_min, global_max = contrast_limits
-
-    if global_max <= global_min:
-        global_max = global_min + 1.0  # avoid divide-by-zero on flat stacks
-
-    cmap = cm.get_cmap(colormap)
+    global_min, global_max = _sampled_contrast_limits(stack, contrast_limits)
+    cmap = _get_cmap(colormap)
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -136,14 +154,70 @@ def export_stack_as_mp4(
         writer.init_video_stream("libx264", fps=fps)
 
         for t in range(n_frames):
-            frame = np.asarray(stack[t]).astype(np.float32)
-            normalized = np.clip((frame - global_min) / (global_max - global_min), 0, 1)
-            rgba = cmap(normalized)  # (H, W, 4) float in [0,1]
-            rgb = (rgba[..., :3] * 255).astype(np.uint8)
-            writer.write_frame(rgb)
+            writer.write_frame(_lut_rgb(stack[t], cmap, global_min, global_max))
 
             if progress_callback is not None:
                 progress_callback(t + 1, n_frames)
+
+    return output_path
+
+
+def export_stack_as_gif(
+    stack,
+    output_path: Path,
+    colormap: str = "viridis",
+    fps: int = 10,
+    contrast_limits: tuple = None,
+    loop: int = 0,
+    progress_callback=None,
+):
+    """Export a (T, H, W) image stack as an animated GIF with a LUT applied.
+
+    The GIF counterpart of :func:`export_stack_as_mp4`, for a small, universally-viewable preview loop (a GIF
+    drops straight into a slide, a README, or a supplementary file — no codec needed). Same LUT + contrast
+    handling as the MP4 path.
+
+    GIF is palette-based (≤256 colours) and, unlike the streamed MP4 path, is written from all coloured frames
+    at once — so this is for SHORT clips (a preview), not a full movie; keep the stack modest.
+
+    Parameters
+    ----------
+    stack : array-like, shape (T, H, W)
+        numpy or any lazy array whose integer index returns a 2D (H, W) frame — one frame is read at a time
+        while colouring, exactly as the MP4 path.
+    output_path : Path
+        Destination ``.gif`` file path.
+    colormap : str
+        A matplotlib colormap name (see ``AVAILABLE_COLORMAPS``).
+    fps : int
+        Playback frame rate; the per-frame duration written into the GIF is ``1000 / fps`` ms.
+    contrast_limits : tuple (min, max), optional
+        Intensity range to normalise all frames; if None, sampled from a few frames (same as the MP4 path).
+    loop : int
+        Number of loops; ``0`` (the default, and the GIF convention) loops forever.
+    progress_callback : callable(frame_idx, total_frames) or None
+
+    Returns
+    -------
+    Path — the output file path, for confirmation.
+    """
+    import imageio.v3 as iio
+
+    n_frames = stack.shape[0]
+    global_min, global_max = _sampled_contrast_limits(stack, contrast_limits)
+    cmap = _get_cmap(colormap)
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    frames = []
+    for t in range(n_frames):
+        frames.append(_lut_rgb(stack[t], cmap, global_min, global_max))
+        if progress_callback is not None:
+            progress_callback(t + 1, n_frames)
+
+    duration_ms = max(1, int(round(1000.0 / max(int(fps), 1))))
+    iio.imwrite(str(output_path), np.stack(frames), extension=".gif", loop=loop, duration=duration_ms)
 
     return output_path
 

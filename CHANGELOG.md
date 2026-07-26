@@ -1,3 +1,18 @@
+## [1.6.385] - 2026-07-26
+### Added — **GIF export path for time-series stacks (manuscript_toolbox — the one genuinely-new video piece).**
+`video_export_tools.export_stack_as_gif(stack, output_path, colormap, fps, contrast_limits, loop, …)` — the GIF
+counterpart of `export_stack_as_mp4`, for a small, universally-viewable preview loop (a GIF drops straight into
+a slide, README, or supplementary file — no codec needed). Same LUT + contrast handling as the MP4 path, now
+shared via `_sampled_contrast_limits` / `_lut_rgb`; written with imageio, `loop=0` (forever) by default.
+### Fixed — **MP4 export was broken under matplotlib ≥ 3.9** (`matplotlib.cm.get_cmap` was removed in 3.9).
+Both export paths now resolve colormaps through a version-tolerant `_get_cmap` (the `matplotlib.colormaps`
+registry, with the legacy accessor as a fallback). This latent breakage had no test; the new GIF work added
+one.
+- `tests/test_video_export_gif.py` (`base`, 5): a (T, H, W) stack round-trips to a (T, H, W, 3) GIF; progress
+  fires once per frame; the contrast helper guards a flat stack; the LUT maps min/max to distinct colours; and
+  the MP4 path still writes a file after the shared-helper refactor (pyav-gated). Full `pytest -m "core or
+  base"` green.
+
 ## [1.6.384] - 2026-07-26
 ### Added — **Manuscript figure-panel registry (manuscript_toolbox Part A).**
 New `toolbox/manuscript/panels.py` — a Qt-free registry of `FigurePanel`s that turn PyCAT's rigor/measurement

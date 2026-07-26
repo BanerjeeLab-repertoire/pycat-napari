@@ -10,9 +10,16 @@
 > exist at the paths the spec names (data-QC moved to the `data_qc/` package), so **Fig 1 (QC)** and
 > **Fig 2 (benchmark)** are registered but grey honestly (`available=False`) until their composers are
 > re-pointed — exactly the greyed-not-dead behaviour the design calls for. `tests/test_manuscript_panels.py`
-> (`base`, 8). **Remaining: re-point Fig 1/Fig 2 to the current QC/benchmark APIs; the GIF path for
-> `video_export_tools` (the one genuinely-new piece); Part C timed panels; and the Qt gallery that renders the
-> registry (greyed tooltips + generate-on-click).**
+> (`base`, 8).
+>
+> **GIF path — DONE, 1.6.385.** `export_stack_as_gif` added beside `export_stack_as_mp4` (shared LUT/contrast
+> helpers), and a latent bug fixed along the way — `matplotlib.cm.get_cmap` was removed in matplotlib 3.9, so
+> the MP4 export was already broken in the current env (no test caught it); both paths now use a version-tolerant
+> `_get_cmap`. `tests/test_video_export_gif.py` (`base`, 5). **Fig 1 (QC) IS re-pointable** —
+> `data_qc.runner.run_full_qc` exists (data-QC moved to the `data_qc/` package); **Fig 2 (benchmark) has no
+> composer** in the tree (no validation/Dice-F1 suite found) and stays greyed. **Remaining: re-point Fig 1 to
+> `run_full_qc` (render its report as the QC sub-panel); wire the GIF option into the export widget; Part C timed
+> panels; and the Qt gallery that renders the registry (greyed tooltips + generate-on-click).**
 >
 > **Date:** 2026-07-23 · **Target tree:** 1.6.324 · Verified against the 1.6.324 tree. The highest-value
 remaining item if the manuscript is the goal: a grouped set of **panel generators** that turn the
