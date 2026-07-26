@@ -313,7 +313,7 @@ def _ivbf_od_field(ui, layout):
     form = QFormLayout(grp)
     form.setContentsMargins(9, 20, 9, 6)
     raw_dd  = ui.create_layer_dropdown(napari.layers.Image, binding='common.raw_image')
-    mask_dd = ui.create_layer_dropdown(napari.layers.Labels)
+    mask_dd = ui.create_layer_dropdown(napari.layers.Labels, binding='brightfield.condensate_mask')
     form.addRow("Raw BF image:", raw_dd)
     form.addRow("Droplet mask:", mask_dd)
     run = QPushButton("▶  Compute OD & Field Summary")
@@ -386,7 +386,7 @@ def _ivbf_size_contact(ui, layout):
     form = QFormLayout(grp)
     form.setContentsMargins(9, 20, 9, 6)
 
-    mask_dd = ui.create_layer_dropdown(napari.layers.Labels)
+    mask_dd = ui.create_layer_dropdown(napari.layers.Labels, binding='brightfield.condensate_mask')
     form.addRow(label_with_circle("Droplet mask:", dropdown=mask_dd), mask_dd)
 
     # Contact angle selector
@@ -453,7 +453,7 @@ def _ivbf_spatial(ui, layout):
     grp  = QGroupBox("Step 6 — Spatial Metrology")
     form = QFormLayout(grp)
     form.setContentsMargins(9, 20, 9, 6)
-    mask_dd = ui.create_layer_dropdown(napari.layers.Labels)
+    mask_dd = ui.create_layer_dropdown(napari.layers.Labels, binding='brightfield.condensate_mask')
     form.addRow(label_with_circle("Droplet mask:", dropdown=mask_dd), mask_dd)
     run = QPushButton("▶  Run Spatial Metrology")
     run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)

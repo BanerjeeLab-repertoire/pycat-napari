@@ -499,8 +499,8 @@ def _add_bf_od_metrics(ui, layout):
     note.setWordWrap(True); form.addRow(note)
 
     raw_dd  = ui.create_layer_dropdown(napari.layers.Image, binding='common.raw_image')
-    mask_dd = ui.create_layer_dropdown(napari.layers.Labels)
-    cell_dd = ui.create_layer_dropdown(napari.layers.Labels)
+    mask_dd = ui.create_layer_dropdown(napari.layers.Labels, binding='brightfield.condensate_mask')
+    cell_dd = ui.create_layer_dropdown(napari.layers.Labels, binding='cell_segmentation.cell_labels')
     form.addRow("Raw BF image:", raw_dd)
     form.addRow("Condensate mask:", mask_dd)
     form.addRow("Cell mask (optional):", cell_dd)
@@ -580,7 +580,7 @@ def _add_bf_per_cell_summary(ui, layout):
         "Requires Step 5 and a cell mask.</span>"
     ))
 
-    cell_dd = ui.create_layer_dropdown(napari.layers.Labels)
+    cell_dd = ui.create_layer_dropdown(napari.layers.Labels, binding='cell_segmentation.cell_labels')
     form.addRow(label_with_circle("Cell mask:", dropdown=cell_dd), cell_dd)
     run = QPushButton("▶  Summarise Per Cell")
     run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
@@ -626,8 +626,8 @@ def _add_bf_spatial(ui, layout):
         "Operates on condensate centroids — identical to fluorescence.</span>"
     ))
 
-    mask_dd = ui.create_layer_dropdown(napari.layers.Labels)
-    cell_dd = ui.create_layer_dropdown(napari.layers.Labels)
+    mask_dd = ui.create_layer_dropdown(napari.layers.Labels, binding='brightfield.condensate_mask')
+    cell_dd = ui.create_layer_dropdown(napari.layers.Labels, binding='cell_segmentation.cell_labels')
     form.addRow("Condensate mask:", mask_dd)
     form.addRow("Cell mask:", cell_dd)
 
@@ -883,8 +883,8 @@ def _add_bf_texture(ui, layout):
     ))
 
     od_dd   = ui.create_layer_dropdown(napari.layers.Image)
-    mask_dd = ui.create_layer_dropdown(napari.layers.Labels)
-    cell_dd = ui.create_layer_dropdown(napari.layers.Labels)
+    mask_dd = ui.create_layer_dropdown(napari.layers.Labels, binding='brightfield.condensate_mask')
+    cell_dd = ui.create_layer_dropdown(napari.layers.Labels, binding='cell_segmentation.cell_labels')
     form.addRow("OD image (or BF Enhanced):", od_dd)
     form.addRow("Condensate mask:", mask_dd)
     form.addRow("Cell mask (optional):", cell_dd)

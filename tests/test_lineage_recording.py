@@ -122,6 +122,31 @@ def test_an_image_to_image_derivation_is_not_misclassified_as_a_segmentation():
     assert get_tag(bg, 'provenance') == 'derived'
 
 
+@pytest.mark.base
+def test_condensate_and_cell_mask_bindings_discriminate_by_target():
+    """The payoff of the role fix + target-discriminated keys: with BOTH a cell mask and a condensate mask in
+    the viewer, `brightfield.condensate_mask` resolves to the condensate mask and `cell_segmentation.cell_labels`
+    to the cell mask — never a silent cross-pick (the mis-selection risk that had these mask fields deferred)."""
+    from pycat.toolbox.brightfield_tools import segment_bf_condensates
+    from pycat.toolbox.segmentation.cellpose import cellpose_segmentation
+    from pycat.utils.tag_registry import tag_from_operation
+    from pycat.utils.tag_resolver import resolve_binding
+
+    viewer = _install_registry_and_viewer()
+    src = viewer.add_image(np.zeros((8, 8), np.float32), name="raw")
+    cell = viewer.add_labels(np.ones((8, 8), int), name="Cell Mask")
+    tag_from_operation(cell, cellpose_segmentation, source_layer=src)
+    cond = viewer.add_labels(np.ones((8, 8), int), name="Condensate Mask")
+    tag_from_operation(cond, segment_bf_condensates, source_layer=src)
+
+    def _name(r):
+        layer = r[0] if isinstance(r, tuple) else r
+        return getattr(layer, 'name', None)
+
+    assert _name(resolve_binding(viewer, 'brightfield.condensate_mask')) == "Condensate Mask"
+    assert _name(resolve_binding(viewer, 'cell_segmentation.cell_labels')) == "Cell Mask"
+
+
 @pytest.mark.core
 def test_increment_2_ui_sites_wire_tag_from_operation():
     """Wiring guard (Outstanding-Work C1 increment 2): the z-stack (bg / cell / condensate) and the two

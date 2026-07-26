@@ -511,7 +511,15 @@ spec it as a follow-up, not first.
 
 ## PART D — Light up the resolver on the dropdowns (Stage 2 activation)
 
-> **◐ IN PROGRESS — increment 3 DONE, 1.6.400 (2026-07-26); increment 2 DONE, 1.6.398; increment 1 DONE, 1.6.359.**
+> **◐ IN PROGRESS — increment 4 DONE, 1.6.402 (2026-07-26); increment 3 DONE, 1.6.400; increment 2 DONE, 1.6.398; increment 1 DONE, 1.6.359.**
+> **Increment 4** (unblocked by the 1.6.401 role fix) wired the mask/labels consumers with target-discriminated
+> keys: fixed `puncta_analysis.puncta_mask` (`role: mask`→`labels` — puncta layers ARE labels, so the old key
+> matched nothing), added `brightfield.condensate_mask` (`role=labels, target=condensate`), and wired the
+> brightfield/in-vitro condensate & droplet mask consumers to it and the brightfield cell-mask consumers to
+> `cell_segmentation.cell_labels`. Behavioural test proves a condensate slot and a cell slot never cross-pick when
+> both masks coexist. **Remaining:** the fluor/time-series droplet masks (blocked on C1 inc 3 decorating their
+> inline producers) and the ambiguous coloc-as-image / FRAP / fusion / temperature fields (need NEW keys).
+
 > **Foundational fix (1.6.401):** wiring the mask/labels bindings surfaced a bug in `layer_tags.mark_derived` —
 > it decided a derived layer's role with `if via in ('segment','segmentation')`, but on the `tag_from_operation`
 > path `via` is the OP NAME (`bf_segment`, `cellpose`, …), so every segmentation output inherited its source

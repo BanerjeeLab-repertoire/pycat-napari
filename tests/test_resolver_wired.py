@@ -73,6 +73,18 @@ def test_increment_3_raw_and_preprocessed_image_dropdowns_are_bound():
 
 
 @pytest.mark.core
+def test_increment_4_condensate_and_cell_mask_consumers_are_bound():
+    """Increment 4 (unblocked by the mark_derived role fix): the brightfield / in-vitro condensate & droplet
+    mask consumers bind to `brightfield.condensate_mask`, and the brightfield cell-mask consumers to
+    `cell_segmentation.cell_labels`. Both are target-discriminated (condensate vs cell), so a condensate slot
+    never auto-picks a co-existing cell mask, and vice versa."""
+    bf = _wired_bindings('src/pycat/toolbox/brightfield_ui.py')
+    assert 'brightfield.condensate_mask' in bf
+    assert 'cell_segmentation.cell_labels' in bf
+    assert 'brightfield.condensate_mask' in _wired_bindings('src/pycat/toolbox/invitro_bf_ui.py')
+
+
+@pytest.mark.core
 def test_every_wired_binding_is_a_real_key_in_the_binding_table():
     """A dropdown must never point at a binding key that does not exist in layer_bindings.json."""
     import json

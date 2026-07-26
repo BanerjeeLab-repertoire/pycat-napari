@@ -1,3 +1,14 @@
+## [1.6.402] - 2026-07-26
+### Changed — **Resolver wired on the condensate / droplet / cell mask dropdowns (Outstanding-Work Part D, increment 4).**
+With role-based resolution repaired (1.6.401), the mask/labels bindings become functional. This increment: fixes
+`puncta_analysis.puncta_mask` (`role: mask` → `labels` — puncta layers are labels layers, so the old key matched
+nothing, silently leaving the wired puncta-measurement dropdown empty); adds `brightfield.condensate_mask`
+(`role=labels, target=condensate`); and wires the brightfield / in-vitro-brightfield condensate & droplet mask
+consumer dropdowns to it, plus the brightfield cell-mask consumers to `cell_segmentation.cell_labels`. Because
+these keys discriminate by `target`, a condensate-mask slot never auto-selects a co-existing cell mask (and vice
+versa) — a behavioural test pins that discrimination. (The fluorescence / time-series droplet masks remain
+deferred pending decorators on their inline producers.)
+
 ## [1.6.401] - 2026-07-26
 ### Fixed — **Segmentation outputs no longer silently inherit `role='image'` from their source (tag resolver).**
 `mark_derived` decided a derived layer's role with `if via in ('segment', 'segmentation')` — but on the

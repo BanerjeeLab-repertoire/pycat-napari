@@ -66,10 +66,10 @@
     "why": "Puncta are assigned to their parent cell, so the cell labels are needed."
   },
   "puncta_analysis.puncta_mask": {
-    "role": "mask",
+    "role": "labels",
     "target": "punctum",
     "prefer": "newest",
-    "why": "The puncta mask."
+    "why": "The puncta mask -- a LABELS layer (puncta_filter / subcellular_segment produce role=labels, target=punctum), not a binary mask. Querying role=mask here matched nothing."
   },
 
   "vpt.bead_stack": {
@@ -87,6 +87,13 @@
     "modality": "brightfield",
     "prefer": "newest",
     "why": "A brightfield image -- DARK objects on a bright field. The tag matters: running the brightfield path on a fluorescence image gives plausible-looking nonsense."
+  },
+
+  "brightfield.condensate_mask": {
+    "role": "labels",
+    "target": "condensate",
+    "prefer": "newest",
+    "why": "The condensate / droplet mask from brightfield segmentation (segment_bf_condensates produces role=labels, target=condensate). target=condensate discriminates it from a co-existing cell mask, so the analysis panels never run on the wrong labels."
   },
 
   "invitro_fluor.input_image": {
