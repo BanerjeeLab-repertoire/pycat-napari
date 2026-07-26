@@ -76,10 +76,10 @@ def discover_sidecar(image_path, *, max_entries: int = 200):
                     try:
                         if parser.matches(entry):
                             return entry, parser
-                    except Exception as exc:             # broad-ok: a parser's match probe must never crash discovery
+                    except Exception as exc:             # broad-ok: optional_probe — a parser's match probe must never crash discovery
                         debug_log(f'sidecar: parser {parser.name} match failed', exc)
         return None, None
-    except Exception as exc:                             # broad-ok: discovery is best-effort; a failure just means no sidecar
+    except Exception as exc:                             # broad-ok: optional_probe — discovery is best-effort; a failure just means no sidecar
         debug_log('sidecar: discovery failed', exc)
         return None, None
 
@@ -92,7 +92,7 @@ def sidecar_metadata_for(image_path) -> Optional[dict]:
         return None
     try:
         return parser.parse(path)
-    except Exception as exc:                             # broad-ok: a parse failure is recorded; the image still loads
+    except Exception as exc:                             # broad-ok: optional_probe — a parse failure is recorded; the image still loads
         debug_log(f'sidecar: parser {parser.name} failed on {path.name}', exc)
         return None
 
@@ -124,7 +124,7 @@ def _iss_matches(path: pathlib.Path) -> bool:
         return False
     try:
         head = path.read_text(encoding='utf-8', errors='ignore')[:4000]
-    except Exception:                                    # broad-ok: unreadable file → not a match
+    except Exception:                                    # broad-ok: optional_probe — unreadable file → not a match
         return False
     return ('fromComments' in head) or ('[Ch1]' in head) or ('ISS' in head and 'Vista' in head)
 

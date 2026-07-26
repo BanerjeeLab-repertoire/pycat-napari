@@ -109,7 +109,7 @@ def seam_qc_from_lazy_stack(stack, *, max_frames=5, **kw):
     "seam" is just image content)."""
     try:
         n = int(stack.shape[0])
-    except Exception:      # broad-ok: not a shaped stack → no QC (best-effort, must never break a load)
+    except Exception:      # broad-ok: scientific_result — not a shaped stack → no QC (best-effort, must never break a load)
         return None
     frames = []
     for i in sample_frame_indices(n, max_frames):
@@ -120,7 +120,7 @@ def seam_qc_from_lazy_stack(stack, *, max_frames=5, **kw):
             if f.ndim == 2 and f.size:
                 step = max(1, f.shape[0] // 256)   # row-subsample: keeps the QC cheap; a seam spans rows
                 frames.append(f[::step])
-        except Exception:      # broad-ok: a single unreadable frame is skipped; QC is best-effort
+        except Exception:      # broad-ok: scientific_result — a single unreadable frame is skipped; QC is best-effort
             continue
     if len(frames) < 2:
         return None
@@ -134,5 +134,5 @@ def warn_seam_qc(stack, show_warning):
         msg = seam_qc_from_lazy_stack(stack)
         if msg:
             show_warning(msg)
-    except Exception:      # broad-ok: seam QC is best-effort; never break the open over it
+    except Exception:      # broad-ok: scientific_result — seam QC is best-effort; never break the open over it
         pass

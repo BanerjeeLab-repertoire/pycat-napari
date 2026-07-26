@@ -157,7 +157,7 @@ def test_a_categorized_broad_ok_names_a_VALID_category():
 # 0 a package at a time — categorize a handler (say WHAT it guards) and lower the number here. It only goes
 # DOWN, and a package that is not listed has an implicit budget of 0 (a NEW uncategorized handler fails).
 _UNCATEGORIZED_BUDGET = {
-    'file_io': 64,
+    'file_io': 0,     # file_io fully categorized (Part 1: metadata/format/UI/state-restore probes → optional_probe, seam-QC → scientific_result, cache/workflow persist → write, widget/viewer clear → ui_cleanup)
     'toolbox': 0,     # toolbox fully categorized (Part 1: fit/QC/gate computations → scientific_result, headless/backend probes → optional_probe, plot/dock teardown → ui_cleanup)
     'utils': 0,       # utils fully categorized (Part 1: teardown/dispatch → ui_cleanup, capability/identity → optional_probe, QC/reliability/gates → scientific_result, persist/quarantine → write)
     'batch': 0,       # batch/steps fully categorized (Part 1: optional_probe model/metadata probes, batch_step, write)

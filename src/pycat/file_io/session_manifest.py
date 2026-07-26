@@ -193,7 +193,7 @@ def workflow_to_manifest_extra(config):
     """
     try:
         steps = (config or {}).get('steps') or []
-    except Exception:      # broad-ok: an odd/None config just means nothing to persist
+    except Exception:      # broad-ok: optional_probe — an odd/None config just means nothing to persist
         return {}
     if not steps:
         return {}
@@ -225,7 +225,7 @@ def workflow_from_manifest(manifest):
     """
     try:
         wf = (manifest or {}).get(WORKFLOW_KEY)
-    except Exception:      # broad-ok: a non-dict manifest just means no workflow to restore
+    except Exception:      # broad-ok: optional_probe — a non-dict manifest just means no workflow to restore
         return None
     if isinstance(wf, dict) and wf.get('steps'):
         return wf

@@ -377,7 +377,7 @@ def _write_session_manifest(session_dir, central_manager, source_path,
         _bp = getattr(central_manager, '_pycat_batch_processor', None)
         if _bp is not None:
             _extra.update(_sm.workflow_to_manifest_extra(getattr(_bp, 'config', None)))
-    except Exception as _wf:  # broad-ok: persisting the workflow is best-effort; never fail a save over it
+    except Exception as _wf:  # broad-ok: write — persisting the workflow is best-effort; never fail a save over it
         from pycat.utils.general_utils import debug_log
         debug_log('writers: could not attach the recorded workflow to the manifest', _wf)
 

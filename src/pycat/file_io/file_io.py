@@ -450,7 +450,7 @@ class FileIOClass(_LoadingMixin, _SessionActionsMixin, _DialogsMixin, _ProgressM
                 if abs(_mpp_sq - 1.0) > 1e-9:
                     from pycat.file_io.tagging import _calibration_is_from_metadata
                     _dr2['pixel_size_from_metadata'] = _calibration_is_from_metadata(_dr2, _mpp_sq ** 0.5)
-            except Exception as _fe:   # broad-ok: the provenance flag is best-effort; a failure must not break the load
+            except Exception as _fe:   # broad-ok: optional_probe — the provenance flag is best-effort; a failure must not break the load
                 debug_log("file_io: 2D pixel-size provenance flag failed", _fe)
 
             # A 2-D image has ONE frame. Recorded OUTSIDE the metadata `try` below: if extraction

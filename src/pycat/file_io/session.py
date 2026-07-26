@@ -77,7 +77,7 @@ def _clear_everything(viewer, central_manager):
     try:
         from pycat.utils.field_registry_hub import active_field_registries
         active_field_registries().reset_all()
-    except Exception:  # broad-ok: resetting method-widget fields is best-effort; never block the clear over it
+    except Exception:  # broad-ok: ui_cleanup — resetting method-widget fields is best-effort; never block the clear over it
         pass
 
     # Reset the batch recording so the recorded-steps list starts empty for
@@ -188,7 +188,7 @@ def clear_before_session_load(viewer, central_manager) -> bool:
     """
     try:
         has_layers = len(getattr(viewer, 'layers', ()) or ()) > 0
-    except Exception:      # broad-ok: a missing/odd viewer means nothing to clear — proceed with the load
+    except Exception:      # broad-ok: ui_cleanup — a missing/odd viewer means nothing to clear — proceed with the load
         has_layers = False
     if not has_layers:
         return True

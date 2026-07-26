@@ -1,8 +1,18 @@
 # Claude Code spec — Exception handler classification by context category
 
-> **◐ INCREMENTS 1–2 DONE + the batch_step guard DONE (test-only guard). Part 1 categorization sweep UNDERWAY —
-> a ratchet + the `ui`, `navigator`, `batch`, `batch_processor.py`, `utils`, and `toolbox` packages done
-> (git-only). Remaining: file_io only.**
+> **✅ Part 1 categorization sweep COMPLETE (git-only). Every `# broad-ok:` in the codebase now names WHAT it
+> guards — 0 uncategorized codebase-wide.** Breakdown: `optional_probe` 158, `ui_cleanup` 100, `scientific_result`
+> 27, `write` 13, `batch_step` 5. All per-package budgets are 0 (and unlisted packages have implicit 0), so a new
+> *plain* broad-ok anywhere now fails the ratchet — the category is effectively mandatory. Increments 1–2 + the
+> three swallow guards (scientific_result / write / batch_step) remain in force. **Remaining (separate):
+> `BatchStepResult` adoption for the broader batch-step sweep (Part 3 batch half; the concrete `BatchWorker.run`
+> offender is already guarded by `test_batch_step_visibility.py`).**
+>
+> **Part 1 (cont.) — `file_io` DONE, sweep CLOSED (comment/test-only, git-only, no bump).** The last package, all
+> 64 categorized to 0: the metadata / format-read / Qt-layer-inspection / state-restore / migration / discovery
+> probes (honest None / fallback / surfaced) → `optional_probe`; the CZI seam-QC (degrades to None = not
+> assessed) → `scientific_result`; the two dialog storage/cache ops + the workflow persist → `write`; the
+> method-widget / viewer clear → `ui_cleanup`. Budget file_io 64 → 0; uncategorized total 64 → 0.
 >
 > **Part 1 (cont.) — `toolbox` DONE (comment/test-only, git-only, no bump).** All 46 categorized to 0: the
 > fit/QC/gate computations that report an honest failure (`fit_success=False`, all-NaN + a user warning, an

@@ -328,7 +328,7 @@ def _migrate_loaded_entity_ids(df, source_path):
         uuid = uuid_for_path(source_path)
         if uuid:
             migrate_entity_id_dataset(df, source_path, uuid)
-    except Exception:      # broad-ok: migration is best-effort; a failure must never block the session load
+    except Exception:      # broad-ok: optional_probe — migration is best-effort; a failure must never block the session load
         pass
 
 
@@ -413,7 +413,7 @@ def _read_session_payload(folder, *, stems=None, stem_filter=None, progress=None
         # `workflow` key → None (nothing to restore); pure data read, safe off the Qt thread.
         try:
             payload['workflow'] = _sm.workflow_from_manifest(_manifest)
-        except Exception:  # broad-ok: restoring recorded params is best-effort; never fail a load over it
+        except Exception:  # broad-ok: optional_probe — restoring recorded params is best-effort; never fail a load over it
             pass
 
     groups = scan_output_folder(folder)
@@ -483,7 +483,7 @@ def _remount_brushable_panel(viewer, central_manager) -> bool:
         return False
     try:
         dr = central_manager.active_data_class.data_repository
-    except Exception:   # broad-ok: no repository → nothing to re-mount
+    except Exception:   # broad-ok: optional_probe — no repository → nothing to re-mount
         return False
     cell_df = dr.get('cell_df') if hasattr(dr, 'get') else None
     if cell_df is None or 'Labeled Cell Mask' not in getattr(viewer, 'layers', []):
@@ -566,7 +566,7 @@ def _apply_session_payload(payload, viewer, data_instance, central_manager=None)
                 bp.config = dict(workflow)
                 print(f"[PyCAT Session]   Restored recorded workflow: "
                       f"{len(workflow.get('steps') or [])} step(s)")
-        except Exception as e:  # broad-ok: a failed workflow restore is noted as skipped, not fatal to the load
+        except Exception as e:  # broad-ok: optional_probe — a failed workflow restore is noted as skipped, not fatal to the load
             skipped.append(('recorded workflow', str(e)))
 
     # Re-mount the brushable results panel if this session carries a cellular object table, so a reloaded
@@ -575,7 +575,7 @@ def _apply_session_payload(payload, viewer, data_instance, central_manager=None)
     # (the entity id is deterministic from the durable dataset_id), so the same object resolves the same way.
     try:
         _remount_brushable_panel(viewer, central_manager)
-    except Exception as e:  # broad-ok: the brushable panel is a convenience; its absence never fails a load
+    except Exception as e:  # broad-ok: ui_cleanup — the brushable panel is a convenience; its absence never fails a load
         skipped.append(('brushable results panel', str(e)))
 
     return dict(

@@ -414,7 +414,7 @@ def _fill_scan_acquisition_fields(result):
                 if frag in blob:
                     common['acquisition_mode'] = mode
                     break
-    except Exception as _exc:  # broad-ok: opportunistic metadata probe over arbitrary raw keys; a parse failure must never break metadata extraction
+    except Exception as _exc:  # broad-ok: optional_probe — opportunistic metadata probe over arbitrary raw keys; a parse failure must never break metadata extraction
         debug_log('metadata_extract: could not fill scan-acquisition fields', _exc)
     return result
 
