@@ -133,9 +133,9 @@ class InVitroFluorUI:
         bp = getattr(self.central_manager, '_pycat_batch_processor', None)
         if bp: bp.record(step, params)
 
-    def create_layer_dropdown(self, layer_type, binding: str = ''):
+    def create_layer_dropdown(self, layer_type, name_hint: str = '', binding: str = ''):
         return self.central_manager.toolbox_functions_ui.create_layer_dropdown(
-            layer_type, binding=binding)
+            layer_type, name_hint=name_hint, binding=binding)
 
     def _img(self, dd):
         arr = np.asarray(self.viewer.layers[dd.currentText()].data).astype(np.float32)

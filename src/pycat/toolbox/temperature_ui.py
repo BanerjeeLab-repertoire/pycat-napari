@@ -85,9 +85,9 @@ class TemperatureDependentUI:
         if bp:
             bp.record(step, params)
 
-    def create_layer_dropdown(self, layer_type, name_hint=''):
+    def create_layer_dropdown(self, layer_type, name_hint: str = '', binding: str = ''):
         return self.central_manager.toolbox_functions_ui.create_layer_dropdown(
-            layer_type, name_hint=name_hint)
+            layer_type, name_hint=name_hint, binding=binding)
 
     def setup_ui(self):
         try:

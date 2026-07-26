@@ -391,6 +391,14 @@ where S5a finds a genuinely lost output (which then needs its own assertion).
 
 ## S6 — Redundancy: `create_layer_dropdown` delegators drop `binding=` (unblocks the resolver)
 
+> **✅ FIXED (step 1), shipped 1.6.397.** All nine toolbox `create_layer_dropdown` delegators now carry the
+> canonical `(self, layer_type, name_hint='', binding='')` signature and forward both keyword args to
+> `toolbox_functions_ui.create_layer_dropdown`. The classes do NOT inherit `BaseUIClass` (they delegate through
+> `self.central_manager`), so option 2 (delete + inherit) does not apply — the thin forwarders are kept, now
+> with the full signature. Contract test `tests/test_dropdown_binding_forwarded.py` pins that every delegator
+> accepts and forwards `name_hint` and `binding`. **Step 3 (wiring `binding='<key>'` at the ~180 call sites) is
+> the separate downstream resolver task and is NOT part of this change** — the signatures are now unblocked for it.
+
 **Finding, corrected on closer read:** this is **not** ten duplicate implementations. There is one
 canonical implementation (`ui/base_ui.py:184`, the full tag-aware version with `name_hint` **and**
 `binding`), and the nine toolbox UIs each define a **thin one-line delegator** to it. The problem is

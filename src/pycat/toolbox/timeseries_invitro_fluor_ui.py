@@ -76,9 +76,9 @@ class TimeSeriesInVitroFluorUI:
         if bp:
             bp.record(step, params)
 
-    def create_layer_dropdown(self, layer_type):
+    def create_layer_dropdown(self, layer_type, name_hint: str = '', binding: str = ''):
         return self.central_manager.toolbox_functions_ui.create_layer_dropdown(
-            layer_type)
+            layer_type, name_hint=name_hint, binding=binding)
 
     def _frame_interval_s(self):
         """Frame interval (s) from captured metadata, else 1.0."""

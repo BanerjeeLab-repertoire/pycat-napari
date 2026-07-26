@@ -62,8 +62,9 @@ class ZStackSegmentationUI:
     def _record(self, step, params):
         bp = getattr(self.central_manager, '_pycat_batch_processor', None)
         if bp: bp.record(step, params)
-    def create_layer_dropdown(self, lt):
-        return self.central_manager.toolbox_functions_ui.create_layer_dropdown(lt)
+    def create_layer_dropdown(self, layer_type, name_hint: str = '', binding: str = ''):
+        return self.central_manager.toolbox_functions_ui.create_layer_dropdown(
+            layer_type, name_hint=name_hint, binding=binding)
     def _vol(self, dd):
         arr = np.asarray(self.viewer.layers[dd.currentText()].data).astype(np.float32)
         mn, mx = arr.min(), arr.max()

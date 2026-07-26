@@ -79,9 +79,9 @@ class BrightfieldCondensateUI:
         if bp:
             bp.record(step, params)
 
-    def create_layer_dropdown(self, layer_type):
+    def create_layer_dropdown(self, layer_type, name_hint: str = '', binding: str = ''):
         return self.central_manager.toolbox_functions_ui.create_layer_dropdown(
-            layer_type)
+            layer_type, name_hint=name_hint, binding=binding)
 
     def _add_label(self, layout, text, bold=False):
         lbl = QLabel(f"<b>{text}</b>" if bold else text)

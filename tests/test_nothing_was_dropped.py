@@ -1454,6 +1454,14 @@ _QT_PLUMBING = {
     'file_io.py::add_image_or_mask',
     'file_io.py::open_image_auto',
     'file_io.py::_file_has_imaging_metadata',
+
+    # 1.6.397 — 1.6.376-S6: the two truncated `create_layer_dropdown` delegators that named their first
+    # positional `lt` were given the canonical `(self, layer_type, name_hint='', binding='')` signature so
+    # every toolbox panel can forward a resolver binding. Renaming the positional `lt` -> `layer_type` (all
+    # call sites pass it positionally) registers `lt` as "lost" — a Qt-idiom rename of a dropdown factory,
+    # not a lost scientific capability. Forwarding is pinned by test_dropdown_binding_forwarded.
+    'invitro_bf_ui.py::create_layer_dropdown',
+    'zstack_segmentation_ui.py::create_layer_dropdown',
 }
 
 _ALLOWED = _DELIBERATE | _QT_PLUMBING

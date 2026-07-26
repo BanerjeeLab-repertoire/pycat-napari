@@ -1,3 +1,13 @@
+## [1.6.397] - 2026-07-26
+### Fixed — **Toolbox `create_layer_dropdown` delegators forward the full `(name_hint, binding)` signature (1.6.376 audit S6).**
+There is one canonical `create_layer_dropdown` (`ui/base_ui.py`, tag-aware, with `name_hint` and `binding`); the
+nine toolbox UIs each define a thin one-line delegator to it. Eight of the nine had truncated signatures that
+dropped `binding=` (four also dropped `name_hint=`), so those panels physically could not pass a resolver binding
+through — a structural reason almost no toolbox dropdown was resolver-bound. All nine delegators now carry the
+canonical `(self, layer_type, name_hint='', binding='')` signature and forward both keyword args. Contract test
+`tests/test_dropdown_binding_forwarded.py` pins that every delegator accepts and forwards both. (Actually passing
+`binding='<key>'` at the call sites is the separate downstream resolver task, not part of this change.)
+
 ## [1.6.396] - 2026-07-26
 ### Fixed — **Felzenszwalb region merging now actually runs (distance graph, not similarity graph) (1.6.376 audit S4).**
 `segmentation.fz.felzenszwalb_segmentation_and_merging` built its region-adjacency graph in `mode='similarity'`
