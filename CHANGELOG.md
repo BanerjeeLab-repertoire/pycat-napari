@@ -1,3 +1,17 @@
+## [1.6.391] - 2026-07-26
+### Added — **A batch config can activate calibrated concentration by curve path (reliability_index roadmap).**
+`BatchWorker._process_file` now injects a run-level `calibration_curve_path` from the batch config into the
+per-file `state` (mirroring how `_auto_ball_radius` is threaded), so the headless `client_enrichment` step
+(1.6.387) loads that curve and produces calibrated concentrations + the reliability calibration factor for
+**every** image — without a per-step param. A saved config (or a script) can now turn calibrated concentration
+on by adding one key; absent, the step stays a no-op and the batch is unchanged (uncalibrated).
+
+- With this, the calibrated-concentration path is reachable end-to-end from a config file: `calibration_curve_path`
+  → `state` → `client_enrichment` loads the curve → concentrations/ΔG through the validity gate → the
+  reliability index. Only the Qt field to *set* that config value in the batch dialog remains.
+- `tests/test_batch_client_enrichment.py` +2 (`base`): a run-level `calibration_curve_path` reaches the step via
+  `state`; its absence leaves the batch uncalibrated. Full `pytest -m "core or base"` green.
+
 ## [1.6.390] - 2026-07-26
 ### Changed — **Batch steps now carry a typed BatchStepResult status; a failed step is a visible partial, not a clean ✓ (exception_context_classification Part 3 / typed-result-models).**
 `BatchWorker._process_file` records each replay step's outcome as a typed `BatchStepResult` — `'ok'`,

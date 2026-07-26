@@ -26,8 +26,14 @@
 > `image_qc` when a curve ran. The consolidated table already consumes `reliability_context['calibration']` and
 > `_score_calibration` scores the `{valid, level, reason}` verdict — so a refused calibration hard-overrides to
 > `unreliable`, a warn down-weights, and no-curve omits the factor (grade stays capped). `+3` tests. **The
-> calibration factor is now wired end-to-end in the batch.** STILL OPEN: only the config-UI to record a
-> calibration-curve path per run so a real batch actually configures a curve (Qt).
+> calibration factor is now wired end-to-end in the batch.**
+>
+> **◐ CONFIG ACTIVATION DONE, 1.6.391.** `_process_file` injects a run-level `calibration_curve_path` from the
+> config into `state` (like `_auto_ball_radius`), so the `client_enrichment` step loads that curve for every
+> image. The calibrated path is now reachable from a config file end-to-end (`calibration_curve_path` → state →
+> load_curve → concentrations/ΔG through the gate → reliability). `+2` tests. STILL OPEN: only the Qt field in
+> the batch dialog to *set* `calibration_curve_path` (a user can already add it to a saved config by hand / by
+> script).
 
 **Why deferred, captured so it is not re-investigated.** The reliability `calibration` factor
 (`check_calibration_validity` → valid/level/reason) only has a source when a *calibrated* measurement runs.

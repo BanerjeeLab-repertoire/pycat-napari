@@ -132,3 +132,26 @@ def test_reliability_context_is_none_for_a_non_scored_batch():
     fake = SimpleNamespace(_last_image=_qc_image(), _last_calibration=None)
     non_scored = [("cell", pd.DataFrame({"area": [10.0]}))]   # no SCORED_FAMILY column
     assert BatchWorker._reliability_context_for(fake, non_scored, "a.tif") is None
+
+
+# ── config → state activation of the calibrated path ──────────────────────────────────────────────────
+
+def _capture_worker(config, seen):
+    def _cap(state, image_path, params, output_dir):
+        seen["path"] = state.get("calibration_curve_path", "<absent>")
+    return SimpleNamespace(config=config, step_registry={"cap": _cap}, _auto_ball_radius=False)
+
+
+def test_a_run_level_calibration_curve_path_reaches_the_step_via_state(tmp_path):
+    from pycat.batch_processor import BatchWorker
+    seen = {}
+    cfg = {"steps": [{"step": "cap"}], "calibration_curve_path": "/data/gfp_curve.json"}
+    BatchWorker._process_file(_capture_worker(cfg, seen), Path("x.tif"), tmp_path)
+    assert seen["path"] == "/data/gfp_curve.json"      # the step (client_enrichment) would load_curve this
+
+
+def test_no_config_curve_path_leaves_the_batch_uncalibrated(tmp_path):
+    from pycat.batch_processor import BatchWorker
+    seen = {}
+    BatchWorker._process_file(_capture_worker({"steps": [{"step": "cap"}]}, seen), Path("x.tif"), tmp_path)
+    assert seen["path"] == "<absent>"                  # no path → the step stays a no-op (unchanged behaviour)

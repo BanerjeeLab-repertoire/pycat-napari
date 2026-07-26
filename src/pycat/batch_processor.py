@@ -433,6 +433,13 @@ class BatchWorker(QThread):
         # Propagate the batch-level auto-ball_radius decision so the open_image
         # replay can estimate it per image when appropriate.
         state['_auto_ball_radius'] = getattr(self, '_auto_ball_radius', False)
+        # A run-level calibration-curve path in the config activates the headless calibrated-concentration
+        # (client_enrichment) step for every image — the reliability_index roadmap's config activation, so a
+        # saved config (or a script) can turn on calibrated concentration without a per-step param. The step's
+        # _resolve_calibration_curve reads it from state; absent → the step stays a no-op (uncalibrated batch).
+        _cal_curve_path = self.config.get('calibration_curve_path')
+        if _cal_curve_path:
+            state['calibration_curve_path'] = _cal_curve_path
         # For split-file recordings (multiple separate 'open_image' steps --
         # e.g. two single-channel files opened as separate layers), tell
         # replay_open_image which recorded file_path was the PRIMARY (first)
