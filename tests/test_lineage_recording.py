@@ -83,6 +83,48 @@ def test_preprocess_add_site_records_op_and_source_edge():
                for e in edges), edges
 
 
+@pytest.mark.core
+def test_increment_2_ui_sites_wire_tag_from_operation():
+    """Wiring guard (Outstanding-Work C1 increment 2): the z-stack (bg / cell / condensate) and the two
+    brightfield condensate-mask add-sites now record lineage. A source-level check so it runs in the fast
+    lane without building Qt — the mechanism itself is proved below."""
+    import pathlib
+    repo = pathlib.Path(__file__).resolve().parents[1]
+    zstack = (repo / 'src/pycat/toolbox/zstack_segmentation_ui.py').read_text(encoding='utf-8')
+    assert zstack.count('tag_from_operation(') >= 3, "z-stack bg/cell/condensate lineage not all wired"
+    for fname in ('brightfield_ui.py', 'invitro_bf_ui.py'):
+        src = (repo / 'src/pycat/toolbox' / fname).read_text(encoding='utf-8')
+        assert 'tag_from_operation(' in src, f"{fname}: condensate-mask lineage not wired"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("module, fn_name, expected_op", [
+    ("pycat.toolbox.zstack_segmentation_tools", "bg_removal_3d", "bg_subtract_3d"),
+    ("pycat.toolbox.zstack_segmentation_tools", "cellpose_segmentation_3d", "cellpose_3d"),
+    ("pycat.toolbox.zstack_segmentation_tools", "segment_subcellular_objects_3d", "subcellular_segment_3d"),
+    ("pycat.toolbox.brightfield_tools", "segment_bf_condensates", "bf_segment"),
+])
+def test_increment_2_producers_record_op_and_source_edge(module, fn_name, expected_op):
+    """Each increment-2 producer is a REGISTERED op (so tag_from_operation records rather than no-ops) and
+    stamps op (source='pipeline') + a derived_from edge back to its source layer."""
+    import importlib
+    producer = getattr(importlib.import_module(module), fn_name)
+    from pycat.utils.tag_registry import tag_from_operation
+    from pycat.utils.layer_tags import get_tags, get_edges, layer_tag_id
+
+    viewer = _install_registry_and_viewer()
+    src = viewer.add_image(np.zeros((4, 16, 16), np.float32), name="input volume")
+    out = viewer.add_labels(np.ones((4, 16, 16), int), name=f"{expected_op} output")
+
+    tag_from_operation(out, producer, source_layer=src)
+
+    op_rec = next((t for t in get_tags(out) if t.get('key') == 'op'), None)
+    assert op_rec is not None and op_rec['value'] == expected_op
+    assert op_rec['source'] == 'pipeline'
+    assert any(e['relation'] == 'derived_from' and e['target'] == layer_tag_id(src)
+               for e in get_edges(out))
+
+
 @pytest.mark.integration
 def test_add_labels_mechanism_records_op_and_source_edge():
     """The shared cellpose/subcellular pattern: tag_from_operation on a produced labels layer records the

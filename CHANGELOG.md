@@ -1,3 +1,17 @@
+## [1.6.399] - 2026-07-26
+### Changed — **Layer lineage now recorded for z-stack and brightfield condensate segmentation (Outstanding-Work Part C1, increment 2).**
+`tag_from_operation` stamps a produced layer with the operation that made it AND a `derived_from` edge to its
+source, which is what makes the resolver's "which image is behind this mask?" (head-of-lineage) queries reliable
+— but it had few call sites. Increment 2 wires the five add-sites whose producer is a registered `@tags_layer`
+op and whose source layer is re-resolvable from its dropdown: z-stack 3D background removal (`bg_removal_3d`),
+3D cell segmentation (`cellpose_segmentation_3d`), 3D condensate segmentation (`segment_subcellular_objects_3d`)
+in `zstack_segmentation_ui`, and brightfield / in-vitro brightfield condensate masks (`segment_bf_condensates`)
+in `brightfield_ui` / `invitro_bf_ui`. Each re-resolves the source Layer via `viewer.layers[dropdown.currentText()]`
+(the input variables held only `.data`) and records lineage best-effort, wrapped so it can never break the output
+layer. Tests: a `core` wiring guard plus a parametrized mechanism test that each producer records op +
+`derived_from` edge. (VPT tracks and in-vitro-fluor droplet masks are deferred — their producers aren't single
+decorated functions.)
+
 ## [1.6.398] - 2026-07-26
 ### Changed — **Layer-binding resolver activated on the highest-value dropdowns (Outstanding-Work Part D, increment 2).**
 The tag resolver + `layer_bindings.json` were fully built but dormant: passing `binding='<key>'` to a dropdown

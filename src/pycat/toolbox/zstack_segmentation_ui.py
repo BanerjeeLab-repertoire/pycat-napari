@@ -213,7 +213,14 @@ def _add_zstack_bg_removal(ui, layout):
         def _done(bg_removed):
             prog.setVisible(False); run.setEnabled(True)
             name = f"BG-Removed 3D [{vol_dd.currentText()}]"
-            ui.viewer.add_image(bg_removed, name=name, colormap='viridis')
+            _out = ui.viewer.add_image(bg_removed, name=name, colormap='viridis')
+            try:
+                from pycat.toolbox.zstack_segmentation_tools import bg_removal_3d
+                from pycat.utils.tag_registry import tag_from_operation
+                tag_from_operation(_out, bg_removal_3d,
+                                   source_layer=ui.viewer.layers[vol_dd.currentText()])
+            except Exception:
+                pass    # broad-ok: optional_probe -- lineage recording is best-effort, never break the produced layer
             ui._dr()['zstack_bg_removed'] = bg_removed
             ui._dr()['zstack_source']     = vol
             # Store the ball_radius the user actually chose here so Step 4
@@ -290,7 +297,14 @@ def _add_zstack_cell_seg(ui, layout):
             prog.setVisible(False); run.setEnabled(True)
             n = int(labeled_3d.max())
             name = f"3D Cell Mask ({n} cells)"
-            ui.viewer.add_labels(labeled_3d, name=name)
+            _out = ui.viewer.add_labels(labeled_3d, name=name)
+            try:
+                from pycat.toolbox.zstack_segmentation_tools import cellpose_segmentation_3d
+                from pycat.utils.tag_registry import tag_from_operation
+                tag_from_operation(_out, cellpose_segmentation_3d,
+                                   source_layer=ui.viewer.layers[vol_dd.currentText()])
+            except Exception:
+                pass    # broad-ok: optional_probe -- lineage recording is best-effort, never break the produced layer
             ui._dr()['zstack_cell_mask'] = labeled_3d
             ui._dr()['cell_diameter']    = diam_sp.value()
             ui._record('zstack_cell_segmentation', {
@@ -399,7 +413,16 @@ def _add_zstack_condensate_seg(ui, layout):
             prog.setVisible(False); run.setEnabled(True)
             n = int(labeled_3d.max())
             name = f"3D Condensate Mask ({n} objects)"
-            ui.viewer.add_labels(labeled_3d, name=name)
+            _out = ui.viewer.add_labels(labeled_3d, name=name)
+            try:
+                # Tagged with the per-cell subcellular-3D op it is built from; source is the
+                # pre-processed volume it was segmented on (mirrors the 2D subcellular lineage).
+                from pycat.toolbox.zstack_segmentation_tools import segment_subcellular_objects_3d
+                from pycat.utils.tag_registry import tag_from_operation
+                tag_from_operation(_out, segment_subcellular_objects_3d,
+                                   source_layer=ui.viewer.layers[proc_dd.currentText()])
+            except Exception:
+                pass    # broad-ok: optional_probe -- lineage recording is best-effort, never break the produced layer
             ui._dr()['zstack_condensate_mask'] = labeled_3d
             ui._record('zstack_condensate_segmentation', {
                 'raw_layer': raw_dd.currentText(), 'proc_layer': proc_dd.currentText(),

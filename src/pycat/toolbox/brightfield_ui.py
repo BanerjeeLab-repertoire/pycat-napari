@@ -452,7 +452,14 @@ def _add_bf_condensate_segmentation(ui, layout):
         def _done(labeled):
             prog.setVisible(False); run.setEnabled(True)
             n = int(labeled.max())
-            ui.viewer.add_labels(labeled, name=f"BF Condensate Mask ({n} spots)")
+            _out = ui.viewer.add_labels(labeled, name=f"BF Condensate Mask ({n} spots)")
+            try:
+                from pycat.toolbox.brightfield_tools import segment_bf_condensates
+                from pycat.utils.tag_registry import tag_from_operation
+                tag_from_operation(_out, segment_bf_condensates,
+                                   source_layer=ui.viewer.layers[enh_dd.currentText()])
+            except Exception:
+                pass    # broad-ok: optional_probe -- lineage recording is best-effort, never break the produced layer
             ui._dr()['bf_condensate_mask'] = labeled
             ui._record('bf_condensate_segmentation', {
                 'enhanced_layer':  enh_dd.currentText(),
