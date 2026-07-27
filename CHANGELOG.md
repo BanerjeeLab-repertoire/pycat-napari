@@ -1,3 +1,19 @@
+## [1.6.413] - 2026-07-27
+### Fixed — **Green the headless CI lane: two collection-breaking imports guarded, and a platform-fragile unmixing check.**
+`pytest -m "core or base"` was red in the headless CI lane (no PyQt5/napari) for three unrelated reasons:
+- **Two `base` test modules broke collection.** `test_batch_step_results.py` imports `pycat.batch_processor`
+  (PyQt5 at module scope) and `test_video_export_gif.py` imports `pycat.toolbox.video_export_tools` (napari) —
+  a *transitive* GUI dependency the AST collection guard's `_GUI_BOUND_PYCAT` allowlist did not cover, so the
+  files were imported (not deselected) and raised `ModuleNotFoundError` before `-m` ever ran. Both module paths
+  are now in the allowlist, so the guard ignores those files when the GUI stack is absent (and still runs them
+  in a full environment).
+- **`negative_fraction` miscounted floating-point zero as a negative.** `unmix` via `np.linalg.solve` leaves a
+  clean recovery at `-1.35e-15` on the Linux CI LAPACK (exactly `0.0` on Windows), and the strict `< 0` counted
+  it — reporting a 50 % "negative fraction" for a *correct* unmix and failing `test_the_negative_fraction_is_the_honesty_check`.
+  Now counts only values below a small **scale-relative** floor (`1e-9 × max|a|`), so numerical zero is not a
+  negative while a genuine over-subtraction (a fraction of the signal) still is — the same honesty signal, now
+  platform-portable. The one production caller (the unmix UI's negative-fraction readout) becomes more honest.
+
 ## [1.6.412] - 2026-07-27
 ### Added — **The condensate segmentation thresholds are now editable in the guided param review (Phase 3 follow-on).**
 The navigator's "Review parameters" form surfaced only a cell segmentation step's `cell_diameter`; a **condensate**

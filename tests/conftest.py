@@ -59,8 +59,11 @@ def _close_matplotlib_figures():
         pass
 
 # PyCAT modules that pull the GUI/IO stack in at import time. A test importing one of these
-# transitively needs the stack, even though it never names it.
-_GUI_BOUND_PYCAT = ("pycat.data", "pycat.file_io", "pycat.run_pycat", "pycat.ui")
+# transitively needs the stack, even though it never names it — e.g. `pycat.batch_processor` imports PyQt5 and
+# `pycat.toolbox.video_export_tools` imports napari, both at module scope, so a `base` test importing them
+# breaks collection in a headless lane before `-m` deselection ever runs.
+_GUI_BOUND_PYCAT = ("pycat.data", "pycat.file_io", "pycat.run_pycat", "pycat.ui",
+                    "pycat.batch_processor", "pycat.toolbox.video_export_tools")
 
 # The base SCIENTIFIC stack — the deps a `base`-tier test needs. The MINIMAL `core` lane installs none of
 # these (only numpy + pytest), so when any is absent we are in the minimal lane and only `core`-marked files

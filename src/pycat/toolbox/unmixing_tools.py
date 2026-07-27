@@ -142,11 +142,17 @@ def negative_fraction(unmixed) -> float:
 
     A few percent is ordinary photon noise around zero in the dilute regions. A LARGE fraction means the
     linear model is wrong (bad controls, a third emitter, a non-linear detector) and the unmix should not be
-    trusted — do not silently clip it away."""
+    trusted — do not silently clip it away.
+
+    Counts only values below a small **scale-relative** floor, so a floating-point ``-1e-15`` from a clean
+    ``np.linalg.solve`` (which differs by LAPACK/platform) is not miscounted as a real negative — only
+    over-subtraction of a meaningful magnitude is. A genuine model error drives abundances negative by a
+    fraction of the signal, far below this floor."""
     a = np.asarray(unmixed, dtype=float)
     if a.size == 0:
         return 0.0
-    return float((a < 0).sum()) / float(a.size)
+    tol = 1e-9 * (float(np.max(np.abs(a))) or 1.0)
+    return float((a < -tol).sum()) / float(a.size)
 
 
 def clip_for_display(unmixed) -> np.ndarray:
