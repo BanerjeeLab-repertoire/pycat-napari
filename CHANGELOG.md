@@ -1,3 +1,24 @@
+## [1.6.412] - 2026-07-27
+### Added — **The condensate segmentation thresholds are now editable in the guided param review (Phase 3 follow-on).**
+The navigator's "Review parameters" form surfaced only a cell segmentation step's `cell_diameter`; a **condensate**
+segmentation step showed nothing editable, so its six thresholds (`min_spot_radius`, `kurtosis_threshold`,
+`local_snr_threshold`, `global_snr_threshold`, `intensity_hwhm_scale`, `max_area_fraction`) were locked at their
+grounded defaults — the follow-on 1.6.410 named. Two gaps, both fixed:
+- **Target-aware material set.** `parameters._MATERIAL["segmentation_tools"]` is now a target branch: a cell
+  target surfaces `cell_diameter`, a condensate target the six thresholds (declared with the grounded defaults
+  that equal `segment_subcellular_objects`' signature defaults). `executor._segmentation_params` reads each
+  reviewed/edited threshold into the condensate params dict (was `{}`), where `replay_condensate_segmentation`'s
+  `params.get(k, default)` picks it up — so an unedited run stays bit-for-bit the manual default and an edited
+  threshold reaches the per-cell computation.
+- **Op-id resolution (the same dormancy the adapters had).** `material_params` was keyed by toolbox-module name
+  while production plans name steps by op-id, so the review surfaced nothing for a real session. It now routes
+  through the shared `executor.adapter_module_for` translation (`cellpose`/`subcellular_segment` →
+  `segmentation_tools`), so a production cell plan surfaces `cell_diameter` and a condensate plan its thresholds.
+The dock renders each `ReviewedStep`'s own (already target/op-id-resolved) params rather than re-looking them up.
+Acceptance gate (`test_navigator_condensate_segmentation_adapter.py`, +2): the review surfaces the six thresholds
+with grounded defaults, and an **edited `min_spot_radius` makes the guided mask equal the manual result at that
+value, not the default** — the edit provably drives the computation. Full gate green.
+
 ## [1.6.411] - 2026-07-27
 ### Fixed — **The navigator execution-adapter layer was DORMANT in the live dock — now it fires (whole-fix).**
 When a user clicked "Run analysis," every step reported `needs_panel` and the plan computed **nothing** — for

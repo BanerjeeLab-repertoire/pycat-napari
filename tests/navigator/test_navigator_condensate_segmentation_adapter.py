@@ -54,18 +54,20 @@ def _scene():
     return img, pre, cells
 
 
-def _manual_puncta_mask(pre, original, cells, ball_radius):
+def _manual_puncta_mask(pre, original, cells, ball_radius, **thresholds):
     """Replicate the batch handler's computation directly: cell-mask stretch, global intensity stats, then
-    segment_subcellular_objects per cell at the default thresholds — the manual/headless route."""
+    segment_subcellular_objects per cell — the manual/headless route. ``thresholds`` (e.g. ``min_spot_radius=4``)
+    pass through unchanged, so the same helper checks the default route and an edited-threshold route."""
     from pycat.toolbox.segmentation_tools import segment_subcellular_objects, cell_mask_stretching
     from pycat.toolbox.segmentation.intensity import compute_image_intensity_stats
+    smooth_sigma = max(0.5, thresholds.get("min_spot_radius", 2) / 2.0)
     CMS = cell_mask_stretching(pre, cells)
-    stats = compute_image_intensity_stats(original, cells, smooth_sigma=max(0.5, 2 / 2.0))
+    stats = compute_image_intensity_stats(original, cells, smooth_sigma=smooth_sigma)
     refined = np.zeros_like(cells, dtype=bool)
     for label in np.unique(cells)[1:]:
         cell_mask = (cells == label).astype(bool)
         r, _u = segment_subcellular_objects(original.copy(), CMS.copy(), cell_mask, label, ball_radius,
-                                            pd.DataFrame(), image_stats=stats)
+                                            pd.DataFrame(), image_stats=stats, **thresholds)
         refined |= r
     return refined
 
@@ -111,6 +113,44 @@ def test_condensate_segmentation_writes_the_puncta_mask_the_analysis_step_reads(
     assert report.steps[0].outcome == "ran"
     # the exact key condensate_analysis consumes
     assert "puncta_mask" in state and state["puncta_mask"].shape == cells.shape
+
+
+def test_the_material_review_surfaces_the_six_thresholds_not_the_cell_diameter():
+    from pycat.navigator.parameters import build_param_review
+    review = build_param_review(_plan(_step("segmentation_tools")))       # intent target=condensate
+    step = review.step("segmentation_tools")
+    assert step is not None
+    assert [p.name for p in step.params] == [
+        "min_spot_radius", "kurtosis_threshold", "local_snr_threshold",
+        "global_snr_threshold", "intensity_hwhm_scale", "max_area_fraction"]
+    assert step.values["kurtosis_threshold"] == -3.0 and step.values["min_spot_radius"] == 2   # grounded defaults
+
+
+def test_an_edited_threshold_drives_the_condensate_run_and_matches_manual_at_that_threshold():
+    """The load-bearing proof (Phase-2 param review for the condensate branch): an edited threshold reaches the
+    per-cell computation — guided == manual AT that threshold, and NOT the default-threshold result."""
+    from pycat.navigator.parameters import build_param_review
+    img, pre, cells = _scene()
+    edited = 4                                        # NOT the default min_spot_radius 2 → changes the mask
+
+    review = build_param_review(_plan(_step("segmentation_tools")))
+    review.step("segmentation_tools").set("min_spot_radius", edited)
+    assert review.step("segmentation_tools").is_modified
+
+    di = _DataInstance({"ball_radius": 30})
+    state = {"image": img.copy(), "preprocessed": pre.copy(),
+             "labeled_cells": cells.copy(), "data_instance": di}
+    report = run_plan(_plan(_step("segmentation_tools")), state,
+                      params_by_step=review.params_by_step(),
+                      provenance_by_step=review.provenance_by_step())
+    assert [s.outcome for s in report.steps] == ["ran"]
+    guided = state["puncta_mask"]
+
+    manual_edited = _manual_puncta_mask(pre, img, cells, ball_radius=30, min_spot_radius=edited)
+    np.testing.assert_array_equal(guided, manual_edited)      # the EDITED threshold drove the run
+    # and it does NOT equal the default-threshold result (proves the edit was not ignored)
+    manual_default = _manual_puncta_mask(pre, img, cells, ball_radius=30)
+    assert not np.array_equal(guided, manual_default)
 
 
 def test_condensate_segmentation_is_skipped_when_no_cells_were_segmented():

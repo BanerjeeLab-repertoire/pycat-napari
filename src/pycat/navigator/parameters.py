@@ -49,13 +49,40 @@ _CELL_DIAMETER = StepParam(
     "cell_diameter", "Cell diameter (px)", "int", 100, minimum=1,
     help="The approximate cell diameter in pixels that Cellpose sizes its search to. Measure it on your data — "
          "a wrong diameter is the most common cause of missed or merged cells. Default 100 px.")
+
+#: The six condensate-segmentation thresholds `segment_subcellular_objects` turns on — declared with the grounded
+#: signature defaults `executor._CONDENSATE_SEG_DEFAULTS` mirrors, so a reviewed edit reaches the per-cell run and
+#: an unedited run is bit-for-bit the manual default. These are what a CONDENSATE segmentation step surfaces
+#: (where a cell step surfaces the cellpose diameter) — the target branch in `_MATERIAL` below.
+_CONDENSATE_THRESHOLDS = (
+    StepParam("min_spot_radius", "Min spot radius (px)", "int", 2, minimum=1,
+              help="The smallest punctum radius kept, in pixels. Larger drops small/noise spots; too large "
+                   "misses real small condensates. Default 2 px."),
+    StepParam("kurtosis_threshold", "Kurtosis threshold", "float", -3.0,
+              help="A cell's intensity kurtosis must exceed this for its puncta to be kept — the phantom-cell "
+                   "gate. Lower is more permissive on flat/empty cells. Default -3.0."),
+    StepParam("local_snr_threshold", "Local SNR threshold", "float", 1.0, minimum=0.0,
+              help="Minimum local signal-to-noise for a punctum against its cell background. Higher is stricter. "
+                   "Default 1.0."),
+    StepParam("global_snr_threshold", "Global SNR threshold", "float", 1.0, minimum=0.0,
+              help="Minimum signal-to-noise against the whole-image background. Higher is stricter. Default 1.0."),
+    StepParam("intensity_hwhm_scale", "Intensity HWHM scale", "float", 1.17, minimum=0.0,
+              help="Scales the half-width-half-max intensity cutoff that separates a punctum from its skirt. "
+                   "Default 1.17."),
+    StepParam("max_area_fraction", "Max area fraction", "float", 0.25, minimum=0.0, maximum=1.0,
+              help="A punctum covering more than this fraction of its cell is rejected as over-segmentation. "
+                   "Default 0.25."),
+)
 _MATERIAL: dict = {
     "image_processing_tools": (
         StepParam("ball_radius", "Rolling-ball radius (px)", "int", 50, minimum=1,
                   help="The rolling-ball structuring radius for background estimation. Larger keeps more "
                        "low-frequency structure; too small eats real signal. Default 50 px."),
     ),
-    "segmentation_tools": (_CELL_DIAMETER,),
+    # segmentation_tools is TARGET-VARYING: a cell target surfaces the cellpose diameter, a condensate target the
+    # six puncta thresholds — the same target branch the executor's `_segmentation_params` dispatches on.
+    "segmentation_tools": lambda intent: (
+        _CONDENSATE_THRESHOLDS if getattr(intent, "target", None) == "condensate" else (_CELL_DIAMETER,)),
 }
 
 
@@ -65,9 +92,14 @@ _MATERIAL: dict = {
 _PRESET_WORKFLOW: dict = {}
 
 
-def material_params(step_name: str) -> tuple:
-    """The declared material parameters of ``step_name`` (empty if none/unknown)."""
-    return _MATERIAL.get(step_name, ())
+def material_params(step_name: str, intent=None) -> tuple:
+    """The declared material parameters of ``step_name`` (empty if none/unknown), resolved through the same
+    op-id → module translation the adapters use so a production op-id step (``cellpose``, ``subcellular_segment``)
+    finds its set. Where a module's material set depends on the target — segmentation surfaces the cellpose
+    diameter for a cell and the six puncta thresholds for a condensate — ``intent`` selects the right one."""
+    from .executor import adapter_module_for
+    entry = _MATERIAL.get(adapter_module_for(step_name), ())
+    return entry(intent) if callable(entry) else entry
 
 
 def _coerce(param: StepParam, value):
@@ -194,7 +226,7 @@ def build_param_review(plan, ctx=None) -> ParamReview:
         # (its batch step resolves to None) must not surface a parameter for a step that won't execute.
         if resolve_batch_step(es.name, intent) is None:
             continue
-        params = material_params(es.name)
+        params = material_params(es.name, intent)
         if not params:
             continue
         reviewed.append(ReviewedStep(es.name, params, preset=_applicable_preset(es.name), ctx=ctx))

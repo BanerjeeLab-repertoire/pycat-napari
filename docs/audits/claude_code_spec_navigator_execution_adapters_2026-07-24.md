@@ -38,6 +38,15 @@
 > feature_analysis_tools` for a condensate target — mirroring the cell chain. The six condensate thresholds take
 > their validated defaults today; surfacing them in the Phase-2 param review (`parameters._MATERIAL` +
 > `_PRESET_WORKFLOW`) is the natural follow-on.
+> **Phase 3 (cont.) — condensate thresholds are now editable in the param review (1.6.412).** The follow-on above:
+> `parameters._MATERIAL["segmentation_tools"]` became a target branch (cell → `cell_diameter`; condensate → the
+> six thresholds, declared with the grounded signature defaults), and `_segmentation_params` now reads each
+> reviewed threshold into the condensate params dict (was `{}`) where `replay_condensate_segmentation` reads it.
+> `material_params` also gained the op-id → module translation (`executor.adapter_module_for`) it was missing —
+> it was module-keyed while production plans are op-id-named, so the review surfaced nothing for a real session
+> (the same dormancy the adapters had, fixed 2026-07-27). Gate (+2 in the adapter test): the review surfaces the
+> six thresholds, and an edited `min_spot_radius` makes the guided mask equal the manual at that value, not the
+> default. (Wiring a preset into `_PRESET_WORKFLOW` remains open — no condensate-segmentation preset applies yet.)
 > **Phase 1 — DONE (1.6.332).** `navigator/executor.py`: `run_plan(plan, state, …)` drives the batch `_STEP_MAP`
 > handlers in `execution_order` order, threading `state`; `ExecAdapter` maps a plan step → batch handler +
 > `params_from`; a step with no adapter is reported ('needs_panel'), never invoked with guessed args; gate

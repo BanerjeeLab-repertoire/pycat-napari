@@ -298,7 +298,7 @@ def _add_param_review(widget, body_layout, plan):
     preset/session value/grounded default (never invented); an edit is tracked so the run records provenance.
     Renders nothing when no adapter-covered step has material params — the honest 'nothing to review' case."""
     from PyQt5.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout
-    from pycat.navigator.parameters import build_param_review, material_params
+    from pycat.navigator.parameters import build_param_review
     try:
         review = build_param_review(plan, ctx=widget._session.ctx)
     except Exception:      # broad-ok: ui_cleanup — a review failure must not break the plan view
@@ -311,7 +311,7 @@ def _add_param_review(widget, body_layout, plan):
                                  "color: gray; font-size: 10px;"))
     for step in review.steps:
         body_layout.addWidget(_label(step.step_name, "font-weight: bold; font-size: 11px; color: #2a7ab0;"))
-        for param in material_params(step.step_name):
+        for param in step.params:                # the reviewed step's own params — already target/op-id resolved
             frame = QFrame()
             row = QHBoxLayout(frame)
             row.setContentsMargins(0, 0, 0, 0)

@@ -105,16 +105,26 @@ def _segmentation_step(intent):
     return None
 
 
+#: The condensate-segmentation thresholds `replay_condensate_segmentation` reads from its params dict, with the
+#: grounded defaults that equal `segment_subcellular_objects`' signature defaults. The param review
+#: (`navigator/parameters._CONDENSATE_THRESHOLDS`) surfaces these same six for editing; keep the two in sync.
+_CONDENSATE_SEG_DEFAULTS: dict = {
+    "min_spot_radius": 2, "kurtosis_threshold": -3.0, "local_snr_threshold": 1.0,
+    "global_snr_threshold": 1.0, "intensity_hwhm_scale": 1.17, "max_area_fraction": 0.25,
+}
+
+
 def _segmentation_params(intent, ctx, state, reviewed):
     """Cellpose (cell) needs the reviewed ``cell_diameter`` applied to the ``data_instance`` plus its
-    method/refine flags. Condensate segmentation (``segment_subcellular_objects`` per cell) reads its
-    thresholds — ``min_spot_radius``, ``kurtosis_threshold``, ``local_snr_threshold``,
-    ``global_snr_threshold``, ``intensity_hwhm_scale``, ``max_area_fraction`` — from the batch handler's own
-    grounded defaults (which equal the function's signature defaults), so ``params`` is empty: the guided run
-    computes exactly what the manual panel does at its default settings. (These are the knobs a future param
-    review would surface for editing; today they take their validated defaults, never a guess.)"""
+    method/refine flags. Condensate segmentation (``segment_subcellular_objects`` per cell) reads its six
+    thresholds — ``min_spot_radius``, ``kurtosis_threshold``, ``local_snr_threshold``, ``global_snr_threshold``,
+    ``intensity_hwhm_scale``, ``max_area_fraction`` — from the params dict: each takes the user-reviewed value
+    when one was surfaced/edited, else the grounded default that equals the function's signature default. So an
+    unedited run is bit-for-bit the manual default (the handler's own ``params.get(k, default)`` sees the same
+    number), and an edited threshold provably reaches the per-cell computation."""
     if getattr(intent, "target", None) == "condensate":
-        return {}
+        return {k: (reviewed.get(k) if reviewed and reviewed.get(k) is not None else d)
+                for k, d in _CONDENSATE_SEG_DEFAULTS.items()}
     return _cellpose_params(intent, ctx, state, reviewed)
 
 
@@ -154,6 +164,15 @@ def _adapter_for(step_name: str):
 
 def has_adapter(step_name: str) -> bool:
     return _adapter_for(step_name) is not None
+
+
+def adapter_module_for(step_name: str) -> str:
+    """The toolbox MODULE an op-id/module step resolves to for material-param lookup (`cellpose` and
+    `subcellular_segment` → `segmentation_tools`), or the step name unchanged if it backs no adapter. The param
+    review keys its material set by module, but production plans name steps by op-id — so it was op-id-blind the
+    same way the adapters were (fixed 2026-07-27); this is the shared translation."""
+    a = _adapter_for(step_name)
+    return a.plan_step if a is not None else step_name
 
 
 def resolve_batch_step(step_name: str, intent=None) -> Optional[str]:
