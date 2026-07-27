@@ -30,6 +30,14 @@
 > (segmentation must run first) instead of silently skipping — a dead `RuntimeError` behind a combined guard was
 > made reachable. Condensate SEGMENTATION (`segmentation_tools` condensate → `condensate_segmentation`) is the
 > next adapter, which produces that `puncta_mask`.
+> **Phase 3 (cont.) — condensate segmentation (1.6.410).** `segmentation_tools` (condensate) →
+> `condensate_segmentation` (`segment_subcellular_objects` per cell), flipping the documented gap. `params_from`
+> branches on target (cellpose method/refine + diameter vs the condensate thresholds' grounded defaults). Proven
+> without torch (`test_navigator_condensate_segmentation_adapter.py`, `base`, 4: guided == manual bit for bit,
+> the per-cell loop replicated). **The condensate chain now runs end to end** — `segmentation_tools →
+> feature_analysis_tools` for a condensate target — mirroring the cell chain. The six condensate thresholds take
+> their validated defaults today; surfacing them in the Phase-2 param review (`parameters._MATERIAL` +
+> `_PRESET_WORKFLOW`) is the natural follow-on.
 > **Phase 1 — DONE (1.6.332).** `navigator/executor.py`: `run_plan(plan, state, …)` drives the batch `_STEP_MAP`
 > handlers in `execution_order` order, threading `state`; `ExecAdapter` maps a plan step → batch handler +
 > `params_from`; a step with no adapter is reported ('needs_panel'), never invoked with guessed args; gate

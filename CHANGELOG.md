@@ -1,3 +1,16 @@
+## [1.6.410] - 2026-07-26
+### Added — **Navigator can now run condensate segmentation — the condensate chain runs end-to-end (Part E Phase 3).**
+`segmentation_tools` for a **condensate** target now resolves to the `condensate_segmentation` batch step (was a
+documented route-equivalence gap, reported "run from its panel"), producing the `puncta_mask` the condensate
+analysis adapter (1.6.409) consumes. So a condensate plan now runs `segmentation → analysis` end to end, mirroring
+the cell chain. `params_from` branches on target: cellpose keeps its method/refine + reviewed diameter, while
+condensate segmentation reads its six thresholds (`min_spot_radius`, `kurtosis_threshold`, `local_snr_threshold`,
+`global_snr_threshold`, `intensity_hwhm_scale`, `max_area_fraction`) from the batch handler's grounded defaults —
+which equal `segment_subcellular_objects`' signature defaults, so the guided run computes exactly what the manual
+panel does at default settings (no guessed knob; these are the parameters a future review would surface for
+editing). Acceptance gate `tests/navigator/test_navigator_condensate_segmentation_adapter.py`: **guided == manual,
+bit for bit** (the per-cell loop replicated directly) on a synthetic pre-processed image + labelled cells.
+
 ## [1.6.409] - 2026-07-26
 ### Added — **Navigator can now run condensate feature analysis (execution adapter, Part E Phase 3).**
 `feature_analysis_tools` for a **condensate** target now resolves to the `condensate_analysis` batch step (it was

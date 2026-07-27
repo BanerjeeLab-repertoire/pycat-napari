@@ -63,21 +63,18 @@ def test_a_real_cell_plan_has_a_segmentation_step_that_now_resolves_to_a_batch_h
     assert "cell_analysis" in resolved.values(), f"no cell-analysis step in a real cell plan — {names}"
 
 
-def test_condensate_and_timeseries_segmentation_are_reported_not_guessed():
-    # segmentation_tools HAS an adapter, but only the cell variant is a proven batch route
+def test_segmentation_resolves_by_target_cell_vs_condensate():
+    # segmentation_tools dispatches on target; both variants are now proven batch routes
     assert resolve_batch_step("segmentation_tools",
                               AnalysisIntent(target="cell", observables=["x"])) == "cellpose_segmentation"
+    # condensate segmentation is now adapted (route-proven in test_navigator_condensate_segmentation_adapter)
     assert resolve_batch_step("segmentation_tools",
-                              AnalysisIntent(target="condensate", observables=["x"])) is None
+                              AnalysisIntent(target="condensate", observables=["x"])) == "condensate_segmentation"
+    # a target with no segmentation route is still reported, never guessed
+    assert resolve_batch_step("segmentation_tools",
+                              AnalysisIntent(target="fibril", observables=["x"])) is None
     # time-series cell segmentation is keyframe propagation, not the single-frame step — no adapter at all
     assert not has_adapter("ts_cellpose_tools")
-
-
-def test_a_condensate_segmentation_step_runs_nothing_and_is_reported():
-    state = {"image": np.zeros((8, 8), np.float32), "data_instance": _DataInstance()}
-    report = run_plan(_plan(_step("segmentation_tools"), target="condensate"), state)
-    assert [s.outcome for s in report.steps] == ["needs_panel"]
-    assert "variant" in report.steps[0].detail and "cellpose_mask" not in state   # nothing invoked
 
 
 def test_every_adapter_targets_a_real_registered_batch_step():
@@ -91,7 +88,8 @@ def test_every_adapter_targets_a_real_registered_batch_step():
             bs = resolve_batch_step(name, AnalysisIntent(target=target, observables=["x"]))
             if bs is not None:
                 targets.add(bs)
-    assert targets == {"background_removal", "cellpose_segmentation", "cell_analysis", "condensate_analysis"}
+    assert targets == {"background_removal", "cellpose_segmentation", "cell_analysis",
+                       "condensate_analysis", "condensate_segmentation"}
     missing = [bs for bs in targets if bs not in registry]
     assert not missing, f"adapters target batch steps that are not registered: {missing}"
 

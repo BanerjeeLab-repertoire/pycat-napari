@@ -90,14 +90,32 @@ def _feature_analysis_step(intent):
     return None
 
 
-def _cellpose_step_if_cell(intent):
-    """``segmentation_tools`` is coarse — for a cell target it is single-frame Cellpose (the ``cellpose_segmentation``
-    batch step `test_route_equivalence` proves), but condensate segmentation is an unproven batch route (a
-    documented route-equivalence gap), so it resolves to ``None`` (reported, never guessed). Time-series cell
-    segmentation (``ts_cellpose_tools``) is deliberately NOT mapped: its real operation is keyframe propagation
-    across a stack (``replay_ts_cellpose_keyframe``), which is not route-proven — a single-frame stand-in would
-    be wrong science, so it stays 'run from its panel'."""
-    return "cellpose_segmentation" if getattr(intent, "target", None) == "cell" else None
+def _segmentation_step(intent):
+    """``segmentation_tools`` is coarse. For a **cell** target it is single-frame Cellpose
+    (``cellpose_segmentation``); for a **condensate** target it is ``condensate_segmentation``
+    (``segment_subcellular_objects`` per cell, producing the ``puncta_mask``). Time-series cell segmentation
+    (``ts_cellpose_tools``) is deliberately NOT mapped: its real operation is keyframe propagation across a
+    stack (``replay_ts_cellpose_keyframe``), which is not route-proven — a single-frame stand-in would be
+    wrong science, so it stays 'run from its panel'."""
+    target = getattr(intent, "target", None)
+    if target == "cell":
+        return "cellpose_segmentation"
+    if target == "condensate":
+        return "condensate_segmentation"
+    return None
+
+
+def _segmentation_params(intent, ctx, state, reviewed):
+    """Cellpose (cell) needs the reviewed ``cell_diameter`` applied to the ``data_instance`` plus its
+    method/refine flags. Condensate segmentation (``segment_subcellular_objects`` per cell) reads its
+    thresholds — ``min_spot_radius``, ``kurtosis_threshold``, ``local_snr_threshold``,
+    ``global_snr_threshold``, ``intensity_hwhm_scale``, ``max_area_fraction`` — from the batch handler's own
+    grounded defaults (which equal the function's signature defaults), so ``params`` is empty: the guided run
+    computes exactly what the manual panel does at its default settings. (These are the knobs a future param
+    review would surface for editing; today they take their validated defaults, never a guess.)"""
+    if getattr(intent, "target", None) == "condensate":
+        return {}
+    return _cellpose_params(intent, ctx, state, reviewed)
 
 
 #: The declared adapters, keyed by the REAL navigator module name `execution_order` reports. The ONLY place a
@@ -108,7 +126,7 @@ def _cellpose_step_if_cell(intent):
 _ADAPTERS: dict = {
     "image_processing_tools": ExecAdapter("image_processing_tools", "background_removal",
                                           _background_removal_params),
-    "segmentation_tools": ExecAdapter("segmentation_tools", _cellpose_step_if_cell, _cellpose_params),
+    "segmentation_tools": ExecAdapter("segmentation_tools", _segmentation_step, _segmentation_params),
     "feature_analysis_tools": ExecAdapter("feature_analysis_tools", _feature_analysis_step,
                                           _cell_analysis_params),
 }
