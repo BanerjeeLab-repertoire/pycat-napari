@@ -48,6 +48,11 @@ def _install_registry_and_viewer():
             self.layers.append(layer)
             return layer
 
+        def add_tracks(self, data, name=None, **kw):
+            layer = napari.layers.Tracks(np.asarray(data, float), name=name)
+            self.layers.append(layer)
+            return layer
+
     return hook.install(_Viewer())
 
 
@@ -81,6 +86,41 @@ def test_preprocess_add_site_records_op_and_source_edge():
     edges = get_edges(produced)
     assert any(e['relation'] == 'derived_from' and e['target'] == layer_tag_id(input_layer)
                for e in edges), edges
+
+
+@pytest.mark.base
+def test_the_vpt_bead_track_op_records_lineage_on_the_trajectories():
+    """`run_vpt_analysis` is now an `@tags_layer('bead_track', role=overlay, target=bead)` op, so the VPT
+    "Bead Trajectories" tracks layer carries op + a `derived_from` edge back to the bead image it was tracked
+    from — the last gap in the layer-lineage story. (`overlay` is not a segmentation role, so the tracks keep
+    their overlay role and gain a supersedes/derived edge, not a mask role.)"""
+    from pycat.navigator.operation_spec import _populate_registry
+    _populate_registry()
+    from pycat.utils.tag_registry import get_operation, operation_of, tag_from_operation
+    from pycat.toolbox.vpt.analysis import run_vpt_analysis
+    from pycat.utils.layer_tags import get_tag, get_edges, layer_tag_id
+
+    assert operation_of(run_vpt_analysis) == 'bead_track'
+    entry = get_operation('bead_track')
+    assert entry is not None and entry['produces'] == 'overlay' and entry['target'] == 'bead'
+
+    viewer = _install_registry_and_viewer()
+    src = viewer.add_image(np.zeros((8, 8), np.float32), name="bead image")
+    trk = viewer.add_tracks(np.array([[0, 0, 1.0, 1.0], [0, 1, 2.0, 2.0]], float), name="Bead Trajectories")
+    tag_from_operation(trk, run_vpt_analysis, source_layer=src)
+
+    assert get_tag(trk, 'op') == 'bead_track'
+    assert get_tag(trk, 'target') == 'bead' and get_tag(trk, 'role') == 'overlay'
+    assert any(e['relation'] == 'derived_from' and e['target'] == layer_tag_id(src) for e in get_edges(trk))
+
+
+@pytest.mark.core
+def test_the_vpt_add_tracks_site_wires_lineage():
+    """The VPT napari adapter records lineage on the "Bead Trajectories" tracks layer it adds."""
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parents[1]
+           / 'src/pycat/toolbox/vpt/napari_adapter.py').read_text(encoding='utf-8')
+    assert 'tag_from_operation(' in src and 'run_vpt_analysis' in src
 
 
 @pytest.mark.base

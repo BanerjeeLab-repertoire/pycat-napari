@@ -1,5 +1,5 @@
 {
-  "count": 91,
+  "count": 92,
   "operations": [
     {
       "aliases": [],
@@ -33,6 +33,23 @@
       "role_declared": "overlay",
       "source": "src/pycat/toolbox/vpt/detection.py",
       "summary": "Bead detection across a stack (blob LoG)",
+      "target": "bead"
+    },
+    {
+      "aliases": [],
+      "function": "run_vpt_analysis",
+      "inputs": [
+        "bead_stack"
+      ],
+      "kind": "toolbox",
+      "module": "analysis",
+      "op": "bead_track",
+      "produces": "overlay",
+      "requirements": [],
+      "role": "overlay",
+      "role_declared": "overlay",
+      "source": "src/pycat/toolbox/vpt/analysis.py",
+      "summary": "Video particle tracking: bead detection + linking into trajectories",
       "target": "bead"
     },
     {

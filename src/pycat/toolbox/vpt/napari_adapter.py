@@ -227,9 +227,16 @@ class _VptNapariMixin:
                     add_kwargs['scale'] = [1.0, float(yx[0]), float(yx[1])]
             except Exception:
                 pass
-        self.viewer.add_tracks(
+        _tracks_layer = self.viewer.add_tracks(
             tl[['track_id', 'frame', 'y', 'x']].values, name=name,
             tail_width=self._BASE_TRACK_TAIL_WIDTH, **add_kwargs)
+        if _img_layer is not None:
+            try:
+                from pycat.toolbox.vpt.analysis import run_vpt_analysis
+                from pycat.utils.tag_registry import tag_from_operation
+                tag_from_operation(_tracks_layer, run_vpt_analysis, source_layer=_img_layer)
+            except Exception:
+                pass    # broad-ok: optional_probe -- lineage recording is best-effort, never break the tracks layer
         try:
             self._add_pickable_bead_points(tracks, _img_layer, mpp)
         except Exception as _e:

@@ -13,6 +13,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 from pycat.utils.notify import show_warning as napari_show_warning
+from pycat.utils.tag_registry import tags_layer
 from pycat.toolbox.condensate_physics_tools import MIN_TRACK_LENGTH_FRAMES
 from pycat.toolbox.vpt.host import segment_host_condensate, erode_host_mask
 from pycat.toolbox.vpt.detection import detect_beads_stack
@@ -25,6 +26,8 @@ from pycat.toolbox.vpt.viscosity import viscosity_from_diffusion
 # Full pipeline orchestration (headless / batch-friendly)
 # ---------------------------------------------------------------------------
 
+@tags_layer('bead_track', role='overlay', target='bead', inputs=('bead_stack',),
+            summary='Video particle tracking: bead detection + linking into trajectories')
 def run_vpt_analysis(
     host_image: Optional[np.ndarray],
     bead_stack: np.ndarray,

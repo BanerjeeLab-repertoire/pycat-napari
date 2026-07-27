@@ -30,8 +30,9 @@ from pycat.utils.tag_registry import ROLES, TARGETS
 
 
 # The ROOT roles: a layer of this role enters the graph from a FILE, not from another operation. Named
-# explicitly here (not inferred) — today the only root is a loaded image.
-_ROOT_ROLES = frozenset({'image'})
+# explicitly here (not inferred). A loaded image is the usual root; a bead movie (`bead_stack`) is also loaded
+# from disk and is the input to the `bead_track` VPT operation, so it is a root too.
+_ROOT_ROLES = frozenset({'image', 'bead_stack'})
 
 # Coverage floor — the number of operations that declare `inputs` today. RATCHET: raise it when a new
 # tranche is annotated; it must never decrease. (A lower bound, the complexity budget's ceiling

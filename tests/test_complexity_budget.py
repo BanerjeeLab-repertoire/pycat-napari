@@ -335,7 +335,9 @@ _FILE_LINE_CEILINGS = {
     "toolbox/vpt/detection.py": 1773,
     # analysis.py — the run_vpt_analysis orchestrator (host->detect->link->drift->MSD->viscosity) + _link
     # + compare_detection_variants moved here from vpt_tools (1.6.239). Byte-identical; own ceiling.
-    "toolbox/vpt/analysis.py": 228,
+    # 228 -> 231 (1.6.406): run_vpt_analysis gained the @tags_layer('bead_track') decorator + its import so the
+    # trajectories layer can carry lineage (3 lines).
+    "toolbox/vpt/analysis.py": 231,
     # 5573 -> 3268 (-41%): MenuManager (2164 lines) extracted to ui/menu_manager.py in the 1.6.149
     # decomposition. The ratchet moves DOWN — it cannot grow back.
     "ui/ui_modules.py": 3268,

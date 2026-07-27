@@ -1,3 +1,15 @@
+## [1.6.406] - 2026-07-26
+### Changed — **VPT bead trajectories record lineage — the last gap in the layer-lineage story (Outstanding-Work C1).**
+`vpt.analysis.run_vpt_analysis` (the bead detection + linking entry point) is now an
+`@tags_layer('bead_track', role=overlay, target=bead)` operation, and the VPT napari adapter records
+`tag_from_operation` (source = the bead-channel image, already resolved as a Layer object at the add-site) on the
+"Bead Trajectories" tracks layer it creates. So "which image were these beads tracked from?" is answerable, and
+the trajectories are queryable by `role=overlay, target=bead`. `overlay` is not a segmentation role, so the fix
+from 1.6.401 keeps the tracks' overlay role and gives them a derived edge rather than a mask role. Catalog
+regenerated (91 → 92 ops); tests in `test_lineage_recording.py` pin the op registration + a `derived_from` edge
+and the UI wiring. With this, every major pipeline output — masks, labels, preprocessed images, droplet masks,
+and now trajectories — carries its operation and source lineage.
+
 ## [1.6.405] - 2026-07-26
 ### Changed — **Time-series per-frame droplet segmentation records lineage (Outstanding-Work C1, increment 3 — time-series half).**
 `timeseries_invitro_tools.segment_stack_per_frame` is now an `@tags_layer('ts_droplet_segment', role=labels,
