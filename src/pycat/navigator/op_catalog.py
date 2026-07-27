@@ -94,7 +94,7 @@ _INFO_ROLE_BY_ROLE = {
 # enhanced) that nothing requires — they stay available but inert to backward
 # chaining. Only the acquisition provides a bare intensity_field.
 _ENHANCE_OPS = {"clahe", "local_contrast", "tone_map", "ridge", "peak_edge",
-                "log_enhance", "dpr"}
+                "log_enhance", "dpr", "bf_preprocess"}
 
 # The role-based `requires` rule assumes a labels/mask op segments an IMAGE. That
 # is wrong for label/mask-EDITING ops, whose input is an existing labels/mask.
@@ -123,6 +123,11 @@ _REQUIRES_OVERRIDE: Dict[str, List[Capability]] = {
     "void_detect": [cap(R.INSTANCE_LABELS, "target:*")],
     "topology_envelope": [cap(R.INTENSITY_FIELD, "target:*")],
     "optical_density": [cap(R.INSTANCE_LABELS, "target:*")],
+    # bf_segment is the ONE segmenter that requires a PREPROCESSED input: brightfield dark-blob detection is
+    # meaningless on a raw image, so it requires the `state:enhanced` product only `bf_preprocess` provides —
+    # forcing the planner to auto-insert brightfield preprocessing before it (Gable's call, 2026-07-27). The
+    # `brightfield` context gate on bf_preprocess makes it (not a fluorescence enhancer) win that slot.
+    "bf_segment": [cap(R.INTENSITY_FIELD, "target:*", "state:enhanced")],
 }
 
 # Primary image->objects segmenters: preferred providers of labels/masks. Label-

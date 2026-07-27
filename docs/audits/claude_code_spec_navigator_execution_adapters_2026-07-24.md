@@ -47,6 +47,19 @@
 > (the same dormancy the adapters had, fixed 2026-07-27). Gate (+2 in the adapter test): the review surfaces the
 > six thresholds, and an edited `min_spot_radius` makes the guided mask equal the manual at that value, not the
 > default. (Wiring a preset into `_PRESET_WORKFLOW` remains open — no condensate-segmentation preset applies yet.)
+> **Phase 3 (cont.) — the brightfield condensate SEGMENTATION chain (1.6.414).** The first segmenter that requires
+> preprocessing: brightfield dark-blob detection is meaningless on a raw image, so a new coarse `bf_preprocess` op
+> (context-gated to `brightfield`, providing `state:enhanced`) is REQUIRED by `bf_segment` (`_REQUIRES_OVERRIDE`),
+> which makes the planner auto-insert it — the one deliberate exception to "preprocessing is never auto-inserted"
+> (Gable's call). Two adapters (`bf_preprocess` → `bf_preprocess`; `bf_segment` → `bf_condensate_segmentation`),
+> both knobs surfaced in the param review; catalog 93 → 94. `run_plan`/`resolve_batch_step` now thread `state`
+> into a coarse module's variant choice so `feature_analysis_tools` dispatches on the produced mask — brightfield
+> condensates are first-class labels that neither `condensate_analysis` (needs a `puncta_mask`) nor `cell_analysis`
+> (cell-sized min-area filter) measures right, so the measurement HONESTLY reports needs_panel (the brightfield
+> measurement route is the next increment). Gate `test_navigator_brightfield_adapter.py` (`base`, 6): planner
+> chains it on brightfield only, guided == manual bit for bit, edited `min_diameter_px`/`bg_kernel` each drive the
+> run, analysis needs_panel for brightfield / `condensate_analysis` for fluorescence. **Brightfield CELL
+> segmentation stays deferred** (`replay_bf_cell_segmentation` uses Cellpose/torch — not headlessly provable).
 > **Phase 1 — DONE (1.6.332).** `navigator/executor.py`: `run_plan(plan, state, …)` drives the batch `_STEP_MAP`
 > handlers in `execution_order` order, threading `state`; `ExecAdapter` maps a plan step → batch handler +
 > `params_from`; a step with no adapter is reported ('needs_panel'), never invoked with guessed args; gate

@@ -1,3 +1,34 @@
+## [1.6.414] - 2026-07-27
+### Added — **The brightfield condensate SEGMENTATION chain — the first segmenter that requires preprocessing (Phase 3).**
+Brightfield dark-blob segmentation (`segment_bf_condensates`) is meaningless on a raw image, so — unlike the
+fluorescence chain, where `segment_subcellular_objects` does its own local processing — brightfield preprocessing
+is **mandatory**. The navigator deliberately never auto-inserts preprocessing (the "PDF4" principle), so a
+brightfield-condensate plan previously had no preprocessing step and `bf_segment` had no adapter (it silently
+reported "run from its panel"). This wires the chain, with one deliberate, science-driven exception to that
+principle (Gable's call):
+- **New coarse `bf_preprocess` op** (`bf_preprocess_enhanced` → the composite `preprocess_brightfield`'s enhanced
+  image), context-gated to `brightfield` and providing a `state:enhanced` product.
+- **`bf_segment` now requires that enhanced product** (`_REQUIRES_OVERRIDE` in op_catalog), which makes the
+  planner **auto-insert `bf_preprocess` before it** — the first (and only) segmenter to require preprocessing. On
+  a brightfield plan the `brightfield` context gate makes `bf_preprocess` (not a fluorescence enhancer) win that
+  slot; a fluorescence plan gets no `bf_preprocess`. Op catalog regenerated (93 → 94 ops).
+- **Two adapters:** `bf_preprocess` → the `bf_preprocess` batch step (knobs `bg_kernel`, `halo_weight`);
+  `bf_segment` → the `bf_condensate_segmentation` batch step (gates `min_diameter_px`, `max_diameter_px`,
+  `min_circularity`) — all surfaced in the guided param review.
+- **Run-time state dispatch for the coarse callables.** `run_plan`/`resolve_batch_step` now thread `state` into a
+  coarse module's batch-step choice, so `feature_analysis_tools` picks its variant from what the segmenter
+  actually produced. Brightfield condensates are first-class labelled objects that neither `condensate_analysis`
+  (needs a `puncta_mask`) nor `cell_analysis` (a cell-sized min-area filter drops them) measures correctly, so
+  the measurement step honestly reports "run from its panel" — never a wrong-handler guess. (The brightfield
+  measurement route is the next increment.)
+
+Acceptance gate `tests/navigator/test_navigator_brightfield_adapter.py` (`base`, 6): the planner chains
+`acquisition → bf_preprocess → bf_segment` on brightfield (and not on fluorescence); guided `preprocess → segment`
+equals the manual `preprocess_brightfield → segment_bf_condensates` bit for bit; an edited `min_diameter_px`
+(segmentation) and an edited `bg_kernel` (preprocessing) each make the guided mask equal the manual at that value,
+not the default; and the analysis step reports needs_panel for brightfield while staying `condensate_analysis` for
+fluorescence. Full gate green.
+
 ## [1.6.413] - 2026-07-27
 ### Fixed — **Green the headless CI lane: two collection-breaking imports guarded, and a platform-fragile unmixing check.**
 `pytest -m "core or base"` was red in the headless CI lane (no PyQt5/napari) for three unrelated reasons:

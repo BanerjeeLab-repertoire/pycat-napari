@@ -287,6 +287,29 @@ def preprocess_brightfield(
     )
 
 
+@tags_layer('bf_preprocess', role='preprocessed', inputs=('image',),
+            requirements=('brightfield',),
+            summary='Brightfield preprocessing (flat-field, background, halo, CLAHE) to one enhanced image')
+def bf_preprocess_enhanced(
+    image: np.ndarray,
+    bg_kernel: int = 50,
+    halo_weight: float = 0.35,
+    background_image: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """The full brightfield preprocessing pipeline as ONE enhanced image — the ``enhanced`` output of
+    :func:`preprocess_brightfield`, exposed as a single array-returning operation.
+
+    This is the navigator op that MUST precede ``bf_segment``. Unlike the fluorescence chain — where
+    ``segment_subcellular_objects`` does its own local processing on the raw intensity field — brightfield
+    dark-blob segmentation is meaningless on a raw image, so this preprocessing is mandatory. The op is
+    context-gated to ``brightfield`` and produces the ``state:enhanced`` product that ``bf_segment`` requires,
+    which is what makes the planner auto-insert it (the one deliberate exception to 'preprocessing is never
+    auto-inserted' — see op_catalog `_REQUIRES_OVERRIDE`)."""
+    return preprocess_brightfield(
+        image, bg_kernel=bg_kernel, halo_weight=halo_weight,
+        background_image=background_image)["enhanced"]
+
+
 # ---------------------------------------------------------------------------
 # 2. Brightfield condensate segmentation
 # ---------------------------------------------------------------------------

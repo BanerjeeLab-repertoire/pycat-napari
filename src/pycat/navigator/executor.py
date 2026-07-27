@@ -76,21 +76,36 @@ def _cell_analysis_params(intent, ctx, state, reviewed):
     return {}
 
 
-def _feature_analysis_step(intent):
+def _feature_analysis_step(intent, state=None):
     """``feature_analysis_tools`` is coarse. For a **cell** target it is ``cell_analysis`` (measures the cell
-    mask). For a **condensate** target it is ``condensate_analysis`` (measures the ``puncta_mask`` that
-    condensate segmentation produced) — both reduce to a single scientific function (``cell_analysis_func`` /
-    ``puncta_analysis_func``) proven route-equivalent, and neither takes a run-time knob (``params_from``
-    returns ``{}``). Any other target has no measurement route yet → ``None`` (reported, never guessed)."""
+    mask). For a **condensate** target the measurement depends on how the condensates were segmented:
+
+    - **Fluorescence** condensates are puncta nested in cells, so segmentation wrote a ``puncta_mask`` and the
+      measurement is ``condensate_analysis`` (``puncta_analysis_func``, measures puncta per cell).
+    - **Brightfield** condensates are first-class labelled objects — ``bf_segment`` wrote them into
+      ``bf_condensate_mask``/``cellpose_mask`` with no per-cell nesting — and NEITHER measurement route fits:
+      ``condensate_analysis`` looks for a ``puncta_mask`` that does not exist (and errors), while
+      ``cell_analysis`` applies a CELL-sized ``min_area`` filter (``≈ π·(cell_diameter/2)²/10``) that discards
+      condensate-sized objects. So there is no proven brightfield-condensate measurement route yet → ``None``,
+      reported as 'run from its panel' (never a wrong-handler guess). Brightfield SEGMENTATION still runs and
+      produces the labelled mask; the measurement is the next increment.
+
+    Which case applies is knowable only at RUN time from the threaded ``state`` (the modality is not on the
+    intent), so we dispatch on the mask the upstream segmenter actually produced. With no state (e.g. the
+    parameter review just asking 'will this run'), the fluorescence default stands. Any other target has no
+    measurement route yet → ``None`` (reported, never guessed)."""
     target = getattr(intent, "target", None)
     if target == "cell":
         return "cell_analysis"
     if target == "condensate":
+        if isinstance(state, dict) and state.get("bf_condensate_mask") is not None \
+                and state.get("puncta_mask") is None:
+            return None
         return "condensate_analysis"
     return None
 
 
-def _segmentation_step(intent):
+def _segmentation_step(intent, state=None):
     """``segmentation_tools`` is coarse. For a **cell** target it is single-frame Cellpose
     (``cellpose_segmentation``); for a **condensate** target it is ``condensate_segmentation``
     (``segment_subcellular_objects`` per cell, producing the ``puncta_mask``). Time-series cell segmentation
@@ -128,6 +143,27 @@ def _segmentation_params(intent, ctx, state, reviewed):
     return _cellpose_params(intent, ctx, state, reviewed)
 
 
+#: Brightfield preprocessing knobs `replay_bf_preprocess` reads, and the dark-blob thresholds
+#: `replay_bf_condensate_segmentation` reads, with grounded defaults equal to each handler's `params.get`
+#: fallbacks — so an unedited brightfield run is bit-for-bit the manual, and a reviewed knob reaches it.
+_BF_PREPROCESS_DEFAULTS: dict = {"bg_kernel": 50, "halo_weight": 0.35}
+_BF_CONDENSATE_SEG_DEFAULTS: dict = {"min_diameter_px": 3.0, "max_diameter_px": 50.0, "min_circularity": 0.5}
+
+
+def _reviewed_or_default(reviewed, defaults):
+    """Each knob takes the user-reviewed value when one was surfaced/edited, else the grounded default."""
+    return {k: (reviewed.get(k) if reviewed and reviewed.get(k) is not None else d)
+            for k, d in defaults.items()}
+
+
+def _bf_preprocess_params(intent, ctx, state, reviewed):
+    return _reviewed_or_default(reviewed, _BF_PREPROCESS_DEFAULTS)
+
+
+def _bf_segment_params(intent, ctx, state, reviewed):
+    return _reviewed_or_default(reviewed, _BF_CONDENSATE_SEG_DEFAULTS)
+
+
 #: The declared adapters, keyed by the REAL navigator module name `execution_order` reports. The ONLY place a
 #: plan step is tied to a computation — a step absent here (or one whose batch step resolves to ``None``) is
 #: reported "run from its panel", never guessed at. Grows one workflow per phase, each behind a
@@ -139,6 +175,11 @@ _ADAPTERS: dict = {
     "segmentation_tools": ExecAdapter("segmentation_tools", _segmentation_step, _segmentation_params),
     "feature_analysis_tools": ExecAdapter("feature_analysis_tools", _feature_analysis_step,
                                           _cell_analysis_params),
+    # The brightfield condensate chain (op-id-keyed — these steps are only ever named by op-id): the planner
+    # auto-inserts `bf_preprocess` (→ the enhanced image) before `bf_segment` (→ dark-blob `bf_condensate_mask`,
+    # which condensate analysis then reads as its mask). See the brightfield-preprocessing exception.
+    "bf_preprocess": ExecAdapter("bf_preprocess", "bf_preprocess", _bf_preprocess_params),
+    "bf_segment": ExecAdapter("bf_segment", "bf_condensate_segmentation", _bf_segment_params),
 }
 
 
@@ -175,15 +216,17 @@ def adapter_module_for(step_name: str) -> str:
     return a.plan_step if a is not None else step_name
 
 
-def resolve_batch_step(step_name: str, intent=None) -> Optional[str]:
+def resolve_batch_step(step_name: str, intent=None, state=None) -> Optional[str]:
     """The batch step ``step_name`` will actually run for ``intent``, or ``None`` if it has no adapter or its
     variant is not auto-runnable yet (a coarse module whose target has no proven batch route). The single
-    authority for 'will this step run', shared by the executor and the parameter review."""
+    authority for 'will this step run', shared by the executor and the parameter review. ``state`` (the run's
+    threaded dict, when available) lets a coarse module pick its variant from what upstream actually produced —
+    e.g. brightfield vs fluorescence condensate measurement; with no state the fluorescence default stands."""
     adapter = _adapter_for(step_name)
     if adapter is None:
         return None
     bs = adapter.batch_step
-    return bs(intent) if callable(bs) else bs
+    return bs(intent, state) if callable(bs) else bs
 
 
 @dataclasses.dataclass(frozen=True)
@@ -299,7 +342,10 @@ def run_plan(plan, state, *, intent=None, ctx=None, image_path=None, output_dir=
                 continue
 
             adapter = _adapter_for(es.name)
-            batch_step = adapter.batch_step(intent) if (adapter and callable(adapter.batch_step)) \
+            # The coarse callable may dispatch on the threaded state (what upstream steps actually produced —
+            # e.g. a brightfield vs fluorescence condensate mask), so pass it: by this point every earlier step
+            # has run and written its output.
+            batch_step = adapter.batch_step(intent, state) if (adapter and callable(adapter.batch_step)) \
                 else (adapter.batch_step if adapter else None)
             if batch_step is None:
                 # No adapter, or a coarse module whose variant has no proven batch route yet — report it,

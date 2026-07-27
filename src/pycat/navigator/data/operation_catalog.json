@@ -1,5 +1,5 @@
 {
-  "count": 93,
+  "count": 94,
   "operations": [
     {
       "aliases": [],
@@ -125,6 +125,25 @@
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/brightfield_tools.py",
       "summary": "Brightfield halo correction",
+      "target": null
+    },
+    {
+      "aliases": [],
+      "function": "bf_preprocess_enhanced",
+      "inputs": [
+        "image"
+      ],
+      "kind": "toolbox",
+      "module": "brightfield_tools",
+      "op": "bf_preprocess",
+      "produces": "image",
+      "requirements": [
+        "brightfield"
+      ],
+      "role": "image",
+      "role_declared": "image",
+      "source": "src/pycat/toolbox/brightfield_tools.py",
+      "summary": "Brightfield preprocessing (flat-field, background, halo, CLAHE) to one enhanced image",
       "target": null
     },
     {

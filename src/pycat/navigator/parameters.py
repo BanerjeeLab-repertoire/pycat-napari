@@ -83,6 +83,25 @@ _MATERIAL: dict = {
     # six puncta thresholds — the same target branch the executor's `_segmentation_params` dispatches on.
     "segmentation_tools": lambda intent: (
         _CONDENSATE_THRESHOLDS if getattr(intent, "target", None) == "condensate" else (_CELL_DIAMETER,)),
+    # The brightfield condensate chain (op-id-keyed): the preprocessing knobs and the dark-blob size/shape gates,
+    # each read by its batch handler's `params.get(k, default)`, so a reviewed edit reaches the run.
+    "bf_preprocess": (
+        StepParam("bg_kernel", "Background kernel (px)", "int", 50, minimum=1,
+                  help="Size of the smoothing kernel that estimates the slowly-varying brightfield background. "
+                       "Should be a few times the largest condensate. Default 50 px."),
+        StepParam("halo_weight", "Halo suppression", "float", 0.35, minimum=0.0, maximum=1.0,
+                  help="Strength of the halo-ring suppression around dark spots. 0 = none, 0.5 = aggressive. "
+                       "Default 0.35."),
+    ),
+    "bf_segment": (
+        StepParam("min_diameter_px", "Min diameter (px)", "float", 3.0, minimum=0.0,
+                  help="Smallest condensate diameter kept, in pixels. Larger drops small/noise blobs. Default 3."),
+        StepParam("max_diameter_px", "Max diameter (px)", "float", 50.0, minimum=0.0,
+                  help="Largest condensate diameter kept, in pixels. Smaller rejects merged/oversized blobs. "
+                       "Default 50."),
+        StepParam("min_circularity", "Min circularity", "float", 0.5, minimum=0.0, maximum=1.0,
+                  help="Minimum circularity (1 = perfect circle) a blob must have to be kept. Default 0.5."),
+    ),
 }
 
 

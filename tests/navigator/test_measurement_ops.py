@@ -43,9 +43,10 @@ def test_the_expected_measurement_ops_are_in_the_catalog():
     assert not missing, f"measurement ops missing from the catalog: {sorted(missing)}"
 
     total = len(iter_operation_specs())
-    assert total == 93, (
-        f"the catalog holds {total} ops, expected 93 (83 layer/ui + 10 measurements). If a layer op was "
-        f"legitimately added/removed, update this count in the same commit that regenerates the catalog.")
+    assert total == 94, (
+        f"the catalog holds {total} ops, expected 94 (84 layer/ui + 10 measurements). If a layer op was "
+        f"legitimately added/removed, update this count in the same commit that regenerates the catalog. "
+        f"(94 since bf_preprocess landed 2026-07-27 — the brightfield condensate chain.)")
 
 
 def test_every_measurement_op_resolves_to_a_real_callable():
