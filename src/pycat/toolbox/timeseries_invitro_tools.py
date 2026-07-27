@@ -35,11 +35,15 @@ from typing import Optional, Callable, List, Dict, Any
 import numpy as np
 import pandas as pd
 
+from pycat.utils.tag_registry import tags_layer
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. Per-frame segmentation → a labelled (T, H, W) stack
 # ─────────────────────────────────────────────────────────────────────────────
 
+@tags_layer('ts_droplet_segment', role='labels', target='condensate', inputs=('image',),
+            summary='Time-series per-frame droplet segmentation')
 def segment_stack_per_frame(
     stack_like,
     segment_frame_fn: Callable[[np.ndarray, int], np.ndarray],

@@ -1,5 +1,5 @@
 {
-  "count": 90,
+  "count": 91,
   "operations": [
     {
       "aliases": [],
@@ -1344,6 +1344,23 @@
       "source": "src/pycat/toolbox/topology_tools.py",
       "summary": "Smoothed structural intensity envelope",
       "target": "chromatin"
+    },
+    {
+      "aliases": [],
+      "function": "segment_stack_per_frame",
+      "inputs": [
+        "image"
+      ],
+      "kind": "toolbox",
+      "module": "timeseries_invitro_tools",
+      "op": "ts_droplet_segment",
+      "produces": "labels",
+      "requirements": [],
+      "role": "labels",
+      "role_declared": "labels",
+      "source": "src/pycat/toolbox/timeseries_invitro_tools.py",
+      "summary": "Time-series per-frame droplet segmentation",
+      "target": "condensate"
     },
     {
       "aliases": [],

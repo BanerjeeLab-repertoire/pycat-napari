@@ -455,8 +455,11 @@ sites**. So derived/superseded edges are essentially never written, and `tag_res
 > `@tags_layer('ivf_droplet_segment', role='labels', target='condensate')` op — and wired
 > `tag_from_operation`←pre-processed image at the add-site. Behaviour is pinned by
 > `tests/test_ivf_droplet_segmentation.py` (exact per-method output on a fixed scene); the catalog was
-> regenerated (+1 op). **Still deferred:** VPT tracks (only detection is decorated, not linking) and the
-> time-series droplet masks (higher-order / relabel producers whose decoration would ripple into the planner).
+> regenerated (+1 op). The TIME-SERIES per-frame segmenter was also done (1.6.405): `segment_stack_per_frame`
+> is now `@tags_layer('ts_droplet_segment')` and its panel records lineage — and the feared planner ripple did
+> NOT materialise (the full gate stays green with the new op). **Still deferred:** VPT tracks (only detection is
+> decorated, not linking) and the time-series TRACKED-droplet relabelling (`relabel_stack_by_track` recolours an
+> already-tagged stack rather than producing a new segmentation).
 >
 > Increment 1 wired `tag_from_operation` at: cellpose→cell labels, subcellular→puncta/refined masks,
 > background removal→preprocessed (replacing a raw-string `mark_derived`), preprocess→preprocessed

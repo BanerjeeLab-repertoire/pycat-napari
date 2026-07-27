@@ -237,7 +237,7 @@ _KNOWN_UNTAGGED = {
     'cascade_rf_segment',            # trained-classifier segmentation; not yet swept
     'cascade_feature_stack',
     'filter_cells_by_transfection', 'apply_transfection_filter_to_stack',
-    'segment_stack_per_frame', 'relabel_stack_by_track',
+    'relabel_stack_by_track',         # a track-id RELABELLING of an already-tagged label stack, not a new segmentation
     'apply_static_pattern_correction', 'reference_subtraction', 'build_temperature_labels',
     'clean_spots_per_region',
     'blob_log_gpu', 'detect_beads_frame', 'build_hot_pixel_mask',

@@ -339,9 +339,17 @@ def _tsivf_segmentation(ui, layout):
             ui._dr()['tsivf_label_stack'] = label_stack
             nm = "TSIVF Droplet Labels (per-frame)"
             if nm in [l.name for l in ui.viewer.layers]:
-                ui.viewer.layers[nm].data = label_stack
+                _out = ui.viewer.layers[nm]
+                _out.data = label_stack
             else:
-                ui.viewer.add_labels(label_stack, name=nm)
+                _out = ui.viewer.add_labels(label_stack, name=nm)
+            try:
+                from pycat.toolbox.timeseries_invitro_tools import segment_stack_per_frame
+                from pycat.utils.tag_registry import tag_from_operation
+                tag_from_operation(_out, segment_stack_per_frame,
+                                   source_layer=ui.viewer.layers[img_dd.currentText()])
+            except Exception:
+                pass    # broad-ok: optional_probe -- lineage recording is best-effort, never break the produced layer
             n_obj = int(label_stack.max())
             ui._record('tsivf_segment_stack', {
                 'image_layer': img_name, 'method': method_dd.currentText(),

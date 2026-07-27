@@ -43,8 +43,8 @@ def test_the_expected_measurement_ops_are_in_the_catalog():
     assert not missing, f"measurement ops missing from the catalog: {sorted(missing)}"
 
     total = len(iter_operation_specs())
-    assert total == 90, (
-        f"the catalog holds {total} ops, expected 90 (80 layer/ui + 10 measurements). If a layer op was "
+    assert total == 91, (
+        f"the catalog holds {total} ops, expected 91 (81 layer/ui + 10 measurements). If a layer op was "
         f"legitimately added/removed, update this count in the same commit that regenerates the catalog.")
 
 

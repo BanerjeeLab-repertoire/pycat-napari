@@ -1,3 +1,14 @@
+## [1.6.405] - 2026-07-26
+### Changed — **Time-series per-frame droplet segmentation records lineage (Outstanding-Work C1, increment 3 — time-series half).**
+`timeseries_invitro_tools.segment_stack_per_frame` is now an `@tags_layer('ts_droplet_segment', role=labels,
+target=condensate)` operation (the decorator is transparent — it still returns the labelled stack), and the
+time-series in-vitro-fluorescence panel records `tag_from_operation` (source = the input stack) on the per-frame
+droplet-label stack it produces. So "which stack is behind these droplet labels?" is answerable, and the earlier
+worry that a new segmentation op would ripple into the navigator planner is disproven (the full gate stays green).
+Catalog regenerated (90 → 91 ops); `segment_stack_per_frame` removed from `_KNOWN_UNTAGGED`. Tests in
+`test_lineage_recording.py` pin the op registration + a `derived_from` edge and the UI wiring. (The tracked-droplet
+relabelling — `relabel_stack_by_track` — is a track-id recolouring of an already-tagged stack, left untagged.)
+
 ## [1.6.404] - 2026-07-26
 ### Changed — **In-vitro-fluorescence droplet-mask dropdowns autopopulate (Outstanding-Work Part D, increment 5).**
 Unblocked by 1.6.403 (which made `segment_ivf_droplets` a registered op, so its droplet mask carries

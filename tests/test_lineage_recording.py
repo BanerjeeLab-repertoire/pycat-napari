@@ -84,6 +84,40 @@ def test_preprocess_add_site_records_op_and_source_edge():
 
 
 @pytest.mark.base
+def test_the_timeseries_per_frame_segmenter_is_a_registered_lineage_op():
+    """`segment_stack_per_frame` is now an `@tags_layer` op (role=labels, target=condensate), so the
+    per-frame droplet-label stack the time-series panel adds can carry op + a `derived_from` edge back to
+    its source image (Outstanding-Work C1 increment 3, time-series half). @tags_layer is transparent — the
+    function still returns its labelled array."""
+    from pycat.navigator.operation_spec import _populate_registry
+    _populate_registry()
+    from pycat.utils.tag_registry import get_operation, operation_of, tag_from_operation
+    from pycat.toolbox.timeseries_invitro_tools import segment_stack_per_frame
+    from pycat.utils.layer_tags import get_tags, get_edges, layer_tag_id
+
+    assert operation_of(segment_stack_per_frame) == 'ts_droplet_segment'
+    entry = get_operation('ts_droplet_segment')
+    assert entry is not None and entry['produces'] == 'labels' and entry['target'] == 'condensate'
+
+    viewer = _install_registry_and_viewer()
+    src = viewer.add_image(np.zeros((3, 8, 8), np.float32), name="ts stack")
+    out = viewer.add_labels(np.ones((3, 8, 8), int), name="TSIVF Droplet Labels (per-frame)")
+    tag_from_operation(out, segment_stack_per_frame, source_layer=src)
+    op_rec = next((t for t in get_tags(out) if t.get('key') == 'op'), None)
+    assert op_rec is not None and op_rec['value'] == 'ts_droplet_segment' and op_rec['source'] == 'pipeline'
+    assert any(e['relation'] == 'derived_from' and e['target'] == layer_tag_id(src) for e in get_edges(out))
+
+
+@pytest.mark.core
+def test_the_timeseries_ivf_add_site_wires_lineage():
+    """The time-series in-vitro-fluorescence panel records lineage on the per-frame droplet-label stack."""
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parents[1]
+           / 'src/pycat/toolbox/timeseries_invitro_fluor_ui.py').read_text(encoding='utf-8')
+    assert 'tag_from_operation(' in src and 'segment_stack_per_frame' in src
+
+
+@pytest.mark.base
 def test_a_segmentation_output_keeps_its_own_role_not_the_source_image_role():
     """**Regression: the `mark_derived` role-inheritance bug.** A mask/labels layer produced by a
     segmentation op must carry its OWN role (the op's `produces`), NOT inherit the source image's
