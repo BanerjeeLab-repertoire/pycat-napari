@@ -12,6 +12,7 @@ import types
 import pytest
 
 pytestmark = pytest.mark.base      # importing the toolbox UI classes pulls in the PyQt5/napari stack
+pytest.importorskip("napari")      # every test imports a napari-bound toolbox UI class; skip if headless
 
 
 def _toolbox_ui_classes():

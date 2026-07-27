@@ -91,7 +91,7 @@ def test_opencv_contour_func_filters_by_true_filled_pixel_area():
 def test_run_binary_morph_operation_computes_binary_morph_and_relabels(monkeypatch):
     """The GUI wrapper's science IS binary_morph_operation; pin that its refreshed output equals it, and that
     a LABELED input is re-labelled on the way out (its documented behaviour)."""
-    import pycat.ui.ui_utils as U
+    U = pytest.importorskip("pycat.ui.ui_utils")   # napari-bound; skip in a headless lane, don't error
     captured = {}
     monkeypatch.setattr(U, "refresh_viewer_with_new_data",
                         lambda viewer, layer, new_data: captured.__setitem__("data", new_data))

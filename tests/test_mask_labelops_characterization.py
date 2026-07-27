@@ -107,7 +107,7 @@ def _stub_labels_layer(data):
 
 
 def test_run_update_labels_increment_mode_adds_to_every_label(monkeypatch):
-    import pycat.ui.ui_utils as U
+    U = pytest.importorskip("pycat.ui.ui_utils")   # napari-bound; skip in a headless lane, don't error
     monkeypatch.setattr(U, "refresh_viewer_with_new_data", lambda *a, **k: None)
 
     active, Labels = _stub_labels_layer(np.array([[0, 1], [2, 3]]))
@@ -121,7 +121,7 @@ def test_run_update_labels_increment_mode_adds_to_every_label(monkeypatch):
 
 
 def test_run_update_labels_specific_mode_changes_one_label(monkeypatch):
-    import pycat.ui.ui_utils as U
+    U = pytest.importorskip("pycat.ui.ui_utils")   # napari-bound; skip in a headless lane, don't error
     monkeypatch.setattr(U, "refresh_viewer_with_new_data", lambda *a, **k: None)
 
     active, Labels = _stub_labels_layer(np.array([[0, 1], [2, 2]]))

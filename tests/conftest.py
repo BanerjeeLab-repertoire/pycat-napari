@@ -113,7 +113,10 @@ def pytest_ignore_collect(collection_path, config):
     if minimal and not _file_has_core_marker(tree):
         return True
 
-    for node in tree.body:                 # module scope only — that is what breaks collection
+    # Module scope only — that is what breaks COLLECTION. A GUI import inside a test function/helper is the
+    # test's own responsibility to guard (a module-scope `pytest.importorskip(...)`), because ignoring a file by
+    # a function-scope import would wrongly skip its many headless-safe tests too.
+    for node in tree.body:
         if isinstance(node, ast.Import):
             names = [a.name for a in node.names]
         elif isinstance(node, ast.ImportFrom) and node.module:

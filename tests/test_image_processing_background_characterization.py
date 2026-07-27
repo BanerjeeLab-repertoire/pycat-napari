@@ -25,11 +25,11 @@ def _scene():
     return img.astype(np.float32)
 
 
-def _c(arr, shape, total, hi):
+def _c(arr, shape, total, hi, *, rel=0.0):
     arr = np.asarray(arr)
     assert arr.shape == shape and str(arr.dtype) == 'float32'
-    assert float(arr.sum()) == pytest.approx(total, rel=0, abs=max(abs(total) * 1e-6, 1e-2))
-    assert float(arr.max()) == pytest.approx(hi, rel=0, abs=1e-3)
+    assert float(arr.sum()) == pytest.approx(total, rel=rel, abs=max(abs(total) * 1e-6, 1e-2))
+    assert float(arr.max()) == pytest.approx(hi, rel=rel, abs=max(abs(hi) * rel, 1e-3))
 
 
 def test_background_removal_is_pinned():
@@ -41,7 +41,10 @@ def test_background_removal_is_pinned():
         _c(bg, (64, 64), 242399.156, 78.069)
         _c(ip.subtract_background(im, bg), (64, 64), 99536.688, 199.2674)
         mask = im > im.mean() + 20
-        _c(ip.background_inpainting_func(im, mask, 6), (64, 64), 585901.562, 252.2762)
+        # skimage biharmonic inpainting is a sparse linear solve, so its sum is platform-sensitive (~5e-6 via
+        # the solver/BLAS — Windows 585901.562, Linux 585898.375). A 1e-4 relative pin stays a real regression
+        # guard (a genuine change moves the sum by orders more) without the cross-platform fragility.
+        _c(ip.background_inpainting_func(im, mask, 6), (64, 64), 585901.562, 252.2762, rel=1e-4)
         _c(ip.rb_gaussian_background_removal(im, 6), (64, 64), 128.805, 0.6888)
         _c(ip.rb_gaussian_bg_removal_with_edge_enhancement(im, 6), (64, 64), 173.635, 1.0)
         _c(ip._realness_weight(ip.apply_rescale_intensity(im), 6), (64, 64), 288.756, 0.9999)

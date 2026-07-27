@@ -110,7 +110,7 @@ def _qc_image():
 
 
 def test_reliability_context_threads_the_calibration_verdict():
-    from pycat.batch_processor import BatchWorker
+    BatchWorker = pytest.importorskip("pycat.batch_processor").BatchWorker   # PyQt5-bound; skip if headless
     verdict = {"valid": True, "level": "warn", "reason": "gain not recorded"}
     fake = SimpleNamespace(_last_image=_qc_image(), _last_calibration=verdict)
     ctx = BatchWorker._reliability_context_for(fake, _scored_records(), "a.tif")
@@ -120,7 +120,7 @@ def test_reliability_context_threads_the_calibration_verdict():
 
 
 def test_reliability_context_omits_calibration_when_no_curve_ran():
-    from pycat.batch_processor import BatchWorker
+    BatchWorker = pytest.importorskip("pycat.batch_processor").BatchWorker   # PyQt5-bound; skip if headless
     fake = SimpleNamespace(_last_image=_qc_image(), _last_calibration=None)
     ctx = BatchWorker._reliability_context_for(fake, _scored_records(), "a.tif")
     assert ctx is not None and "image_qc" in ctx
@@ -128,7 +128,7 @@ def test_reliability_context_omits_calibration_when_no_curve_ran():
 
 
 def test_reliability_context_is_none_for_a_non_scored_batch():
-    from pycat.batch_processor import BatchWorker
+    BatchWorker = pytest.importorskip("pycat.batch_processor").BatchWorker   # PyQt5-bound; skip if headless
     fake = SimpleNamespace(_last_image=_qc_image(), _last_calibration=None)
     non_scored = [("cell", pd.DataFrame({"area": [10.0]}))]   # no SCORED_FAMILY column
     assert BatchWorker._reliability_context_for(fake, non_scored, "a.tif") is None
@@ -143,7 +143,7 @@ def _capture_worker(config, seen):
 
 
 def test_a_run_level_calibration_curve_path_reaches_the_step_via_state(tmp_path):
-    from pycat.batch_processor import BatchWorker
+    BatchWorker = pytest.importorskip("pycat.batch_processor").BatchWorker   # PyQt5-bound; skip if headless
     seen = {}
     cfg = {"steps": [{"step": "cap"}], "calibration_curve_path": "/data/gfp_curve.json"}
     BatchWorker._process_file(_capture_worker(cfg, seen), Path("x.tif"), tmp_path)
@@ -151,7 +151,7 @@ def test_a_run_level_calibration_curve_path_reaches_the_step_via_state(tmp_path)
 
 
 def test_no_config_curve_path_leaves_the_batch_uncalibrated(tmp_path):
-    from pycat.batch_processor import BatchWorker
+    BatchWorker = pytest.importorskip("pycat.batch_processor").BatchWorker   # PyQt5-bound; skip if headless
     seen = {}
     BatchWorker._process_file(_capture_worker({"steps": [{"step": "cap"}]}, seen), Path("x.tif"), tmp_path)
     assert seen["path"] == "<absent>"                  # no path → the step stays a no-op (unchanged behaviour)

@@ -50,7 +50,7 @@ def test_measure_region_props_custom_names_rename_columns():
 
 
 def test_run_measure_binary_mask_pins_the_full_stats_row(monkeypatch):
-    import pycat.ui.ui_utils as U
+    U = pytest.importorskip("pycat.ui.ui_utils")   # napari-bound; skip in a headless lane, don't error
     monkeypatch.setattr(U, "show_dataframes_dialog", lambda *a, **k: None)   # lazy import target — move-stable
 
     mask = np.zeros((10, 10), dtype=bool)
@@ -79,7 +79,7 @@ def test_run_measure_binary_mask_rejects_a_shape_mismatch():
 
 
 def test_run_measure_region_props_appends_the_measured_numbers(monkeypatch):
-    import pycat.ui.ui_utils as U
+    U = pytest.importorskip("pycat.ui.ui_utils")   # napari-bound; skip in a headless lane, don't error
     monkeypatch.setattr(U, "show_dataframes_dialog", lambda *a, **k: None)
 
     class _FakeDialog:

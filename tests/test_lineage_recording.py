@@ -18,6 +18,7 @@ def _install_registry_and_viewer():
     hook = pytest.importorskip("pycat.utils.layer_tag_hook")
     from pycat.navigator.operation_spec import _populate_registry
     assert not _populate_registry(), "tag discovery could not import a decorated module"
+    pytest.importorskip("napari")     # every test here builds a viewer; skip in a headless lane, don't error
     import napari
 
     class _Selection:
