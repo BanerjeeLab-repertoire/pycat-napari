@@ -1,3 +1,27 @@
+## [1.6.415] - 2026-07-27
+### Added — **The brightfield condensate MEASUREMENT — the chain now runs end to end (Phase 3).**
+1.6.414 shipped brightfield condensate segmentation but deferred the measurement (neither fluorescence route
+fit): the analysis step honestly reported "run from its panel". This wires the correct measurement, completing
+the chain. Brightfield condensates are first-class labelled objects (no per-cell nesting), and PyCAT already has
+their measurement — `bf_condensate_metrics`, "the brightfield equivalent of `puncta_analysis_func`", which
+computes per-condensate optical-density / area / shape (mean/max/integrated OD, area µm², major/minor axis,
+eccentricity, circularity, CNR, OD partition coefficient, centroid). It is used today by the in-vitro brightfield
+GUI in exactly the cell-less form the navigator needs (`bf_condensate_metrics(raw, mask, None, mpx)`), and is pure
+numpy/skimage (route-provable without torch).
+- **New batch handler `replay_bf_condensate_analysis`** (`bf_condensate_analysis` in `_STEP_MAP`): runs
+  `bf_condensate_metrics` on the `bf_condensate_mask` the segmenter produced, against the **RAW** image (optical
+  density is `-log10(I/I0)` — a min-max-normalised image moves the zero point and makes the strongest condensate's
+  OD diverge), with `microns_per_pixel` from the data instance's pixel size.
+- **`_feature_analysis_step` now routes brightfield → `bf_condensate_analysis`** (was `None`/needs_panel), via the
+  same run-time state dispatch 1.6.414 added: it reads which mask the segmenter actually produced
+  (`bf_condensate_mask` → the brightfield metrics; `puncta_mask` → the fluorescence per-cell `condensate_analysis`;
+  no state → the fluorescence default). No op-graph change — same measurement op, correct batch handler.
+
+Acceptance gate (`test_navigator_brightfield_adapter.py`, updated): the full plan
+`bf_preprocess → bf_segment → feature_analysis` now runs every step, and the guided `bf_condensate_df` equals the
+manual `bf_condensate_metrics` on the same mask + raw image **bit for bit**; the analysis dispatches on the
+produced mask (brightfield → `bf_condensate_analysis`, fluorescence → `condensate_analysis`). Full gate green.
+
 ## [1.6.414] - 2026-07-27
 ### Added — **The brightfield condensate SEGMENTATION chain — the first segmenter that requires preprocessing (Phase 3).**
 Brightfield dark-blob segmentation (`segment_bf_condensates`) is meaningless on a raw image, so — unlike the

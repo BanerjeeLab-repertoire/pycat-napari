@@ -83,12 +83,10 @@ def _feature_analysis_step(intent, state=None):
     - **Fluorescence** condensates are puncta nested in cells, so segmentation wrote a ``puncta_mask`` and the
       measurement is ``condensate_analysis`` (``puncta_analysis_func``, measures puncta per cell).
     - **Brightfield** condensates are first-class labelled objects — ``bf_segment`` wrote them into
-      ``bf_condensate_mask``/``cellpose_mask`` with no per-cell nesting — and NEITHER measurement route fits:
-      ``condensate_analysis`` looks for a ``puncta_mask`` that does not exist (and errors), while
-      ``cell_analysis`` applies a CELL-sized ``min_area`` filter (``≈ π·(cell_diameter/2)²/10``) that discards
-      condensate-sized objects. So there is no proven brightfield-condensate measurement route yet → ``None``,
-      reported as 'run from its panel' (never a wrong-handler guess). Brightfield SEGMENTATION still runs and
-      produces the labelled mask; the measurement is the next increment.
+      ``bf_condensate_mask`` with no per-cell nesting — which neither fluorescence route measures correctly
+      (``condensate_analysis`` needs a ``puncta_mask``; ``cell_analysis``'s cell-sized ``min_area`` filter
+      discards condensate-sized objects). Their measurement is ``bf_condensate_analysis`` — per-condensate
+      optical-density/area/shape via ``bf_condensate_metrics`` (the cell-less in-vitro path).
 
     Which case applies is knowable only at RUN time from the threaded ``state`` (the modality is not on the
     intent), so we dispatch on the mask the upstream segmenter actually produced. With no state (e.g. the
@@ -100,7 +98,7 @@ def _feature_analysis_step(intent, state=None):
     if target == "condensate":
         if isinstance(state, dict) and state.get("bf_condensate_mask") is not None \
                 and state.get("puncta_mask") is None:
-            return None
+            return "bf_condensate_analysis"
         return "condensate_analysis"
     return None
 

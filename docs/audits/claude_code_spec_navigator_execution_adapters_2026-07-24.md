@@ -60,6 +60,14 @@
 > chains it on brightfield only, guided == manual bit for bit, edited `min_diameter_px`/`bg_kernel` each drive the
 > run, analysis needs_panel for brightfield / `condensate_analysis` for fluorescence. **Brightfield CELL
 > segmentation stays deferred** (`replay_bf_cell_segmentation` uses Cellpose/torch — not headlessly provable).
+> **Phase 3 (cont.) — the brightfield condensate MEASUREMENT (1.6.415).** Completes the chain: the analysis step
+> (deferred to needs_panel in 1.6.414) now runs `bf_condensate_metrics` — PyCAT's existing per-condensate OD/area/
+> shape measurement ("brightfield equivalent of `puncta_analysis_func`"), in the cell-less form the in-vitro BF GUI
+> uses (`bf_condensate_metrics(raw, mask, None, mpx)`), pure numpy/skimage. New batch handler
+> `replay_bf_condensate_analysis` (runs on the RAW image — OD is `-log10(I/I0)`, a normalised image diverges); the
+> run-time state dispatch (added 1.6.414) routes brightfield → `bf_condensate_analysis`, fluorescence →
+> `condensate_analysis`. No op-graph change. Gate: full plan runs every step; guided `bf_condensate_df` == manual
+> bit for bit. **The brightfield condensate workflow now runs end to end in the guided flow.**
 > **Phase 1 — DONE (1.6.332).** `navigator/executor.py`: `run_plan(plan, state, …)` drives the batch `_STEP_MAP`
 > handlers in `execution_order` order, threading `state`; `ExecAdapter` maps a plan step → batch handler +
 > `params_from`; a step with no adapter is reported ('needs_panel'), never invoked with guessed args; gate

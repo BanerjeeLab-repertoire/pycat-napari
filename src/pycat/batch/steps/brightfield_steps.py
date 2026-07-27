@@ -83,6 +83,29 @@ def replay_bf_condensate_segmentation(state: dict, image_path: Path, params: dic
     print(f"[PyCAT Batch]   BF condensate segmentation: {int(labeled.max())} spots.")
 
 
+def replay_bf_condensate_analysis(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """Per-condensate brightfield metrics (optical density, area, shape) on the directly-labelled condensate
+    mask — the CELL-LESS in-vitro path, ``bf_condensate_metrics(raw, mask, None, mpx)`` (invitro_bf_ui). This is
+    the brightfield equivalent of ``puncta_analysis_func``: it measures each labelled condensate as a first-class
+    object, so it fits the navigator's brightfield chain where ``condensate_analysis`` (needs a puncta_mask) and
+    ``cell_analysis`` (cell-sized min-area filter) do not."""
+    from pycat.toolbox.brightfield_tools import bf_condensate_metrics
+    mask = state.get('bf_condensate_mask')
+    if mask is None or int(np.asarray(mask).max()) == 0:
+        print(f"[PyCAT Batch]   BF condensate analysis skipped for {image_path.name}: no condensates.")
+        return
+    # RAW counts, not a normalised image: optical density is -log10(I / I0); min-max normalisation moves the
+    # zero point and makes the OD of the darkest (strongest) condensate diverge. See invitro_bf_ui._on_run.
+    raw = _raw_counts(state.get('image'))
+    data_instance = state['data_instance']
+    mpx = float(np.sqrt(data_instance.data_repository.get('microns_per_pixel_sq', 1.0)))
+    df = bf_condensate_metrics(raw, np.asarray(mask), None, mpx, bg_kernel=params.get('bg_kernel', 50))
+    state['bf_condensate_df'] = df
+    data_instance.set_data('bf_condensate_df', df)
+    df.to_csv(output_dir / f"{image_path.stem}_bf_condensate_df.csv", index=False)
+    print(f"[PyCAT Batch]   BF condensate analysis done: {len(df)} condensates.")
+
+
 def replay_bf_cell_segmentation(state: dict, image_path: Path, params: dict, output_dir: Path):
     """Replay brightfield Cellpose cell segmentation."""
     # RAW counts: this feeds `pre_process_image`, whose rolling ball is NOT scale-invariant.

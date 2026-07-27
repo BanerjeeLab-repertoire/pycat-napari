@@ -13,11 +13,14 @@ What this pins:
   `bf_condensate_mask` as directly running `preprocess_brightfield → segment_bf_condensates`.
 - **The reviewed knobs drive the run.** An edited `min_diameter_px` (segmentation) and an edited `bg_kernel`
   (preprocessing) each make the guided mask equal the manual at THAT value, not the default.
-- **The measurement is honestly deferred.** Brightfield condensates are first-class labelled objects, which
-  neither `condensate_analysis` (needs a `puncta_mask`) nor `cell_analysis` (a cell-sized min-area filter drops
-  them) measures correctly — so the analysis step reports 'run from its panel', never a wrong-handler guess.
+- **The measurement is the brightfield per-condensate metrics.** Brightfield condensates are first-class
+  labelled objects, which neither `condensate_analysis` (needs a `puncta_mask`) nor `cell_analysis` (a cell-sized
+  min-area filter drops them) measures correctly — so the analysis is `bf_condensate_analysis`: per-condensate
+  optical-density/area/shape via `bf_condensate_metrics` (the cell-less in-vitro path), dispatched at run time on
+  the mask the segmenter produced, and proven equal to the manual call bit for bit.
 """
 import numpy as np
+import pandas as pd
 import pytest
 
 from pycat.navigator.executor import run_plan, resolve_batch_step, has_adapter
@@ -141,19 +144,32 @@ def test_an_edited_bg_kernel_drives_the_preprocessing():
     assert not np.array_equal(guided, _manual_mask(img))                         # ≠ the default result
 
 
-# ── the measurement is honestly deferred (no wrong-handler guess) ──────────────────────────────────────
+# ── the measurement: the brightfield per-condensate metrics, guided == manual ──────────────────────────
 
-def test_brightfield_condensate_analysis_reports_needs_panel_not_a_wrong_handler():
+def test_brightfield_condensate_analysis_runs_and_equals_manual():
+    from pycat.toolbox.brightfield_tools import bf_condensate_metrics
+    from pycat.batch.steps._common import _raw_counts
     img = _scene()
     state = _seg_state(img)
+    state["data_instance"].set_data("microns_per_pixel_sq", 0.04)      # 0.2 µm/px
     report = run_plan(_bf_plan(_step("bf_preprocess", InformationRole.TRANSFORM), _step("bf_segment"),
                                _step("feature_analysis.cell_analysis", InformationRole.MEASURE)), state)
     outcomes = {s.name: s.outcome for s in report.steps}
     assert outcomes["bf_preprocess"] == "ran" and outcomes["bf_segment"] == "ran"
-    assert outcomes["feature_analysis.cell_analysis"] == "needs_panel"     # honest: no proven BF measurement route
-    # the dispatch is on the produced mask: brightfield state → None, fluorescence state → condensate_analysis
+    assert outcomes["feature_analysis.cell_analysis"] == "ran"         # the brightfield measurement now runs
+    guided = state.get("bf_condensate_df")
+    assert guided is not None and len(guided) > 0                      # it measured the condensates
+    # guided == manual, bit for bit: cell-less per-condensate OD metrics on the SAME mask + RAW image
+    manual = bf_condensate_metrics(_raw_counts(img), np.asarray(state["bf_condensate_mask"]), None,
+                                   float(np.sqrt(0.04)), bg_kernel=50)
+    pd.testing.assert_frame_equal(guided, manual)
+
+
+def test_condensate_analysis_dispatches_on_the_produced_mask():
+    # the dispatch is on what the segmenter actually produced, resolved at run time from the threaded state
     intent = _bf_plan().intent
-    assert resolve_batch_step("feature_analysis.cell_analysis", intent, state) is None
+    assert resolve_batch_step("feature_analysis.cell_analysis", intent,
+                              {"bf_condensate_mask": np.ones((4, 4), int)}) == "bf_condensate_analysis"
     assert resolve_batch_step("feature_analysis.cell_analysis", intent,
                               {"puncta_mask": np.zeros((4, 4))}) == "condensate_analysis"
     assert resolve_batch_step("feature_analysis.cell_analysis", intent) == "condensate_analysis"   # no-state default
