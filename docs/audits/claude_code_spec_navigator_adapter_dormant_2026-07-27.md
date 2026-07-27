@@ -89,3 +89,45 @@ this needs.
 regression guard, then the target/modality/dimensionality selection + vocabulary corrections, gated on the
 13-pipeline oracle. Do NOT ship the specificity tweak alone — it makes fluorescence condensate segmentation
 wrong.
+
+## Implementation design (worked out 2026-07-27; staged so each stage is oracle-verifiable)
+
+The correct selection rule, from the segmenter landscape: a **general** segmenter for a target beats a
+**specialised** one unless the specialisation's context matches. Cell's general segmenter is `cellpose`
+(target=cell, no context req). Condensate's general segmenter is `subcellular_segment` (target=*, pref 0.66 —
+the highest). The specialised condensate ops are workflow/modality-bound: `bf_segment` (brightfield),
+`ivf_droplet_segment` (in-vitro fluorescence), `ts_droplet_segment` (time-series), `host_segment`/`host_erode`
+(VPT host). So the rule is: **prefer a target-specific provider over the generic one ONLY when its context
+requirements are SATISFIED** (an op with no context req is trivially satisfied — that's `cellpose`).
+
+- cell → target-specific & context-satisfied = `cellpose` (no req) → beats generic. ✓
+- condensate, fluorescence → every specialised condensate op's context is unsatisfied → none preferred →
+  generic `subcellular_segment` wins. ✓ (and it maps to the `condensate_segmentation` adapter/batch step)
+- condensate, brightfield → `bf_segment`'s brightfield context satisfied → it wins. ✓
+
+**Prerequisite discovered:** `requires_context` today only knows `{time_series, calibrated, two_channels}` —
+there is **no modality (brightfield/fluorescence) gate**, and no op carries a modality tag. `ctx` DOES hold a
+`modality` (set by `context_from_session`), so the gate is buildable, but it is a **new capability**, not a
+tweak. Also: `@tags_layer`'s `requirements=(...)` (e.g. `z_stack` on `cellpose_3d`) does NOT currently surface
+as `requires_context` (cellpose_3d shows `requires_context=[]`) — that mapping must be added for dimensionality
+gating too.
+
+### Stages (each ends green + oracle-checked)
+1. **Modality/dimensionality gating capability.** Add a modality context key (brightfield/fluorescence) that
+   `ctx.modality` answers, and surface `@tags_layer` `requirements` (`z_stack`, `time_series`, …) as
+   `requires_context`. No behaviour change yet — just the capability + tests.
+2. **Declare the specialised segmenters' contexts.** `bf_segment`→brightfield, `ivf_droplet_segment`→in-vitro
+   fluorescence, `ts_droplet_segment`→time-series, `host_segment`/`host_erode`→VPT host, the `*_3d` ops→z_stack.
+   Regenerate the catalog. Verify the op-graph guard.
+3. **Context-satisfied target-specificity in dependency selection.** Narrow the subgoal to the propagated
+   specific target (drop `target:*`), then among providers prefer target-specific ones whose context is
+   satisfied; else the base policy. Verify the matrix: cell→cellpose, fluor-condensate→subcellular_segment,
+   bf-condensate→bf_segment, across 2d/3d/time-series. **This is the stage that moves the 13-pipeline oracle
+   — expect and reconcile oracle shifts here.**
+4. **Translation layer.** `run_plan` resolves the adapter from the op-id step's toolbox module (a small
+   op-id→module map, since op.module is a dotted path like `pycat.toolbox.segmentation.cellpose`), so the
+   module-keyed adapters fire and dispatch on `intent.target`. Flip the xfail guard to a real assertion.
+5. **Fix the `home_dock` `run_navigator_plan` wiring gap.**
+
+This is multi-part with real blast radius at stage 3; it should be executed stage-by-stage with the gate +
+oracle checked between stages, not in one pass.
