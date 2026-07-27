@@ -480,9 +480,18 @@ def _tsivf_linking(ui, layout):
             ui._dr()['tsivf_fusions'] = fusions
             nm = "TSIVF Tracked Droplets"
             if nm in [l.name for l in ui.viewer.layers]:
-                ui.viewer.layers[nm].data = tracked
+                _out = ui.viewer.layers[nm]
+                _out.data = tracked
             else:
-                ui.viewer.add_labels(tracked, name=nm)
+                _out = ui.viewer.add_labels(tracked, name=nm)
+            try:
+                # Derived from the per-frame droplet labels it recolours by track id.
+                from pycat.toolbox.timeseries_invitro_tools import relabel_stack_by_track
+                from pycat.utils.tag_registry import tag_from_operation
+                tag_from_operation(_out, relabel_stack_by_track,
+                                   source_layer=ui.viewer.layers["TSIVF Droplet Labels (per-frame)"])
+            except Exception:
+                pass    # broad-ok: optional_probe -- lineage recording is best-effort, never break the produced layer
             n_tracks = linked['track_id'].nunique() if 'track_id' in linked else 0
             ui._record('tsivf_link_condensates', {
                 'intensity_layer': img_name,

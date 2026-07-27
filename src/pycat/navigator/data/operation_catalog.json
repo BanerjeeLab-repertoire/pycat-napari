@@ -1,5 +1,5 @@
 {
-  "count": 92,
+  "count": 93,
   "operations": [
     {
       "aliases": [],
@@ -1377,6 +1377,23 @@
       "role_declared": "labels",
       "source": "src/pycat/toolbox/timeseries_invitro_tools.py",
       "summary": "Time-series per-frame droplet segmentation",
+      "target": "condensate"
+    },
+    {
+      "aliases": [],
+      "function": "relabel_stack_by_track",
+      "inputs": [
+        "labels"
+      ],
+      "kind": "toolbox",
+      "module": "timeseries_invitro_tools",
+      "op": "ts_track_relabel",
+      "produces": "labels",
+      "requirements": [],
+      "role": "labels",
+      "role_declared": "labels",
+      "source": "src/pycat/toolbox/timeseries_invitro_tools.py",
+      "summary": "Time-series tracked-droplet relabelling (per-frame labels -> track ids)",
       "target": "condensate"
     },
     {

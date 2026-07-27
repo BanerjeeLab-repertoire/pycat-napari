@@ -148,13 +148,41 @@ def test_the_timeseries_per_frame_segmenter_is_a_registered_lineage_op():
     assert any(e['relation'] == 'derived_from' and e['target'] == layer_tag_id(src) for e in get_edges(out))
 
 
+@pytest.mark.base
+def test_the_timeseries_tracked_droplet_relabel_is_a_registered_lineage_op():
+    """`relabel_stack_by_track` (per-frame labels → track ids, the "TSIVF Tracked Droplets" layer) is now an
+    `@tags_layer('ts_track_relabel', role=labels, target=condensate)` op, so the tracked-droplet layer — the
+    primary time-series analysis output — carries op + a `derived_from` edge back to the per-frame label stack
+    it recolours. This completes the chain raw → ts_droplet_segment → ts_track_relabel."""
+    from pycat.navigator.operation_spec import _populate_registry
+    _populate_registry()
+    from pycat.utils.tag_registry import get_operation, operation_of, tag_from_operation
+    from pycat.toolbox.timeseries_invitro_tools import relabel_stack_by_track
+    from pycat.utils.layer_tags import get_tags, get_edges, layer_tag_id
+
+    assert operation_of(relabel_stack_by_track) == 'ts_track_relabel'
+    entry = get_operation('ts_track_relabel')
+    assert entry is not None and entry['produces'] == 'labels' and entry['target'] == 'condensate'
+
+    viewer = _install_registry_and_viewer()
+    per_frame = viewer.add_labels(np.ones((3, 8, 8), int), name="TSIVF Droplet Labels (per-frame)")
+    tracked = viewer.add_labels(np.ones((3, 8, 8), int), name="TSIVF Tracked Droplets")
+    tag_from_operation(tracked, relabel_stack_by_track, source_layer=per_frame)
+    op_rec = next((t for t in get_tags(tracked) if t.get('key') == 'op'), None)
+    assert op_rec is not None and op_rec['value'] == 'ts_track_relabel'
+    assert any(e['relation'] == 'derived_from' and e['target'] == layer_tag_id(per_frame)
+               for e in get_edges(tracked))
+
+
 @pytest.mark.core
-def test_the_timeseries_ivf_add_site_wires_lineage():
-    """The time-series in-vitro-fluorescence panel records lineage on the per-frame droplet-label stack."""
+def test_the_timeseries_ivf_add_sites_wire_lineage():
+    """The time-series in-vitro-fluorescence panel records lineage on BOTH the per-frame droplet-label stack
+    and the tracked-droplet relabelling."""
     import pathlib
     src = (pathlib.Path(__file__).resolve().parents[1]
            / 'src/pycat/toolbox/timeseries_invitro_fluor_ui.py').read_text(encoding='utf-8')
-    assert 'tag_from_operation(' in src and 'segment_stack_per_frame' in src
+    assert 'tag_from_operation(' in src
+    assert 'segment_stack_per_frame' in src and 'relabel_stack_by_track' in src
 
 
 @pytest.mark.base

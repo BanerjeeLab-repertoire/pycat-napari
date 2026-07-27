@@ -497,6 +497,8 @@ def field_trajectories(
 # 6. Relabel a per-frame label stack by track id (for a napari Labels overlay)
 # ─────────────────────────────────────────────────────────────────────────────
 
+@tags_layer('ts_track_relabel', role='labels', target='condensate', inputs=('labels',),
+            summary='Time-series tracked-droplet relabelling (per-frame labels -> track ids)')
 def relabel_stack_by_track(
     label_stack: np.ndarray,
     linked_df: pd.DataFrame,

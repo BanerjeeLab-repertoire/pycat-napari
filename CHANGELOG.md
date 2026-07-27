@@ -1,3 +1,13 @@
+## [1.6.407] - 2026-07-26
+### Changed — **Time-series tracked-droplet layer records lineage (completes the time-series lineage chain).**
+`timeseries_invitro_tools.relabel_stack_by_track` (per-frame labels → track ids) is now an
+`@tags_layer('ts_track_relabel', role=labels, target=condensate)` op, and the panel records `tag_from_operation`
+(source = the per-frame "TSIVF Droplet Labels" layer it recolours) on the "TSIVF Tracked Droplets" layer — the
+primary time-series analysis output. On reflection this layer is a distinct analytical product (tracked
+identity), not merely a recolouring, so it merits its own lineage; this completes the chain
+`raw → ts_droplet_segment → ts_track_relabel`. Catalog regenerated (92 → 93 ops); `relabel_stack_by_track`
+removed from `_KNOWN_UNTAGGED`; tests pin the op registration + a `derived_from` edge to the per-frame stack.
+
 ## [1.6.406] - 2026-07-26
 ### Changed — **VPT bead trajectories record lineage — the last gap in the layer-lineage story (Outstanding-Work C1).**
 `vpt.analysis.run_vpt_analysis` (the bead detection + linking entry point) is now an

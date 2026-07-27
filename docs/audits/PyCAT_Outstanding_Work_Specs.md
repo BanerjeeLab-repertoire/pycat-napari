@@ -461,8 +461,10 @@ sites**. So derived/superseded edges are essentially never written, and `tag_res
 > `run_vpt_analysis` is now `@tags_layer('bead_track', role=overlay, target=bead)` and the napari adapter tags
 > the "Bead Trajectories" layer with a `derived_from` edge to the bead image. **With that, the layer-lineage
 > story is complete** — every major output (masks, labels, preprocessed images, droplet masks, trajectories)
-> carries op + source. The only remaining tail is the time-series TRACKED-droplet relabelling
-> (`relabel_stack_by_track`), a track-id recolouring of an already-tagged stack (not a new segmentation).
+> carries op + source. The time-series TRACKED-droplet relabelling was also completed (1.6.407):
+> `relabel_stack_by_track` is now `@tags_layer('ts_track_relabel')` and the "TSIVF Tracked Droplets" layer
+> carries a `derived_from` edge to the per-frame stack — on reflection it is a distinct analytical output, not
+> merely a recolouring. **Every layer-producing operation in the toolbox now records lineage.**
 >
 > Increment 1 wired `tag_from_operation` at: cellpose→cell labels, subcellular→puncta/refined masks,
 > background removal→preprocessed (replacing a raw-string `mark_derived`), preprocess→preprocessed
