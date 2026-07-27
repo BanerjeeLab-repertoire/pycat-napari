@@ -520,7 +520,11 @@ spec it as a follow-up, not first.
 
 ## PART D — Light up the resolver on the dropdowns (Stage 2 activation)
 
-> **◐ IN PROGRESS — increment 4 DONE, 1.6.402 (2026-07-26); increment 3 DONE, 1.6.400; increment 2 DONE, 1.6.398; increment 1 DONE, 1.6.359.**
+> **◐ IN PROGRESS — increment 5 DONE, 1.6.404 (2026-07-26); increment 4 DONE, 1.6.402; increment 3 DONE, 1.6.400; increment 2 DONE, 1.6.398; increment 1 DONE, 1.6.359.**
+> **Increment 5** (unblocked by C1 inc 3 / 1.6.403): added `invitro_fluor.droplet_mask` (role=labels,
+> target=condensate) and wired the three in-vitro-fluorescence "Droplet mask:" consumers to it. **Remaining:**
+> the time-series droplet masks (still blocked on decorating their higher-order producers) and the ambiguous
+> coloc-as-image / FRAP / fusion / temperature fields (need NEW keys).
 > **Increment 4** (unblocked by the 1.6.401 role fix) wired the mask/labels consumers with target-discriminated
 > keys: fixed `puncta_analysis.puncta_mask` (`role: mask`→`labels` — puncta layers ARE labels, so the old key
 > matched nothing), added `brightfield.condensate_mask` (`role=labels, target=condensate`), and wired the

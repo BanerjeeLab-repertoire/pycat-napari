@@ -85,6 +85,13 @@ def test_increment_4_condensate_and_cell_mask_consumers_are_bound():
 
 
 @pytest.mark.core
+def test_increment_5_invitro_fluor_droplet_mask_consumers_are_bound():
+    """The in-vitro-fluorescence droplet-mask consumers bind to `invitro_fluor.droplet_mask` — unblocked by
+    1.6.403, which made `segment_ivf_droplets` a registered op so its mask carries role=labels, target=condensate."""
+    assert 'invitro_fluor.droplet_mask' in _wired_bindings('src/pycat/toolbox/invitro_fluor_ui.py')
+
+
+@pytest.mark.core
 def test_every_wired_binding_is_a_real_key_in_the_binding_table():
     """A dropdown must never point at a binding key that does not exist in layer_bindings.json."""
     import json

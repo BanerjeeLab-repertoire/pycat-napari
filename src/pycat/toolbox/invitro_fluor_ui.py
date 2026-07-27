@@ -680,7 +680,7 @@ def _ivf_field_summary(ui, layout):
         "or under-represents the bulk volume fraction depending on focal depth. "
         "Treat it as a 2D coverage metric.</span>"))
     img_dd  = ui.create_layer_dropdown(napari.layers.Image, binding='invitro_fluor.input_image')
-    mask_dd = ui.create_layer_dropdown(napari.layers.Labels)
+    mask_dd = ui.create_layer_dropdown(napari.layers.Labels, binding='invitro_fluor.droplet_mask')
     form.addRow("Fluorescence image:", img_dd)
     form.addRow("Droplet mask:", mask_dd)
 
@@ -846,7 +846,7 @@ def _ivf_size_distribution(ui, layout):
     grp  = QGroupBox("Step 5 — Size Distribution")
     form = QFormLayout(grp)
     form.setContentsMargins(9, 20, 9, 6)
-    mask_dd = ui.create_layer_dropdown(napari.layers.Labels)
+    mask_dd = ui.create_layer_dropdown(napari.layers.Labels, binding='invitro_fluor.droplet_mask')
     form.addRow(label_with_circle("Droplet mask:", dropdown=mask_dd), mask_dd)
     bins_sp = QSpinBox(); bins_sp.setRange(5,100); bins_sp.setValue(30)
     form.addRow("Histogram bins:", bins_sp)
@@ -888,7 +888,7 @@ def _ivf_spatial(ui, layout):
         "<span style='color:#aaa;font-size:9pt;'>"
         "NND, Ripley's L, PCF, Voronoi — identical to cellular analysis.</span>"
     ))
-    mask_dd = ui.create_layer_dropdown(napari.layers.Labels)
+    mask_dd = ui.create_layer_dropdown(napari.layers.Labels, binding='invitro_fluor.droplet_mask')
     form.addRow(label_with_circle("Droplet mask:", dropdown=mask_dd), mask_dd)
     run = QPushButton("▶  Run Spatial Metrology")
     run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)

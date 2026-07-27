@@ -1,3 +1,11 @@
+## [1.6.404] - 2026-07-26
+### Changed — **In-vitro-fluorescence droplet-mask dropdowns autopopulate (Outstanding-Work Part D, increment 5).**
+Unblocked by 1.6.403 (which made `segment_ivf_droplets` a registered op, so its droplet mask carries
+`role=labels, target=condensate`): added the `invitro_fluor.droplet_mask` binding key and wired the three
+in-vitro-fluorescence "Droplet mask:" consumer dropdowns to it. `target=condensate` discriminates the droplet
+mask from a co-existing cell mask, so the analysis panels autopopulate the droplets they just segmented. Guard
+`test_increment_5_invitro_fluor_droplet_mask_consumers_are_bound`.
+
 ## [1.6.403] - 2026-07-26
 ### Changed — **In-vitro-fluorescence droplet segmenter extracted to a named, lineage-bearing operation (Outstanding-Work C1, increment 3).**
 The in-vitro-fluorescence droplet segmentation lived as an inline `_task` closure inside `invitro_fluor_ui`
