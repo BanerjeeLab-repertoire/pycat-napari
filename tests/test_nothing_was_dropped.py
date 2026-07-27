@@ -1440,6 +1440,13 @@ _DELIBERATE = {
     'ui_modules.py::_row',
     'ui_modules.py::_store_params',
     'ui_modules.py::_wrapper',
+
+    # 1.6.403 — 1.6.376-C1 inc 3: the in-vitro-fluorescence droplet segmentation was extracted VERBATIM from
+    # invitro_fluor_ui's inline worker `_task` into toolbox/invitro/segmentation.py::segment_ivf_droplets (a
+    # named @tags_layer op, so the droplet mask it makes can carry a lineage edge). Its nested `_postfilter`
+    # helper moved with it; the UI `_task` remains as a thin call to the extracted op. Behaviour is pinned by
+    # test_ivf_droplet_segmentation (exact per-method output on a fixed scene).
+    'invitro_fluor_ui.py::_postfilter',
 }
 
 # Qt widget plumbing. A `__init__` losing `parent`, or a callback losing an index, is a Qt idiom

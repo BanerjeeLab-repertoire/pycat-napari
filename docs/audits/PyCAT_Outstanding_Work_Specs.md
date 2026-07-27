@@ -448,7 +448,16 @@ sites**. So derived/superseded edges are essentially never written, and `tag_res
 
 ### C1. Stamp lineage at the UI add-sites for the highest-value operations (additive, low-risk)
 
-> **◐ IN PROGRESS — increment 2 DONE, 1.6.399 (2026-07-26); increment 1 DONE, 1.6.357 (2026-07-25).**
+> **◐ IN PROGRESS — increment 3 DONE, 1.6.403 (2026-07-26); increment 2 DONE, 1.6.399; increment 1 DONE, 1.6.357.**
+> **Increment 3** unblocked the in-vitro-fluorescence droplet mask: its producer was an inline `_task` closure
+> in `invitro_fluor_ui` (otsu/multiotsu/sauvola/rf/advanced-spot dispatch) with no decorated function to tag.
+> Extracted it VERBATIM into `toolbox/invitro/segmentation.py::segment_ivf_droplets` — a named
+> `@tags_layer('ivf_droplet_segment', role='labels', target='condensate')` op — and wired
+> `tag_from_operation`←pre-processed image at the add-site. Behaviour is pinned by
+> `tests/test_ivf_droplet_segmentation.py` (exact per-method output on a fixed scene); the catalog was
+> regenerated (+1 op). **Still deferred:** VPT tracks (only detection is decorated, not linking) and the
+> time-series droplet masks (higher-order / relabel producers whose decoration would ripple into the planner).
+>
 > Increment 1 wired `tag_from_operation` at: cellpose→cell labels, subcellular→puncta/refined masks,
 > background removal→preprocessed (replacing a raw-string `mark_derived`), preprocess→preprocessed
 > (enabling fix: `add_image_with_default_colormap` now RETURNS the created layer). **Increment 2** wired the

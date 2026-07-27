@@ -507,7 +507,14 @@ def _ivf_segmentation(ui, layout):
         prog.setVisible(False); run.setEnabled(True)
         labeled, unrefined = result
         n = int(labeled.max())
-        ui.viewer.add_labels(labeled, name=f"IVF Droplet Mask ({n} droplets)")
+        _out = ui.viewer.add_labels(labeled, name=f"IVF Droplet Mask ({n} droplets)")
+        try:
+            from pycat.toolbox.invitro.segmentation import segment_ivf_droplets
+            from pycat.utils.tag_registry import tag_from_operation
+            tag_from_operation(_out, segment_ivf_droplets,
+                               source_layer=ui.viewer.layers[pre_dd.currentText()])
+        except Exception:
+            pass    # broad-ok: optional_probe -- lineage recording is best-effort, never break the produced layer
         ui._dr()['ivf_droplet_mask'] = labeled
         ui._record('ivf_segmentation', {
             'pre_layer': pre_dd.currentText(), 'raw_layer': raw_dd.currentText(),
@@ -521,8 +528,6 @@ def _ivf_segmentation(ui, layout):
         napari_show_info(f"In vitro: {n} droplets segmented ({method}).")
 
     def _on_run():
-        from pycat.toolbox.segmentation_tools import (
-            segment_subcellular_objects, cell_mask_stretching)
         try:
             pre = ui._img(pre_dd)
             raw = ui._img(raw_dd)
@@ -546,70 +551,19 @@ def _ivf_segmentation(ui, layout):
 
         prog.setRange(0,0); prog.setVisible(True); run.setEnabled(False)
 
+        # Snapshot cell_diameter on the GUI thread (matches the `ball` snapshot above), then run the
+        # segmentation off-thread via the extracted, @tags_layer-registered producer.
+        cell_diam = int(ui._dr().get('cell_diameter', 100))
+
         def _task():
-            import skimage as sk
-            from skimage import filters, morphology, measure
-
-            def _postfilter(binary):
-                b = np.asarray(binary) > 0
-                if p_minarea > 0:
-                    b = _remove_small_objects_compat(b, int(p_minarea))
-                lab = measure.label(b)
-                if p_round:
-                    keep = np.zeros_like(lab)
-                    for pr in measure.regionprops(lab):
-                        if pr.area >= 5 and pr.solidity >= 0.85:
-                            keep[lab == pr.label] = pr.label
-                    lab = measure.label(keep > 0)
-                return lab.astype(np.int32), b
-
-            if method == 'otsu':
-                t = filters.threshold_otsu(pre) * p_sens
-                return _postfilter(pre > t)
-
-            if method == 'multiotsu':
-                ts = filters.threshold_multiotsu(pre, classes=int(p_classes))
-                cut = ts[-1] if p_upper else ts[0]
-                return _postfilter(pre > cut)
-
-            if method == 'sauvola':
-                from pycat.toolbox.segmentation_tools import local_thresholding_func
-                binary = local_thresholding_func(pre, window_size=int(p_win),
-                                                 k_val=p_k, mode='Sauvola')
-                return _postfilter(np.asarray(binary) > 0)
-
-            if method == 'rf':
-                from pycat.toolbox.segmentation_tools import train_and_apply_rf_classifier
-                od = int(ui._dr().get('cell_diameter', 100))
-                # train_and_apply_rf_classifier runs CLAHE (equalize_adapthist),
-                # which requires float input in [-1, 1]. The raw fluorescence
-                # image is in raw intensity units, so pass a [0,1]-normalized
-                # copy or CLAHE raises "Images of type float must be between -1
-                # and 1" — caught by the worker and surfacing as an EMPTY mask.
-                _p = np.asarray(pre, dtype=np.float32)
-                _lo, _hi = float(_p.min()), float(_p.max())
-                _pn = (_p - _lo) / (_hi - _lo) if _hi > _lo else _p
-                # Returns a LIST of refined masks, one per non-background class
-                # (the lowest painted label is dropped as background inside).
-                masks = train_and_apply_rf_classifier(_pn, rf_scribbles, od)
-                if not masks:
-                    return _postfilter(np.zeros(pre.shape, dtype=bool))
-                # Foreground = union of all returned (non-background) class masks.
-                fg = np.zeros(pre.shape, dtype=bool)
-                for m in masks:
-                    fg |= (np.asarray(m) > 0)
-                return _postfilter(fg)
-
-            # Advanced spot detection (original pipeline).
-            H, W = pre.shape
-            whole = np.ones((H, W), dtype=bool); whole[:2,:2] = False
-            cms  = cell_mask_stretching(pre, whole.astype(int))
-            refined, unrefined = segment_subcellular_objects(
-                raw.copy(), cms.copy(), whole, 1, ball, cell_df=None,
-                min_spot_radius=p_minr, kurtosis_threshold=p_kurt,
-                local_snr_threshold=p_lsnr, global_snr_threshold=0.8)
-            lab, _ = _postfilter(refined)
-            return lab, unrefined
+            from pycat.toolbox.invitro.segmentation import segment_ivf_droplets
+            return segment_ivf_droplets(
+                pre, raw, method=method, otsu_sensitivity=p_sens,
+                multiotsu_classes=p_classes, multiotsu_upper=p_upper,
+                sauvola_window=p_win, sauvola_k=p_k, min_radius=p_minr,
+                kurtosis_threshold=p_kurt, local_snr_threshold=p_lsnr,
+                min_area=p_minarea, reject_nonround=p_round,
+                rf_scribbles=rf_scribbles, ball_radius=ball, cell_diameter=cell_diam)
 
         worker = _IVFWorker(_task)
         ui._ivf_seg_worker = worker

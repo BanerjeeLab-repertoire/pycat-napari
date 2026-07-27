@@ -1,3 +1,13 @@
+## [1.6.403] - 2026-07-26
+### Changed — **In-vitro-fluorescence droplet segmenter extracted to a named, lineage-bearing operation (Outstanding-Work C1, increment 3).**
+The in-vitro-fluorescence droplet segmentation lived as an inline `_task` closure inside `invitro_fluor_ui`
+(otsu / multiotsu / sauvola / random-forest / advanced-spot dispatch), so it could neither be tested nor carry
+lineage. It is extracted VERBATIM into `toolbox/invitro/segmentation.py::segment_ivf_droplets` — a named
+`@tags_layer('ivf_droplet_segment', role='labels', target='condensate')` operation — and the panel now records
+`tag_from_operation` (source = the pre-processed image) on the droplet mask it produces, so "which image is behind
+this droplet mask?" is answerable. Behaviour is unchanged and pinned by `tests/test_ivf_droplet_segmentation.py`,
+which characterizes each method's exact output on a fixed scene; the operation catalog was regenerated (90 ops).
+
 ## [1.6.402] - 2026-07-26
 ### Changed — **Resolver wired on the condensate / droplet / cell mask dropdowns (Outstanding-Work Part D, increment 4).**
 With role-based resolution repaired (1.6.401), the mask/labels bindings become functional. This increment: fixes
