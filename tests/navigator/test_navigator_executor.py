@@ -86,9 +86,11 @@ def test_guided_equals_batch_equals_manual_for_background_removal():
 # ── the safety contract ──────────────────────────────────────────────────────────────────────────────
 
 def test_a_step_with_no_adapter_is_reported_never_invoked():
-    assert not has_adapter("subcellular_segment")
+    # `watershed` is a genuinely UN-adapted op (subcellular_segment gained an adapter in the 2026-07-27
+    # dormant-adapter fix); a step with no adapter must be reported, never invoked with guessed arguments.
+    assert not has_adapter("watershed")
     state = {}
-    report = run_plan(_plan(_step("subcellular_segment")), state)
+    report = run_plan(_plan(_step("watershed")), state)
     assert [s.outcome for s in report.steps] == ["needs_panel"]
     assert not report.ran and state == {}             # nothing was invoked, no guessed arguments
 

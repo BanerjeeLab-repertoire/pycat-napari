@@ -118,6 +118,8 @@ REQUIREMENTS: dict[str, str] = {
     'pixel_size':   'a calibrated pixel size (microns per pixel)',
     'two_channels': 'two image channels',
     'gpu':          'a CUDA-capable GPU',
+    'brightfield':  'a brightfield (transmitted-light) image — DARK objects on a bright field',
+    'fluorescence': 'a fluorescence image',
 }
 REQUIREMENT_NAMES = tuple(sorted(REQUIREMENTS))
 

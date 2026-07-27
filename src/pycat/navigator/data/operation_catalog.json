@@ -137,7 +137,9 @@
       "module": "brightfield_tools",
       "op": "bf_segment",
       "produces": "labels",
-      "requirements": [],
+      "requirements": [
+        "brightfield"
+      ],
       "role": "labels",
       "role_declared": "labels",
       "source": "src/pycat/toolbox/brightfield_tools.py",

@@ -1,3 +1,37 @@
+## [1.6.411] - 2026-07-27
+### Fixed — **The navigator execution-adapter layer was DORMANT in the live dock — now it fires (whole-fix).**
+When a user clicked "Run analysis," every step reported `needs_panel` and the plan computed **nothing** — for
+every workflow, cell and condensate alike, including the adapters shipped in 1.6.332–1.6.410. The dock builds its
+plan from a default `NavigatorSession()`, whose step names are **op-ids** (`cellpose`, `subcellular_segment`,
+`feature_analysis.cell_analysis`), while every `ExecAdapter` keys on **module names** (`segmentation_tools`, …) —
+so `resolve_batch_step` returned `None` for every production step. Four layered root causes, all fixed in one
+change so the layer works end to end (a partial fix would have shipped wrong science):
+- **Namespace translation.** `executor.py` gains `_OP_TO_ADAPTER_MODULE` + `_adapter_for(step)`, so an op-id step
+  resolves to its module adapter (`cellpose`→`segmentation_tools`→`cellpose_segmentation`, etc.). `has_adapter`,
+  `resolve_batch_step`, and `run_plan` all route through it.
+- **Target-aware selection.** `Planner._resolve_module` now narrows a wildcard `target:*` requirement to a
+  propagated *specific* target **for provider lookup only** (leaving the layer-resolver, recursion, and step
+  inputs untouched), so a `target:cell` plan is offered the cell segmenter instead of matching the puncta
+  segmenter by a preference fluke.
+- **Modality/dimensionality-aware selection.** New `_context_score` in `_pick` ranks a context-matched specialist
+  (a brightfield op on brightfield, a 3D op on a z-stack) **above** a generic, a context-*unknown* specialist
+  **below** a no-gate generic (so an unconfirmed time-series segmenter never out-ranks the plain one), and a
+  context-*violated* op out. This is what lets a condensate plan pick `subcellular_segment` on fluorescence yet
+  `bf_segment` on brightfield, and a cell plan pick `cellpose_3d` on a z-stack yet `cellpose` on 2D — no per-op
+  preference fudge.
+- **Vocabulary correction.** `brightfield`/`fluorescence` added to the requirements vocab and mapped to context
+  predicates; `bf_segment` tagged `requirements=('brightfield',)`; layer-op contracts now carry
+  `requires_context` (was only ever set on the measure path).
+
+The home-dock Run button now drives the same executor path as the menu action (was wired to a non-existent
+`run_navigator_plan`). New guard `tests/navigator/test_navigator_adapter_reaches_production_plan.py`: a
+default-session **cell** plan resolves `cellpose→cellpose_segmentation` + `cell_analysis`, a **condensate** plan
+`subcellular_segment→condensate_segmentation` + `condensate_analysis` — the check every earlier adapter test
+skipped by hand-building module-name steps. Three phase-3/executor tests updated to the corrected selection
+(the time-series coarsening chain segments with `cellpose` — it feeds `link_condensates`' per-cell condensate
+detection, which consumes **cell** labels per its op `purpose`; `subcellular_segment` is now adapted, so the
+"no-adapter" guard uses `watershed`). Full navigator suite + route-equivalence oracle green.
+
 ## [1.6.410] - 2026-07-26
 ### Added — **Navigator can now run condensate segmentation — the condensate chain runs end-to-end (Part E Phase 3).**
 `segmentation_tools` for a **condensate** target now resolves to the `condensate_segmentation` batch step (was a

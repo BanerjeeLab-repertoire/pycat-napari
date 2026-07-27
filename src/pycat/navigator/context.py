@@ -174,10 +174,17 @@ def _req_fluorescence(ctx: AnalysisContext) -> Optional[bool]:
     return None
 
 
+def _req_brightfield(ctx: AnalysisContext) -> Optional[bool]:
+    if ctx.known("modality"):
+        return ctx.get("modality") == "brightfield"
+    return None
+
+
 AnalysisContext.PREDICATES = {
     "time_series": _req_time_series,
     "two_channels": _req_two_channels,
     "z_stack": _req_z_stack,
     "calibrated": _req_calibrated,
     "fluorescence": _req_fluorescence,
+    "brightfield": _req_brightfield,
 }

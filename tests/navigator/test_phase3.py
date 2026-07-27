@@ -76,17 +76,22 @@ def test_capability_to_query_translation():
 
 def test_existing_layer_is_reused_not_replanned():
     reg = build_operation_registry()
+    # The time-series coarsening chain runs through `link_condensates`, the time-series condensate SPECIALIST,
+    # which detects condensates PER CELL internally and so consumes CELL labels (see its op `purpose`). An
+    # existing usable cell-labels layer is therefore reused in place of re-running the segmenter. (Before the
+    # 2026-07-27 selection fix a condensate-labels layer was reused via the generic linker; that was the
+    # accident the fix corrected — a time-series plan now prefers the time-series-specialised tracker.)
     resolver = InMemoryLayerResolver([
-        SessionLayer("Refined Condensate Labels", "instance_labels",
-                     target="condensate", state="refined", quality_status="pass")])
+        SessionLayer("Cell Labels", "instance_labels",
+                     target="cell", state="refined", quality_status="pass")])
     ctx = _ts(); ctx.set("snr", 6.0, source=Source.MODULE)
     plan = Planner(reg).compile(
         AnalysisIntent(target="condensate", observables=["coarsening"]),
         ctx, layer_resolver=resolver)
-    assert "subcellular_segment" not in plan.ordered_modules
-    assert "Refined Condensate Labels" in plan.reused_layers
+    assert "cellpose" not in plan.ordered_modules          # the reused labels stand in for the segmenter
+    assert "Cell Labels" in plan.reused_layers
     # tracking still planned on top of the reused labels
-    assert "dynamic_spatial.link_trajectories" in plan.ordered_modules
+    assert "timeseries_condensate.link_condensates" in plan.ordered_modules
 
 
 def test_failed_qc_layer_is_not_reused():
@@ -110,9 +115,10 @@ def test_unknown_snr_inserts_qc_probe():
     plan = Planner(reg).compile(
         AnalysisIntent(target="condensate", observables=["coarsening"]), _ts())
     assert "data_qc.assess" in [s.name for s in plan.probes]
-    # probe is ordered before the segmenter it gates
+    # probe is ordered before the segmenter it gates (the time-series coarsening chain segments with cellpose
+    # — it feeds link_condensates' per-cell detection; see the 2026-07-27 selection fix)
     names = plan.ordered_modules
-    assert names.index("data_qc.assess") < names.index("subcellular_segment")
+    assert names.index("data_qc.assess") < names.index("cellpose")
 
 
 def test_known_snr_inserts_no_probe():

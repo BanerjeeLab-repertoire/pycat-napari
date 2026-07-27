@@ -129,7 +129,9 @@ _REQUIRES_OVERRIDE: Dict[str, List[Capability]] = {
 # editors and merges get a low preference so they are never the auto-selected
 # object source (they refine an existing segmentation, they don't create one).
 _PREF_OVERRIDE: Dict[str, float] = {
-    "subcellular_segment": 0.66, "cellpose": 0.65, "cellpose_3d": 0.6,
+    # cellpose is THE general cell segmenter — it must edge out the generic subcellular_segment (0.66) so a
+    # `target:cell` plan selects it, not the puncta segmenter (see the dormant-adapter fix, 2026-07-27).
+    "subcellular_segment": 0.66, "cellpose": 0.67, "cellpose_3d": 0.6,
     "subcellular_segment_3d": 0.6, "watershed": 0.55, "felzenszwalb": 0.5,
     "local_threshold": 0.5, "stardist": 0.55, "puncta_filter": 0.6,
     "bf_segment": 0.55, "clean": 0.55, "bead_detect": 0.6,
@@ -347,12 +349,20 @@ def _layer_op_contract(o: dict) -> ModuleContract:
             observable="snr", threshold_key="snr", min_value=3.0,
             rationale="Below SNR≈3 object boundaries are unreliable.")]
 
+    # An op's `requirements` (z_stack, brightfield, …) are runtime GATES the planner should honour: a 3D op on
+    # a 2D image, or a brightfield op on fluorescence, is context-violated and must not be auto-selected.
+    # Surface them as requires_context (aliasing the two requirement names that differ from their
+    # context-predicate keys) so the planner's selection gates on them. See the dormant-adapter fix, 2026-07-27.
+    _req_alias = {"pixel_size": "calibrated", "time_axis": "time_series"}
+    requires_context = [_req_alias.get(r, r) for r in o.get("requirements", [])]
+
     return ModuleContract(
         name=o["op"],
         info_role=_INFO_ROLE_BY_ROLE.get(role, InformationRole.TRANSFORM),
         purpose=o.get("summary", ""),
         provides=provides,
         requires_inputs=requires,
+        requires_context=requires_context,
         propagates_tags=propagate,
         preference=_PREF_OVERRIDE.get(o["op"], 0.5),
         assumptions=assumptions,

@@ -1,37 +1,44 @@
-"""**Regression guard for the DORMANT execution-adapter finding.**
+"""**Regression guard: the execution adapters reach a PRODUCTION plan.**
 
 See `docs/audits/claude_code_spec_navigator_adapter_dormant_2026-07-27.md`.
 
 A plan compiled the way the production dock compiles it — from a default `NavigatorSession()` (the op-catalog
-registry) — must have at least ONE step that resolves to a real batch handler, or the "Run analysis" button
-computes nothing. Today it resolves NONE: the adapters key on toolbox-module names (`segmentation_tools`,
-`feature_analysis_tools`), but production plans carry op-ids (`subcellular_segment`,
-`feature_analysis.cell_analysis`). So this is **xfail** — a live record of the bug at the test level.
-
-**When the navigator-planning fix lands this flips to xpass** (pytest reports it) — remove the xfail marker
-then. It is exactly the check every adapter test skipped: they build plans from hand-made module-name
-`PlanStep`s / the workbook registry, never from a default session, which is why the dormancy went unseen.
+registry, op-id step names like `cellpose` / `subcellular_segment`) — must have its segmentation and analysis
+steps resolve to real batch handlers, or the "Run analysis" button computes nothing. This was DORMANT: the
+adapters keyed on toolbox-module names while production plans carry op-ids, and the planner mis-selected the
+segmenter (a `target:cell` plan chose the puncta segmenter). Fixed by target/modality-aware op selection plus an
+op-id→module translation in the executor. This guard is the check every earlier adapter test skipped — they
+built plans from hand-made module-name `PlanStep`s, never from a default session.
 """
 import pytest
+
+from pycat.navigator.session import NavigatorSession
+from pycat.navigator.contracts import AnalysisIntent
+from pycat.navigator.execution import execution_order
+from pycat.navigator.executor import resolve_batch_step
 
 pytestmark = pytest.mark.base
 
 
-@pytest.mark.xfail(reason="execution-adapter layer is dormant in the default (op-catalog) session — see "
-                          "docs/audits/claude_code_spec_navigator_adapter_dormant_2026-07-27.md",
-                   strict=False)
-def test_a_default_session_plan_has_at_least_one_runnable_adapter_step():
-    from pycat.navigator.session import NavigatorSession
-    from pycat.navigator.contracts import AnalysisIntent
-    from pycat.navigator.execution import execution_order
-    from pycat.navigator.executor import resolve_batch_step
-
-    sess = NavigatorSession()          # exactly what the dock constructs (navigator_dock.py:427/463)
-    sess.intent = AnalysisIntent(target="cell", observables=["count", "size"])
+def _resolved(target):
+    sess = NavigatorSession()                 # exactly what the dock constructs (navigator_dock.py:427/463)
+    sess.intent = AnalysisIntent(target=target, observables=["count", "size"])
     plan = sess.planner.compile(sess.intent, sess.ctx, pins={})
+    return {s.name: resolve_batch_step(s.name, sess.intent) for s in execution_order(plan)}
 
-    resolvable = [getattr(s, "name", "") for s in execution_order(plan)
-                  if resolve_batch_step(getattr(s, "name", ""), sess.intent) is not None]
-    assert resolvable, (
-        "no step in a default-session plan resolves to a batch handler — the Run button computes nothing. "
-        "Adapters key on module names but production plans carry op-ids.")
+
+def test_a_default_session_cell_plan_runs_segmentation_and_analysis_via_adapters():
+    res = _resolved("cell")
+    runnable = {k: v for k, v in res.items() if v is not None}
+    assert runnable, f"no cell-plan step resolves to a batch handler — Run computes nothing: {res}"
+    # the planner picks the CELL segmenter (cellpose), not the puncta segmenter, and it maps to its batch step
+    assert res.get("cellpose") == "cellpose_segmentation"
+    assert res.get("feature_analysis.cell_analysis") == "cell_analysis"
+
+
+def test_a_default_session_condensate_plan_runs_segmentation_and_analysis_via_adapters():
+    res = _resolved("condensate")
+    runnable = {k: v for k, v in res.items() if v is not None}
+    assert runnable, f"no condensate-plan step resolves to a batch handler: {res}"
+    assert res.get("subcellular_segment") == "condensate_segmentation"
+    assert res.get("feature_analysis.cell_analysis") == "condensate_analysis"

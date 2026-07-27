@@ -1,9 +1,18 @@
 # Claude Code spec — The navigator execution-adapter layer is dormant in the live dock
 
-> **STATUS — FINDING, verified 2026-07-27. Not yet fixed. No clean self-contained fix exists; the correct
-> fix is a target/modality/dimensionality-aware selection + op-vocabulary correction, verified against the
-> 13-pipeline oracle. Documented here so it can be scoped as its own effort rather than half-fixed (a partial
-> fix ships wrong science — see §Root cause 3).**
+> **STATUS — FIXED, 1.6.411 (2026-07-27).** All four root causes addressed in one change: (1) an op-id→module
+> translation layer in the executor (`_OP_TO_ADAPTER_MODULE` / `_adapter_for`) so production op-id steps reach
+> their module adapters; (2) target-aware dependency selection — `_resolve_module` narrows a wildcard `target:*`
+> requirement to a propagated specific target *for provider lookup only*, so a `target:cell` plan is offered the
+> cell segmenter; (3) modality/dimensionality-aware selection — `_context_score` in `_pick` ranks a
+> context-matched specialist (brightfield op on brightfield, 3D op on a z-stack) above a generic, a
+> context-unknown specialist below a no-gate generic, and a context-violated op out; (4) vocabulary correction —
+> `brightfield`/`fluorescence` added to the requirements vocab and mapped to context predicates, `bf_segment`
+> tagged `requirements=('brightfield',)`. The home-dock Run button now drives the same executor path as the menu.
+> Verified: a default-session cell plan resolves `cellpose→cellpose_segmentation` + `cell_analysis`, a condensate
+> plan `subcellular_segment→condensate_segmentation` + `condensate_analysis` (new guard
+> `test_navigator_adapter_reaches_production_plan.py`); selection matrix correct across cell/2D, cell/3D,
+> condensate/fluorescence, condensate/brightfield; full navigator suite + route-equivalence oracle green.
 
 ## The finding
 

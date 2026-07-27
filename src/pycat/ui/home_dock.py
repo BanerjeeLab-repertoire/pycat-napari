@@ -82,11 +82,14 @@ def _render_home(widget, body_layout, store, reg, central_manager):
     guided = QWidget()
     gl = QVBoxLayout(guided)
     gl.setAlignment(Qt.AlignTop)
-    from pycat.ui.navigator_dock import build_navigator_widget
+    from pycat.ui.navigator_dock import build_navigator_widget, run_plan_via_central_manager
     from pycat.navigator.session import NavigatorSession
+    # central_manager has no `run_navigator_plan`; drive Run through the same execution-adapter path the menu
+    # action uses, so the home-dock Run button is live too (not silently disabled). See the 2026-07-27 fix.
+    on_run = (lambda plan, review=None: run_plan_via_central_manager(central_manager, plan, review)) \
+        if central_manager is not None else None
     nav = build_navigator_widget(
-        NavigatorSession(), on_run=getattr(central_manager, "run_navigator_plan", None),
-        central_manager=central_manager)
+        NavigatorSession(), on_run=on_run, central_manager=central_manager)
     if nav is not None:
         widget._navigator = nav
         gl.addWidget(nav)

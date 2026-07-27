@@ -132,15 +132,35 @@ _ADAPTERS: dict = {
 }
 
 
+#: The production planner names plan steps by OP-ID (`cellpose`, `subcellular_segment`,
+#: `feature_analysis.cell_analysis`, `rolling_ball`), but the adapters are keyed by the toolbox MODULE.
+#: Translate the op-id to its module so the module adapter — which dispatches on `intent.target` — fires. Only
+#: the ops backing a proven adapter route are listed; anything else stays "run from its panel". The planner
+#: selects the op by target × modality (fixed 2026-07-27), so an op here is only planned for the target its
+#: adapter expects (cellpose→cell, subcellular_segment→condensate). See the dormant-adapter fix.
+_OP_TO_ADAPTER_MODULE: dict = {
+    "rolling_ball": "image_processing_tools",
+    "cellpose": "segmentation_tools",
+    "subcellular_segment": "segmentation_tools",
+    "feature_analysis.cell_analysis": "feature_analysis_tools",
+}
+
+
+def _adapter_for(step_name: str):
+    """The ExecAdapter for a plan step, whether it is named by module (`segmentation_tools`, from the
+    workbook registry / hand-built plans) or by op-id (`cellpose`, from the production op-catalog session)."""
+    return _ADAPTERS.get(step_name) or _ADAPTERS.get(_OP_TO_ADAPTER_MODULE.get(step_name, ""))
+
+
 def has_adapter(step_name: str) -> bool:
-    return step_name in _ADAPTERS
+    return _adapter_for(step_name) is not None
 
 
 def resolve_batch_step(step_name: str, intent=None) -> Optional[str]:
     """The batch step ``step_name`` will actually run for ``intent``, or ``None`` if it has no adapter or its
     variant is not auto-runnable yet (a coarse module whose target has no proven batch route). The single
     authority for 'will this step run', shared by the executor and the parameter review."""
-    adapter = _ADAPTERS.get(step_name)
+    adapter = _adapter_for(step_name)
     if adapter is None:
         return None
     bs = adapter.batch_step
@@ -259,7 +279,7 @@ def run_plan(plan, state, *, intent=None, ctx=None, image_path=None, output_dir=
                 halted = True
                 continue
 
-            adapter = _ADAPTERS.get(es.name)
+            adapter = _adapter_for(es.name)
             batch_step = adapter.batch_step(intent) if (adapter and callable(adapter.batch_step)) \
                 else (adapter.batch_step if adapter else None)
             if batch_step is None:

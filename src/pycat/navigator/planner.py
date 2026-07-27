@@ -132,6 +132,34 @@ def regate(plan: "Plan", ctx: AnalysisContext) -> "Plan":
 SelectionPolicy = Callable[[List[ModuleContract], AnalysisContext], ModuleContract]
 
 
+def _context_score(c: ModuleContract, ctx: AnalysisContext) -> int:
+    """How well ``c``'s context requirements match the situation, ranking a provider against its rivals:
+      +1  every requirement is SATISFIED and there is at least one — a context-matched SPECIALIST (a brightfield
+          op on brightfield, a 3D op on a z-stack) that should beat a context-agnostic generic;
+       0  NO requirements — a general op, applicable anywhere;
+      -1  has requirements but one is UNKNOWN — a specialist whose context is unconfirmed; it ranks BELOW a
+          no-gate general op (an unconfirmed time-series segmenter must not out-rank the plain one on a still-
+          unknown context), but above one whose context is outright violated;
+      -2  a requirement is VIOLATED (a brightfield op on fluorescence, a 3D op on a 2D image) — does not apply.
+    This is what lets a `target:condensate` plan pick the general `subcellular_segment` on fluorescence yet
+    `bf_segment` on brightfield, and a `target:cell` plan pick `cellpose_3d` on a z-stack yet `cellpose` on 2D,
+    without a fragile per-op preference fudge. See the dormant-adapter fix, 2026-07-27."""
+    reqs = list(getattr(c, "requires_context", []) or [])
+    if not reqs:
+        return 0
+    results = []
+    for key in reqs:
+        try:
+            results.append(ctx.context_requirement(key))
+        except Exception:                  # broad-ok: optional_probe — an unknown gate key is treated as unknown
+            results.append(None)
+    if any(r is False for r in results):
+        return -2
+    if all(r is True for r in results):
+        return 1
+    return -1
+
+
 def default_selection_policy(candidates: List[ModuleContract],
                              ctx: AnalysisContext) -> ModuleContract:
     """Deterministic: highest preference, then cheapest, then name.
@@ -232,7 +260,14 @@ class Planner:
             for c in candidates:
                 if c.name == pinned:
                     return c
-        return self.select(candidates, ctx)
+        # DEPENDENCY (e.g. segmenter) selection is context-aware: a context-matched specialist (a brightfield
+        # op on brightfield, a 3D op on a z-stack) beats a context-agnostic generic, and a context-VIOLATED op
+        # (a brightfield op on fluorescence, a 3D op on 2D) drops below the generic — so a cell plan picks
+        # cellpose, a fluorescence-condensate plan the general subcellular_segment, a brightfield one bf_segment.
+        # Scoped here (not the global policy) so terminal/interpret selection is unchanged. See the 2026-07-27 fix.
+        best_cs = max((_context_score(c, ctx) for c in candidates), default=0)
+        top = [c for c in candidates if _context_score(c, ctx) == best_cs] or candidates
+        return self.select(top, ctx)
 
     def _pick_terminal(self, candidates, ctx, pins, intent) -> ModuleContract:
         """Terminal selection is TARGET-AWARE: an operation specialised to the
@@ -299,7 +334,17 @@ class Planner:
                     step.depends_on.append(f"layer:{binding.layer_name}")
                     continue
 
-            providers = self.registry.providers_of(subgoal)
+            # A propagated SPECIFIC target (e.g. target:cell) narrows the requirement's wildcard target:* — FOR
+            # PROVIDER LOOKUP ONLY — so a target-specialised producer (cellpose for a cell, bf_segment for a
+            # brightfield condensate) is offered and can win, without changing the subgoal the layer-resolver,
+            # recursion, and step inputs see. Without it, providers_of never lists the specialised op and a cell
+            # plan silently segments with the puncta segmenter. See the 2026-07-27 fix.
+            provider_goal = subgoal
+            _specific = {t for t in propagated if t.startswith("target:") and t != "target:*"}
+            if _specific and "target:*" in subgoal.tags:
+                provider_goal = Capability(subgoal.kind, frozenset(subgoal.tags) - {"target:*"})
+
+            providers = self.registry.providers_of(provider_goal)
             providers = [p for p in providers if p.name not in stack]  # avoid cycles
             if not providers:
                 plan.unresolved.append((subgoal, module.name))
