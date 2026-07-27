@@ -150,7 +150,7 @@ class FRAPUI:
         except Exception:
             pass
 
-        self._rec_dd = self.create_layer_dropdown(napari.layers.Image)
+        self._rec_dd = self.create_layer_dropdown(napari.layers.Image, binding='common.raw_image')
         self._rec_dd.setToolTip("Recovery time-series (T, H, W) to analyze.")
         form.addRow("Recovery stack:", self._rec_dd)
 

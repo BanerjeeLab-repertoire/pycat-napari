@@ -134,7 +134,7 @@ class DropletFusionUI:
         self._image_container = QWidget()
         ic = QFormLayout(self._image_container)
         ic.setContentsMargins(0, 0, 0, 0); ic.setSpacing(4)
-        self._img_dd = self.create_layer_dropdown(napari.layers.Image)
+        self._img_dd = self.create_layer_dropdown(napari.layers.Image, binding='common.raw_image')
         self._img_dd.setToolTip("Image stack (T,H,W) of the fusing droplet pair.")
         ic.addRow("Image stack:", self._img_dd)
         form.addRow(self._image_container)

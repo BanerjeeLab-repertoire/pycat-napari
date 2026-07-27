@@ -147,7 +147,7 @@ class TemperatureDependentUI:
             "Pick the stack, then a temperature CSV file or its folder.</span>")
         note.setWordWrap(True); form.addRow(note)
 
-        self._stack_dd = self.create_layer_dropdown(napari.layers.Image)
+        self._stack_dd = self.create_layer_dropdown(napari.layers.Image, binding='common.raw_image')
         self._stack_dd.setToolTip("The MicroManager OME-TIFF stack (already opened).")
         status_row(form, self._registry, "Stack layer:", self._stack_dd, REQUIRED, step="step2")
 

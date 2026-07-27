@@ -92,6 +92,17 @@ def test_increment_5_invitro_fluor_droplet_mask_consumers_are_bound():
 
 
 @pytest.mark.core
+def test_increment_6_frap_fusion_temperature_primary_inputs_are_bound():
+    """The FRAP / droplet-fusion / temperature panels' primary stack inputs bind to `common.raw_image` — each
+    is a single-movie workflow, so the raw acquisition is auto-selected (and, being provenance-discriminated
+    with no `target`, the binding degrades to an empty dropdown when several raw images match rather than
+    guessing)."""
+    for f in ('src/pycat/toolbox/frap_ui.py', 'src/pycat/toolbox/fusion_ui.py',
+              'src/pycat/toolbox/temperature_ui.py'):
+        assert 'common.raw_image' in _wired_bindings(f), f
+
+
+@pytest.mark.core
 def test_every_wired_binding_is_a_real_key_in_the_binding_table():
     """A dropdown must never point at a binding key that does not exist in layer_bindings.json."""
     import json

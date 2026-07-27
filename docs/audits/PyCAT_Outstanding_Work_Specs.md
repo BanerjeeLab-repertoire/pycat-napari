@@ -528,7 +528,11 @@ spec it as a follow-up, not first.
 
 ## PART D — Light up the resolver on the dropdowns (Stage 2 activation)
 
-> **◐ IN PROGRESS — increment 5 DONE, 1.6.404 (2026-07-26); increment 4 DONE, 1.6.402; increment 3 DONE, 1.6.400; increment 2 DONE, 1.6.398; increment 1 DONE, 1.6.359.**
+> **◐ IN PROGRESS — increment 6 DONE, 1.6.408 (2026-07-26); increment 5 DONE, 1.6.404; increment 4 DONE, 1.6.402; increment 3 DONE, 1.6.400; increment 2 DONE, 1.6.398; increment 1 DONE, 1.6.359.**
+> **Increment 6:** the FRAP / droplet-fusion / temperature primary stack inputs bind to `common.raw_image`
+> (single-movie workflows; provenance-discriminated, degrades to empty when several raw images match). **Remaining:**
+> only secondary/ambiguous fields (coloc-as-image channels, FRAP bleach ROI, dark-reference/scribble/control
+> dropdowns) that would each need a new key or lack a defensible auto-selection — left for the user.
 > **Increment 5** (unblocked by C1 inc 3 / 1.6.403): added `invitro_fluor.droplet_mask` (role=labels,
 > target=condensate) and wired the three in-vitro-fluorescence "Droplet mask:" consumers to it. **Remaining:**
 > the time-series droplet masks (still blocked on decorating their higher-order producers) and the ambiguous

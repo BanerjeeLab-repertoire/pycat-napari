@@ -1,3 +1,11 @@
+## [1.6.408] - 2026-07-26
+### Changed — **FRAP / fusion / temperature primary inputs autopopulate (Outstanding-Work Part D, increment 6).**
+The FRAP recovery stack, droplet-fusion image stack, and temperature stack dropdowns now bind to
+`common.raw_image`. Each is a single-movie workflow, so the raw acquisition is auto-selected; with no `target`
+to discriminate, the binding is provenance-based (`prefer: head_of_lineage`) and degrades to an empty dropdown
+when several raw images match rather than guessing. This rounds out the resolver wiring for the primary inputs
+across the toolbox panels. Guard `test_increment_6_frap_fusion_temperature_primary_inputs_are_bound`.
+
 ## [1.6.407] - 2026-07-26
 ### Changed — **Time-series tracked-droplet layer records lineage (completes the time-series lineage chain).**
 `timeseries_invitro_tools.relabel_stack_by_track` (per-frame labels → track ids) is now an
