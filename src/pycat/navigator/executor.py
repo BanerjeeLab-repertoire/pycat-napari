@@ -76,12 +76,18 @@ def _cell_analysis_params(intent, ctx, state, reviewed):
     return {}
 
 
-def _feature_analysis_step_if_cell(intent):
-    """``feature_analysis_tools`` is coarse — for a cell target it is ``cell_analysis`` (measures the cell mask,
-    the natural next step after segmentation). For a condensate target it would be ``condensate_analysis``, which
-    depends on a ``puncta_mask`` from the unproven condensate-segmentation batch route — so it resolves to
-    ``None`` (reported, never guessed) until that route is proven."""
-    return "cell_analysis" if getattr(intent, "target", None) == "cell" else None
+def _feature_analysis_step(intent):
+    """``feature_analysis_tools`` is coarse. For a **cell** target it is ``cell_analysis`` (measures the cell
+    mask). For a **condensate** target it is ``condensate_analysis`` (measures the ``puncta_mask`` that
+    condensate segmentation produced) — both reduce to a single scientific function (``cell_analysis_func`` /
+    ``puncta_analysis_func``) proven route-equivalent, and neither takes a run-time knob (``params_from``
+    returns ``{}``). Any other target has no measurement route yet → ``None`` (reported, never guessed)."""
+    target = getattr(intent, "target", None)
+    if target == "cell":
+        return "cell_analysis"
+    if target == "condensate":
+        return "condensate_analysis"
+    return None
 
 
 def _cellpose_step_if_cell(intent):
@@ -103,7 +109,7 @@ _ADAPTERS: dict = {
     "image_processing_tools": ExecAdapter("image_processing_tools", "background_removal",
                                           _background_removal_params),
     "segmentation_tools": ExecAdapter("segmentation_tools", _cellpose_step_if_cell, _cellpose_params),
-    "feature_analysis_tools": ExecAdapter("feature_analysis_tools", _feature_analysis_step_if_cell,
+    "feature_analysis_tools": ExecAdapter("feature_analysis_tools", _feature_analysis_step,
                                           _cell_analysis_params),
 }
 

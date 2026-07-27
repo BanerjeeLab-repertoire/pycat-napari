@@ -91,7 +91,7 @@ def test_every_adapter_targets_a_real_registered_batch_step():
             bs = resolve_batch_step(name, AnalysisIntent(target=target, observables=["x"]))
             if bs is not None:
                 targets.add(bs)
-    assert targets == {"background_removal", "cellpose_segmentation", "cell_analysis"}
+    assert targets == {"background_removal", "cellpose_segmentation", "cell_analysis", "condensate_analysis"}
     missing = [bs for bs in targets if bs not in registry]
     assert not missing, f"adapters target batch steps that are not registered: {missing}"
 

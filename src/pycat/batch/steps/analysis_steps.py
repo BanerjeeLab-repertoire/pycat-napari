@@ -20,10 +20,12 @@ def replay_condensate_analysis(state: dict, image_path: Path, params: dict, outp
     """
     from pycat.toolbox.feature_analysis_tools import puncta_analysis_func
 
-    if state.get('no_cells') or state.get('puncta_mask') is None:
+    if state.get('no_cells'):
         print(f"[PyCAT Batch]   Condensate analysis skipped for "
-              f"{image_path.name}: no cells/puncta available upstream.")
+              f"{image_path.name}: no cells were segmented upstream.")
         return
+    # A MISSING puncta_mask is different from an empty one: it means condensate segmentation did not run.
+    # Report that as an error (below) rather than silently producing nothing — the segmentation must run first.
 
     # Measure puncta intensity on the layer the GUI recorded (image_layer),
     # e.g. "Upscaled Fluorescence Image".

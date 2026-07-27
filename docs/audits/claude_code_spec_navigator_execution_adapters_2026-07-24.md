@@ -21,8 +21,15 @@
 > proven without torch on a synthetic labelled mask (`test_navigator_cell_analysis_adapter.py`, `base`, 4: guided ==
 > manual bit for bit). It reads the `cellpose_mask` segmentation writes, so a real cell plan now fires
 > `segmentation_tools → feature_analysis_tools` end to end; no upstream mask → reported error, never a silent empty.
-> Condensate feature analysis stays reported (unproven route). **Phase 3 continues; Phase 4** (dock progress +
+> **Phase 3 continues; Phase 4** (dock progress +
 > cancel) remains.
+> **Phase 3 (cont.) — condensate analysis (1.6.409).** `feature_analysis_tools` (condensate) → the
+> `condensate_analysis` batch step, proven without torch on a synthetic puncta mask + labelled cells + a seeded
+> per-cell table (`test_navigator_condensate_analysis_adapter.py`, `base`, 4: guided == manual bit for bit). It
+> reads the `puncta_mask` condensate segmentation writes; with none, the batch handler now reports an error
+> (segmentation must run first) instead of silently skipping — a dead `RuntimeError` behind a combined guard was
+> made reachable. Condensate SEGMENTATION (`segmentation_tools` condensate → `condensate_segmentation`) is the
+> next adapter, which produces that `puncta_mask`.
 > **Phase 1 — DONE (1.6.332).** `navigator/executor.py`: `run_plan(plan, state, …)` drives the batch `_STEP_MAP`
 > handlers in `execution_order` order, threading `state`; `ExecAdapter` maps a plan step → batch handler +
 > `params_from`; a step with no adapter is reported ('needs_panel'), never invoked with guessed args; gate

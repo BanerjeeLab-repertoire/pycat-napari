@@ -65,11 +65,15 @@ def _plan(*steps, target="cell"):
     return Plan(intent=AnalysisIntent(target=target, observables=["count"]), steps=list(steps))
 
 
-def test_feature_analysis_resolves_to_cell_analysis_for_cell_not_condensate():
+def test_feature_analysis_resolves_by_target_cell_vs_condensate():
     assert resolve_batch_step("feature_analysis_tools",
                               AnalysisIntent(target="cell", observables=["x"])) == "cell_analysis"
+    # condensate is now adapted too (route-proven in test_navigator_condensate_analysis_adapter)
     assert resolve_batch_step("feature_analysis_tools",
-                              AnalysisIntent(target="condensate", observables=["x"])) is None
+                              AnalysisIntent(target="condensate", observables=["x"])) == "condensate_analysis"
+    # a target with no measurement route is still reported, never guessed
+    assert resolve_batch_step("feature_analysis_tools",
+                              AnalysisIntent(target="fibril", observables=["x"])) is None
 
 
 def test_guided_cell_analysis_equals_manual_bit_for_bit():

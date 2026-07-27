@@ -1,3 +1,14 @@
+## [1.6.409] - 2026-07-26
+### Added — **Navigator can now run condensate feature analysis (execution adapter, Part E Phase 3).**
+`feature_analysis_tools` for a **condensate** target now resolves to the `condensate_analysis` batch step (it was
+reported as "run from its panel"), so a condensate plan's measurement step auto-runs. Like the cell-analysis
+adapter, it takes no run-time parameter — both branches reduce to a single proven function (`cell_analysis_func`
+/ `puncta_analysis_func`). Acceptance gate `tests/navigator/test_navigator_condensate_analysis_adapter.py`:
+**guided == manual, bit for bit** on a synthetic puncta mask + labelled cells + seeded per-cell table. Also made
+the batch handler report a MISSING `puncta_mask` as an error (segmentation must run first) rather than silently
+skipping — a dead `RuntimeError` was unreachable behind a combined guard; the legitimate no-cells case still
+skips.
+
 ## [1.6.408] - 2026-07-26
 ### Changed — **FRAP / fusion / temperature primary inputs autopopulate (Outstanding-Work Part D, increment 6).**
 The FRAP recovery stack, droplet-fusion image stack, and temperature stack dropdowns now bind to
