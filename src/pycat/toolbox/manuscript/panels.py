@@ -196,6 +196,46 @@ def _thermo_generate(context):
     return delta_g_transfer(ctx["c_dense"], ctx["c_dilute"], ctx["temperature_K"])
 
 
+# ── panel: Supp — runtime by method (Part C: measured, not asserted) ──────────────────────────────────
+
+def _runtime_scores(context):
+    """``(method_name, runtime_s)`` for every candidate with a recorded runtime, or an empty list. Reads the
+    same ``context['benchmark_results']`` Fig 2 does — a candidate's ``runtime_s`` comes from ``basic_metrics``
+    whenever the method actually ran (an *external*/uploaded mask has ``runtime_s is None`` and is skipped —
+    there is no time to report for a pre-computed result, and the panel never invents one)."""
+    res = (context or {}).get("benchmark_results")
+    if not isinstance(res, dict):
+        return []
+    scores = []
+    for cand in res.get("candidates", []):
+        if not isinstance(cand, dict):
+            continue
+        rt = cand.get("runtime_s")
+        try:
+            seconds = float(rt)
+        except (TypeError, ValueError):
+            continue                           # None (external) or non-numeric → no time to report
+        if seconds == seconds:                 # exclude NaN
+            scores.append((str(cand.get("name", "?")), seconds))
+    return scores
+
+
+def _runtime_available(context):
+    return len(_runtime_scores(context)) > 0
+
+
+def _runtime_generate(context):
+    """The performance figure (Part C — 'generate the graph rather than the assertion'): each method's measured
+    runtime, rendered through the canonical FigureSpec. A claim like 'fast' becomes a number on an axis."""
+    from pycat.utils.figure_spec import FigureData, FigureSpec, render
+    scores = _runtime_scores(context)
+    groups = tuple(name for name, _ in scores)
+    fig_data = FigureData(measurement="runtime_s", groups=groups,
+                          values_by_group={name: [seconds] for name, seconds in scores}, x_label="method")
+    spec = FigureSpec(title="Runtime by method (measured)", y_label="runtime (s)", annotate_n=False)
+    return render(fig_data, spec)
+
+
 #: The registered panels, in the manuscript's figure order. A panel is shown greyed (its ``data_requirement``
 #: as the tooltip) whenever ``available(context)`` is False — never a dead button.
 _PANELS = (
@@ -224,6 +264,11 @@ _PANELS = (
         data_requirement="Build a calibration curve and supply dense/dilute concentrations + temperature (Partition → concentration → ΔG).",
         tooltip="Partition → concentration → ΔG of transfer from the calibration curve.",
         produces="table", generate=_thermo_generate, available=_thermo_available),
+    FigurePanel(
+        key="supp_runtime", title="Supp — runtime by method", figure_role="supplementary",
+        data_requirement="Run the benchmark with at least one method that executes (not an uploaded/external mask); its runtime is recorded in 'benchmark_results'.",
+        tooltip="Each method's measured runtime — the performance claim as a number on an axis, not an assertion.",
+        produces="figure", generate=_runtime_generate, available=_runtime_available),
 )
 
 

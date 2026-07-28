@@ -1,5 +1,12 @@
 # Claude Code spec — Manuscript-prep figure toolbox
 
+> **Part C (runtime by method) — DONE, 1.6.425.** The benchmark's *performance* axis, beside Fig 2's accuracy
+> axis: a `supp_runtime` panel reads the same `benchmark_results` and renders each candidate's measured
+> `runtime_s` (recorded by `basic_metrics` when the method ran) through the canonical `FigureSpec`. An
+> external/uploaded mask has no runtime → skipped; the panel greys when nothing was timed (never invents a
+> runtime). `tests/test_manuscript_panels.py` (`base`, 13). The other two Part C panels (lazy-load latency,
+> batch throughput) need timing harnesses not yet in the tree, and stay unbuilt.
+>
 > **Fig 2 (benchmark/validation) — WIRED, 1.6.424.** Premise-drift correction: an earlier increment concluded
 > "no validation/Dice-F1 suite found" — but it searched for the spec's named `benchmarks/run_suite.py`; the real
 > suite is `toolbox/benchmark_tools.py` (`run_benchmark` → per-candidate pixel Dice/IoU + matched-detection F1 vs

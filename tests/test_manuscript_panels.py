@@ -33,7 +33,7 @@ def test_registry_lists_the_manuscript_panels_in_figure_order():
     panels = manuscript_panels()
     keys = [p.key for p in panels]
     assert keys == ["fig1_qc", "fig2_benchmark", "fig3_phenotyping",
-                    "supp_reliability", "supp_thermodynamics"]
+                    "supp_reliability", "supp_thermodynamics", "supp_runtime"]
     assert all(isinstance(p, FigurePanel) for p in panels)
 
 
@@ -165,6 +165,48 @@ def test_fig2_generates_a_dice_figure_from_validation_results():
         assert float(plotted["perfect"][0]) == pytest.approx(1.0)      # identical mask → Dice 1
         assert 0.0 <= float(plotted["partial"][0]) < 1.0               # under-segmented → real, sub-1 Dice
         assert "Dice" in fig.axes[0].get_ylabel()
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close(fig)
+
+
+def _benchmark_timed_result():
+    """A benchmark where candidates actually RUN (trivial threshold segmenters), so runtimes are recorded —
+    external/pre-computed masks carry no runtime, so the runtime panel needs executed methods."""
+    from pycat.toolbox.benchmark_tools import Candidate, run_benchmark
+    from scipy import ndimage as ndi
+    rng = np.random.default_rng(3)
+    img = rng.normal(100, 10, (48, 48)).astype(np.float32)
+    img[10:20, 10:20] += 120
+    img[30:40, 28:38] += 120
+    cands = [Candidate("thresh_hi", method_fn=lambda im: ndi.label(im > im.mean() + 40)[0]),
+             Candidate("thresh_lo", method_fn=lambda im: ndi.label(im > im.mean() + 20)[0])]
+    return run_benchmark(img, cands)                                    # comparison mode; runtimes recorded
+
+
+def test_supp_runtime_greys_without_a_timed_run():
+    runtime = next(p for p in manuscript_panels() if p.key == "supp_runtime")
+    assert panel_is_available(runtime, {}) is False
+    # a validation result over EXTERNAL masks has no runtimes (runtime_s is None) → greyed, never invented
+    assert panel_is_available(runtime, {"benchmark_results": _benchmark_validation_result()}) is False
+
+
+def test_supp_runtime_generates_a_runtime_figure_from_a_timed_run():
+    import matplotlib
+    matplotlib.use("Agg", force=False)
+    from matplotlib.figure import Figure
+
+    runtime = next(p for p in manuscript_panels() if p.key == "supp_runtime")
+    ctx = {"benchmark_results": _benchmark_timed_result()}
+    assert panel_is_available(runtime, ctx) is True
+
+    fig = runtime.generate(ctx)
+    try:
+        assert isinstance(fig, Figure) and fig.axes
+        plotted = fig._pycat_plotted
+        assert set(plotted) == {"thresh_hi", "thresh_lo"}
+        assert all(float(v[0]) >= 0.0 for v in plotted.values())       # measured seconds, non-negative
+        assert "runtime" in fig.axes[0].get_ylabel()
     finally:
         import matplotlib.pyplot as plt
         plt.close(fig)

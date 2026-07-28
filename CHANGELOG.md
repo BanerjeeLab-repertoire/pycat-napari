@@ -1,3 +1,19 @@
+## [1.6.425] - 2026-07-28
+### Added — **Manuscript Supp panel: runtime by method (the benchmark's performance axis) — Part C, measured not asserted.**
+Fig 2 (1.6.424) added the benchmark's *accuracy* axis (Dice vs ground truth); this adds its *speed* axis, so the
+benchmark tells a complete story. Part C of the manuscript spec is "for a measurable claim, generate the graph
+rather than the assertion" — a "PyCAT is fast" sentence becomes a number on an axis.
+- **New panel `supp_runtime`** (`toolbox/manuscript/panels.py`): reads the same `context['benchmark_results']`
+  Fig 2 does — each candidate's `runtime_s` (recorded by `benchmark_tools.basic_metrics` whenever the method
+  actually ran) — and renders runtime-by-method through the canonical `FigureSpec`. An external/uploaded mask
+  carries no runtime (`runtime_s is None`), so it is skipped and the panel greys when nothing was timed — the
+  panel never invents a runtime.
+- `tests/test_manuscript_panels.py` (`base`, 13: +2) runs two trivial threshold segmenters through
+  `run_benchmark` (so real runtimes are recorded) and asserts the figure plots a non-negative measured runtime
+  per method; it greys on an external-mask (no-runtime) result. **Remaining (Qt-gated): the interactive gallery,
+  the export-widget GIF option, the other Part C timed panels (lazy-load / batch-throughput harnesses), Part D
+  recorded demos, Part E FeatureCard discoverability (blocked until the gallery opener exists).**
+
 ## [1.6.424] - 2026-07-28
 ### Added — **Manuscript Fig 2 (benchmark/validation) is now wired — all five panels generate when their data is present.**
 The manuscript figure registry left Fig 2 hard-greyed on the belief that no Dice/F1 validation suite existed.
