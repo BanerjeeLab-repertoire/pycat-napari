@@ -251,6 +251,28 @@ def replay_ivf_segmentation(state: dict, image_path: Path, params: dict, output_
           f"{int(labeled.max())} droplets.")
 
 
+def replay_ivf_droplet_segment(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """In-vitro fluorescence droplet segmentation for the NAVIGATOR, via the extracted @tags_layer producer
+    ``segment_ivf_droplets`` — the same function the in-vitro-fluorescence panel uses (whole-field threshold, no
+    cells). Droplets ≡ condensates: the in-vitro context (not a different target) is what selects this over the
+    in-cell puncta pipeline. Writes ``ivf_droplet_mask`` (the directly-labelled droplets)."""
+    from pycat.toolbox.invitro.segmentation import segment_ivf_droplets
+    pre = np.asarray(state.get('preprocessed', state['image']))
+    raw = _normalize_to_float(state['image'])
+    labeled, _unrefined = segment_ivf_droplets(
+        pre, raw, method=params.get('method', 'otsu'),
+        min_area=int(params.get('min_area', 6)),
+        reject_nonround=bool(params.get('reject_nonround', False)))
+    labeled = np.asarray(labeled).astype(np.int32)
+    state['ivf_droplet_mask'] = labeled
+    state['cellpose_mask']    = labeled       # aliases for downstream compatibility
+    state['labeled_cells']    = labeled
+    _save_array(labeled.astype(np.uint16),
+                output_dir / f"{image_path.stem}_ivf_droplet_mask.tiff")
+    print(f"[PyCAT Batch]   IVF droplet segmentation ({params.get('method', 'otsu')}): "
+          f"{int(labeled.max())} droplets.")
+
+
 # ---------------------------------------------------------------------------
 # Headless calibrated concentration (reliability_index roadmap)
 # ---------------------------------------------------------------------------

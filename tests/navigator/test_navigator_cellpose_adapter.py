@@ -90,7 +90,8 @@ def test_every_adapter_targets_a_real_registered_batch_step():
                 targets.add(bs)
     assert targets == {"background_removal", "cellpose_segmentation", "cell_analysis",
                        "condensate_analysis", "condensate_segmentation",
-                       "bf_preprocess", "bf_condensate_segmentation"}   # + the brightfield chain (1.6.414)
+                       "bf_preprocess", "bf_condensate_segmentation",   # + the brightfield chain (1.6.414)
+                       "ivf_droplet_segment"}                           # + the in-vitro droplet chain
     missing = [bs for bs in targets if bs not in registry]
     assert not missing, f"adapters target batch steps that are not registered: {missing}"
 

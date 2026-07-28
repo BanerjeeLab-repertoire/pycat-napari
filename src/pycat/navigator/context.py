@@ -180,6 +180,15 @@ def _req_brightfield(ctx: AnalysisContext) -> Optional[bool]:
     return None
 
 
+def _req_in_vitro(ctx: AnalysisContext) -> Optional[bool]:
+    """A purified in-vitro sample (condensates/droplets in a whole field, no cells) — the signal that selects the
+    whole-field threshold segmenter over the in-cell puncta pipeline. Droplets and condensates are the SAME target
+    (synonymous); in-vitro vs in-cell is this context distinction, not a different target."""
+    if ctx.known("in_vitro"):
+        return bool(ctx.get("in_vitro"))
+    return None
+
+
 AnalysisContext.PREDICATES = {
     "time_series": _req_time_series,
     "two_channels": _req_two_channels,
@@ -187,4 +196,5 @@ AnalysisContext.PREDICATES = {
     "calibrated": _req_calibrated,
     "fluorescence": _req_fluorescence,
     "brightfield": _req_brightfield,
+    "in_vitro": _req_in_vitro,
 }

@@ -19,6 +19,7 @@ from pycat.utils.tag_registry import tags_layer
 
 
 @tags_layer('ivf_droplet_segment', role='labels', target='condensate', inputs=('image',),
+            requirements=('in_vitro', 'fluorescence'),
             summary='In-vitro fluorescence droplet segmentation')
 def segment_ivf_droplets(pre, raw, *, method='otsu', otsu_sensitivity=1.0, multiotsu_classes=3,
                          multiotsu_upper=False, sauvola_window=35, sauvola_k=0.0, min_radius=2.0,

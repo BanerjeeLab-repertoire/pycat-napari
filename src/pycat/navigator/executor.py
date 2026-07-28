@@ -96,9 +96,13 @@ def _feature_analysis_step(intent, state=None):
     if target == "cell":
         return "cell_analysis"
     if target == "condensate":
-        if isinstance(state, dict) and state.get("bf_condensate_mask") is not None \
-                and state.get("puncta_mask") is None:
-            return "bf_condensate_analysis"
+        if isinstance(state, dict) and state.get("puncta_mask") is None:
+            # a directly-labelled condensate mask (no per-cell puncta nesting): brightfield → its OD metrics;
+            # in-vitro droplets → the field-summary/size-distribution measurement (staged — next increment)
+            if state.get("bf_condensate_mask") is not None:
+                return "bf_condensate_analysis"
+            if state.get("ivf_droplet_mask") is not None:
+                return None
         return "condensate_analysis"
     return None
 
@@ -162,6 +166,15 @@ def _bf_segment_params(intent, ctx, state, reviewed):
     return _reviewed_or_default(reviewed, _BF_CONDENSATE_SEG_DEFAULTS)
 
 
+#: In-vitro fluorescence droplet segmentation knobs (`segment_ivf_droplets` via `replay_ivf_droplet_segment`),
+#: with the grounded defaults the producer uses. Method 'otsu' is the pure-skimage default.
+_IVF_SEG_DEFAULTS: dict = {"method": "otsu", "min_area": 6, "reject_nonround": False}
+
+
+def _ivf_segment_params(intent, ctx, state, reviewed):
+    return _reviewed_or_default(reviewed, _IVF_SEG_DEFAULTS)
+
+
 #: The declared adapters, keyed by the REAL navigator module name `execution_order` reports. The ONLY place a
 #: plan step is tied to a computation — a step absent here (or one whose batch step resolves to ``None``) is
 #: reported "run from its panel", never guessed at. Grows one workflow per phase, each behind a
@@ -178,6 +191,9 @@ _ADAPTERS: dict = {
     # which condensate analysis then reads as its mask). See the brightfield-preprocessing exception.
     "bf_preprocess": ExecAdapter("bf_preprocess", "bf_preprocess", _bf_preprocess_params),
     "bf_segment": ExecAdapter("bf_segment", "bf_condensate_segmentation", _bf_segment_params),
+    # In-vitro fluorescence droplet segmentation (droplets ≡ condensates; the in-vitro CONTEXT selects it over the
+    # in-cell puncta segmenter). The op runs the extracted producer `segment_ivf_droplets` → `ivf_droplet_mask`.
+    "ivf_droplet_segment": ExecAdapter("ivf_droplet_segment", "ivf_droplet_segment", _ivf_segment_params),
 }
 
 

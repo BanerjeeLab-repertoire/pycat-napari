@@ -102,6 +102,15 @@ _MATERIAL: dict = {
         StepParam("min_circularity", "Min circularity", "float", 0.5, minimum=0.0, maximum=1.0,
                   help="Minimum circularity (1 = perfect circle) a blob must have to be kept. Default 0.5."),
     ),
+    # In-vitro fluorescence droplet segmentation: the threshold method + the small-object cutoff.
+    "ivf_droplet_segment": (
+        StepParam("method", "Threshold method", "choice", "otsu",
+                  choices=("otsu", "multiotsu", "sauvola"),
+                  help="How the whole-field droplet threshold is chosen: otsu (global), multiotsu (multi-level), "
+                       "or sauvola (local). Default otsu."),
+        StepParam("min_area", "Min droplet area (px)", "int", 6, minimum=1,
+                  help="Smallest droplet kept, in pixels of area. Larger drops small/noise objects. Default 6."),
+    ),
 }
 
 

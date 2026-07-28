@@ -68,6 +68,17 @@
 > run-time state dispatch (added 1.6.414) routes brightfield → `bf_condensate_analysis`, fluorescence →
 > `condensate_analysis`. No op-graph change. Gate: full plan runs every step; guided `bf_condensate_df` == manual
 > bit for bit. **The brightfield condensate workflow now runs end to end in the guided flow.**
+> **Phase 3 (cont.) — in-vitro fluorescence droplet SEGMENTATION (1.6.416).** Droplets ≡ condensates (same target,
+> per the science owner); in-vitro vs in-cell is a CONTEXT distinction (no cells → whole-field threshold), not a
+> `droplet` target. New `in_vitro` context flag (requirement + `_req_in_vitro` predicate, mirroring the modality
+> gate): `ivf_droplet_segment` (the extracted producer `segment_ivf_droplets`, `target='condensate'`) tagged
+> `requirements=('in_vitro','fluorescence')` wins the segmenter slot on a condensate+in_vitro+fluorescence plan via
+> context-score; in-cell keeps `subcellular_segment`, brightfield keeps `bf_segment`. New batch handler
+> `replay_ivf_droplet_segment` → `ivf_droplet_mask`; method + min-area knobs in the param review. Measurement
+> STAGED (needs_panel, state-dispatched) — field-summary/size-distribution is the next increment. Gate
+> `test_navigator_invitro_adapter.py` (`base`, 5): context selects the droplet segmenter, guided == manual
+> `segment_ivf_droplets` bit for bit, edited `min_area` drives the run. **Follow-on:** reconcile the canonical
+> `target='droplet'` cases to condensate+in_vitro (they currently pass unchanged), and the in-vitro measurement.
 > **Phase 1 — DONE (1.6.332).** `navigator/executor.py`: `run_plan(plan, state, …)` drives the batch `_STEP_MAP`
 > handlers in `execution_order` order, threading `state`; `ExecAdapter` maps a plan step → batch handler +
 > `params_from`; a step with no adapter is reported ('needs_panel'), never invoked with guessed args; gate

@@ -120,6 +120,7 @@ REQUIREMENTS: dict[str, str] = {
     'gpu':          'a CUDA-capable GPU',
     'brightfield':  'a brightfield (transmitted-light) image — DARK objects on a bright field',
     'fluorescence': 'a fluorescence image',
+    'in_vitro':     'a purified in-vitro sample — condensates/droplets in a whole field, with NO cells',
 }
 REQUIREMENT_NAMES = tuple(sorted(REQUIREMENTS))
 

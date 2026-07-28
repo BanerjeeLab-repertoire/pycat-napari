@@ -817,7 +817,10 @@
       "module": "segmentation",
       "op": "ivf_droplet_segment",
       "produces": "labels",
-      "requirements": [],
+      "requirements": [
+        "in_vitro",
+        "fluorescence"
+      ],
       "role": "labels",
       "role_declared": "labels",
       "source": "src/pycat/toolbox/invitro/segmentation.py",

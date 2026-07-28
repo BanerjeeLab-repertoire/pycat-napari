@@ -1,3 +1,28 @@
+## [1.6.416] - 2026-07-27
+### Added — **The in-vitro fluorescence droplet SEGMENTATION — a context branch, not a new target (Phase 3).**
+Droplets and condensates are the same target (synonymous, per the science owner). What distinguishes the in-vitro
+workflow from the in-cell one is the **absence of cells**: in-vitro is a whole-field threshold segmentation of
+droplets, where in-cell is the per-cell puncta pipeline. So this is a **context** distinction, not a `droplet`
+target — carried by a new `in_vitro` context flag that mirrors how brightfield uses the modality gate.
+- **`in_vitro` context**: new requirement in the tag vocabulary + `_req_in_vitro` predicate. `ivf_droplet_segment`
+  (the extracted `@tags_layer` producer `segment_ivf_droplets` — the same function the panel uses) is tagged
+  `requirements=('in_vitro', 'fluorescence')`, so on a `condensate` plan with `in_vitro` + fluorescence it wins
+  the segmenter slot via context-score, while the in-cell plan keeps `subcellular_segment` and brightfield keeps
+  `bf_segment` (the `fluorescence` gate keeps the in-vitro fluorescence segmenter off brightfield). The target
+  stays `condensate` throughout. Catalog regenerated (op count unchanged at 94 — a requirement, not a new op).
+- **New batch handler `replay_ivf_droplet_segment`** (`ivf_droplet_segment` in `_STEP_MAP`) drives
+  `segment_ivf_droplets` (whole-field otsu/multiotsu/sauvola threshold, no cells) → `ivf_droplet_mask`. Adapter
+  keyed on the op-id; the threshold method + min-area knob are surfaced in the param review.
+- **Measurement staged.** Like the brightfield chain, the field-summary/size-distribution measurement is the next
+  increment; the run-time state dispatch routes the in-vitro measurement step to needs_panel for now (dispatched
+  on the produced `ivf_droplet_mask`), never a wrong-handler guess.
+
+Acceptance gate `tests/navigator/test_navigator_invitro_adapter.py` (`base`, 5): `in_vitro` context selects
+`ivf_droplet_segment` (in-cell fluorescence stays `subcellular_segment`, brightfield stays `bf_segment`); guided
+segmentation equals the manual `segment_ivf_droplets` bit for bit; an edited `min_area` drives the run; the
+measurement reports needs_panel. Full gate green. (The canonical cases still use `target='droplet'` — reconciling
+them to condensate+in_vitro is a documented follow-on.)
+
 ## [1.6.415] - 2026-07-27
 ### Added — **The brightfield condensate MEASUREMENT — the chain now runs end to end (Phase 3).**
 1.6.414 shipped brightfield condensate segmentation but deferred the measurement (neither fluorescence route
