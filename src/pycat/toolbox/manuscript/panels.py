@@ -127,6 +127,47 @@ def _fig1_generate(context):
     return pd.DataFrame(run_full_qc(a, **kwargs))
 
 
+# ── panel: Fig 2 — benchmark / validation (Dice vs ground truth, wired to benchmark_tools) ────────────
+
+def _fig2_scores(context):
+    """``(method_name, dice)`` for every candidate scored against a ground truth, or an empty list. Reads
+    ``context['benchmark_results']`` — the dict :func:`benchmark_tools.run_benchmark` returns in VALIDATION
+    mode (a named ground truth). A comparison-mode result (no ground truth) has no per-method Dice, so the
+    panel greys — validation needs ground-truth masks, and the panel never invents them."""
+    res = (context or {}).get("benchmark_results")
+    if not isinstance(res, dict) or not res.get("ground_truth"):
+        return []
+    scores = []
+    for cand in res.get("candidates", []):
+        vg = cand.get("vs_ground_truth") if isinstance(cand, dict) else None
+        if not isinstance(vg, dict):
+            continue
+        try:
+            dice = float(vg.get("dice"))
+        except (TypeError, ValueError):
+            continue
+        if dice == dice:                       # exclude NaN (a candidate that scored nothing)
+            scores.append((str(cand.get("name", "?")), dice))
+    return scores
+
+
+def _fig2_available(context):
+    return len(_fig2_scores(context)) > 0
+
+
+def _fig2_generate(context):
+    """The validation figure: each candidate method's pixel-Dice overlap against the ground-truth mask,
+    rendered through the canonical FigureSpec (F1/IoU are also computed — they live in the benchmark table)."""
+    from pycat.utils.figure_spec import FigureData, FigureSpec, render
+    scores = _fig2_scores(context)
+    groups = tuple(name for name, _ in scores)
+    fig_data = FigureData(measurement="segmentation_dice", groups=groups,
+                          values_by_group={name: [dice] for name, dice in scores}, x_label="method")
+    spec = FigureSpec(title="Segmentation accuracy vs ground truth",
+                      y_label="Dice (vs ground truth)", y_limits=(0.0, 1.0), annotate_n=False)
+    return render(fig_data, spec)
+
+
 # ── panel: Supp — reliability / rigor (wired) ─────────────────────────────────────────────────────────
 
 def _reliability_available(context):
@@ -155,16 +196,6 @@ def _thermo_generate(context):
     return delta_g_transfer(ctx["c_dense"], ctx["c_dilute"], ctx["temperature_K"])
 
 
-# ── panels whose composer/data does not exist yet — greyed with their requirement (never a dead button) ──
-
-def _never(context):
-    return False
-
-
-def _unavailable_generate(_context):
-    raise RuntimeError("this panel's data is not available — run the step named in its data_requirement first")
-
-
 #: The registered panels, in the manuscript's figure order. A panel is shown greyed (its ``data_requirement``
 #: as the tooltip) whenever ``available(context)`` is False — never a dead button.
 _PANELS = (
@@ -175,9 +206,9 @@ _PANELS = (
         produces="table", generate=_fig1_generate, available=_fig1_available),
     FigurePanel(
         key="fig2_benchmark", title="Fig 2 — benchmark / validation", figure_role="main",
-        data_requirement="Run the validation suite (Analysis → Validation) on at least one segmentation case; needs ground-truth masks.",
-        tooltip="Dice/F1 vs ground truth, plus cross-release metric stability when ≥2 releases are recorded.",
-        produces="figure", generate=_unavailable_generate, available=_never),
+        data_requirement="Run the benchmark in validation mode (a named ground-truth mask) on at least one segmentation case; put the result dict in the context as 'benchmark_results'.",
+        tooltip="Each method's pixel-Dice overlap against the ground-truth mask (F1/IoU are in the benchmark table).",
+        produces="figure", generate=_fig2_generate, available=_fig2_available),
     FigurePanel(
         key="fig3_phenotyping", title="Fig 3 — comparative phenotyping", figure_role="main",
         data_requirement="Load a consolidated_long.csv (a batch's long-format table) with a measurement, a condition field, and per-image replicates.",

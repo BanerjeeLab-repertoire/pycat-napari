@@ -1,3 +1,21 @@
+## [1.6.424] - 2026-07-28
+### Added — **Manuscript Fig 2 (benchmark/validation) is now wired — all five panels generate when their data is present.**
+The manuscript figure registry left Fig 2 hard-greyed on the belief that no Dice/F1 validation suite existed.
+That was premise drift: the earlier increment searched for the spec's named `benchmarks/run_suite.py`, but the
+real suite is `toolbox/benchmark_tools.py` — `run_benchmark(...)` produces per-candidate pixel **Dice/IoU** and
+matched-detection **F1** against a named ground truth.
+- **Fig 2 wired** (`toolbox/manuscript/panels.py`): `available` when `context['benchmark_results']` is a
+  **validation-mode** result (a named ground truth with per-method scores); `generate` builds the
+  Dice-vs-ground-truth figure through the canonical `FigureSpec` (one point per method, y in [0,1]), so it shares
+  the fonts/palette/export of every other panel. F1/IoU are also computed and live in the benchmark table.
+- **Honest greying preserved**: a comparison-mode benchmark (no named ground truth) has no per-method Dice, so
+  the panel greys — it never invents ground truth. With all five panels now composable, the dead
+  `_never`/`_unavailable_generate` stubs are removed.
+- `tests/test_manuscript_panels.py` (`base`, 11: +3) builds a real validation-mode result from pre-computed
+  masks (no heavy segmenter) and asserts an identical mask scores Dice 1.0, an under-segmented one scores a real
+  sub-1 Dice, and the figure renders through `FigureSpec`. **Remaining (Qt-gated): the interactive gallery, the
+  export-widget GIF option, Part C timed panels, Part D recorded demos, Part E FeatureCard discoverability.**
+
 ## [1.6.423] - 2026-07-28
 ### Added — **VPT microrheology batch handler — the flagship viscosity chain runs headless (spec N2b-1a).**
 The `vpt_microrheology` batch step was a skip-stub (`print('… skipped in headless mode')`) — one of ~35 stubbed
