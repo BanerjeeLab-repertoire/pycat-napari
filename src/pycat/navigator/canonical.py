@@ -87,22 +87,30 @@ CANONICAL_CASES: List[CanonicalCase] = [
         required_ops={"feature_analysis.cell_analysis"},
         forbidden_ops={"frap.fit_recovery", "vpt.microrheology"},
         note="segment -> per-object morphology"),
+    # Droplets ≡ condensates (same target); in-vitro vs in-cell is the `in_vitro` CONTEXT (no cells → a
+    # whole-field threshold segmentation), NOT a separate `droplet` target. (Reconciled 2026-07-27 to the
+    # condensate+in_vitro model the adapters implement; these were `target='droplet'` before.)
     CanonicalCase(
-        "In Vitro Fluorescence", "droplet", ["size"], {},
-        required_ops={"feature_analysis.cell_analysis"},
-        forbidden_ops={"frap.fit_recovery"},
-        note="segment droplets -> field summary / size distribution"),
+        "In Vitro Fluorescence", "condensate", ["size"], dict(modality="fluorescence", in_vitro=True),
+        required_ops={"ivf_droplet_segment", "feature_analysis.cell_analysis", "invitro.size_distribution"},
+        forbidden_ops={"frap.fit_recovery", "subcellular_segment"},
+        note="in-vitro fluorescence: threshold droplet segmentation -> per-droplet measure -> size distribution "
+             "(the measure→interpret chain). NOT the in-cell puncta segmenter."),
+    CanonicalCase(
+        "In Vitro Brightfield", "condensate", ["morphology"], dict(modality="brightfield", in_vitro=True),
+        required_ops={"bf_segment", "feature_analysis.cell_analysis"},
+        forbidden_ops={"subcellular_segment", "cellpose"},
+        note="in-vitro brightfield: preprocessing -> dark-blob segmentation -> cell-less OD metrics (the same "
+             "cell-less brightfield chain, which is exactly right when there are no cells)."),
 
     # ---- need codebase-level selection or specialized ops ------------------
     CanonicalCase(
         "Cellular Brightfield", "condensate", ["morphology"], dict(modality="brightfield"),
         status="needs_codebase",
-        note="requires modality-aware selection to prefer bf_segment/optical_density "
-             "over fluorescence segmenters — needs the step->handler map in ui_modules.py"),
-    CanonicalCase(
-        "In Vitro Brightfield", "droplet", ["morphology"], dict(modality="brightfield"),
-        status="needs_codebase",
-        note="same modality-aware selection gap as Cellular Brightfield"),
+        note="the modality-aware selection is now wired (bf_segment on brightfield), but a CELLULAR brightfield "
+             "workflow wants the cells segmented first (bf_cell_segmentation) — which is Cellpose/torch, not "
+             "headlessly provable. The cell-less chain (see In Vitro Brightfield) applies only when there are "
+             "no cells."),
     CanonicalCase(
         "Z-Stack (3D)", "condensate", ["size"], dict(axes=["z"], voxel_size=0.2),
         status="needs_codebase",

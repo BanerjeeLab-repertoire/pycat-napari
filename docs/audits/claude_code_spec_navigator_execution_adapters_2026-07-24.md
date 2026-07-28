@@ -90,6 +90,15 @@
 > `invitro.size_distribution → ivf_size_distribution`, `n_bins` reviewable. Gate: planner chains it in-vitro only;
 > full plan runs every step; guided per-droplet table == manual `partition_coefficient_local` and guided fit ==
 > manual `fit_size_distribution`, bit for bit. **The in-vitro fluorescence droplet workflow now runs end to end.**
+> **Phase 3 (cont.) — canonical oracle reconciled to the condensate+in_vitro model (2026-07-27, git-only).** The
+> canonical cases `In Vitro Fluorescence` and `In Vitro Brightfield` were `target='droplet'` (encoding the old
+> separate-target model, and passing only because they required just `feature_analysis`). Reconciled to
+> `target='condensate'` + `in_vitro` context, with the real required ops: In Vitro Fluorescence now asserts the
+> full `ivf_droplet_segment → feature_analysis → invitro.size_distribution` chain (forbidding the puncta
+> segmenter), and In Vitro Brightfield — newly REPRODUCIBLE via the cell-less brightfield chain — asserts
+> `bf_segment → feature_analysis`. `Cellular Brightfield` stays needs_codebase (a with-cells brightfield workflow
+> wants Cellpose/torch cell segmentation first). Oracle-data only (`canonical.py`, no runtime importer). **Both
+> in-vitro workflows are now verified by the oracle, not just the fluorescence one.**
 > **Phase 1 — DONE (1.6.332).** `navigator/executor.py`: `run_plan(plan, state, …)` drives the batch `_STEP_MAP`
 > handlers in `execution_order` order, threading `state`; `ExecAdapter` maps a plan step → batch handler +
 > `params_from`; a step with no adapter is reported ('needs_panel'), never invoked with guessed args; gate
