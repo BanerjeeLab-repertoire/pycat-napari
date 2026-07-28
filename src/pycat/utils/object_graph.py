@@ -17,7 +17,9 @@ The core (`BiologicalObject` / `ObjectGraph` / `objects_from_table` / `build_obj
 "objects that carry their own id and (optionally) their parent's id" (increment 1). The **schema-specific**
 join that derives a punctum's parent-cell id from the cell-labelled-puncta convention — so PyCAT's real
 ``cell_df`` + ``puncta_df`` assemble into one graph — is :func:`build_cell_puncta_graph` at the bottom
-(increment 2). The linked-navigation / state-vector vision is a later increment still.
+(increment 2). The graph then earns its keep: :meth:`ObjectGraph.aggregate_children` /
+:meth:`ObjectGraph.child_summary` roll a child measurement up to its parent (puncta-per-cell counts, total /
+mean punctum area), the first step of the state-vector direction (increment 3). Linked navigation is later still.
 """
 from __future__ import annotations
 
@@ -128,6 +130,47 @@ class ObjectGraph:
     def filter(self, predicate):
         """Every object for which ``predicate(object)`` is truthy."""
         return [o for o in self._by_key.values() if predicate(o)]
+
+    # ── aggregation: a parent's state, rolled up from its children (increment 3) ───────────────────
+    def aggregate_children(self, key, measurement=None, reduce='count'):
+        """Reduce a ``measurement`` over the DIRECT children of ``key``. ``reduce`` is ``'count'`` (children,
+        ``measurement`` ignored), or ``'sum'`` / ``'mean'`` / ``'min'`` / ``'max'`` over the numeric values of
+        ``measurement`` — the graph-native "roll the children up to the parent" (e.g. total punctum area in a
+        cell). Non-numeric and NaN values are skipped; ``count`` of no children is ``0``, and every other reducer
+        over no numeric values is ``None`` (nothing to reduce) — never a guessed zero."""
+        children = self.children_of(key)
+        if reduce == 'count':
+            return len(children)
+        vals = [c.measurements.get(measurement) for c in children]
+        vals = [v for v in vals if isinstance(v, (int, float)) and not isinstance(v, bool) and v == v]
+        if not vals:
+            return None
+        if reduce == 'sum':
+            return sum(vals)
+        if reduce == 'mean':
+            return sum(vals) / len(vals)
+        if reduce == 'min':
+            return min(vals)
+        if reduce == 'max':
+            return max(vals)
+        raise ValueError(f"unknown reduce {reduce!r} (count/sum/mean/min/max)")
+
+    def child_summary(self, parent_type, *, measurements=(), reducers=('sum', 'mean')):
+        """One row per parent object of ``parent_type`` — its ``key``, ``entity_type``, own measurements, the
+        child count (``n_children``), and, for each named child ``measurement`` × ``reducer``, a
+        ``f'{measurement}_{reducer}'`` field. The per-parent roll-up over the graph (e.g. puncta-per-cell counts
+        and total / mean punctum area from a cell→puncta graph), general over any parent/child types. Returns a
+        list of plain dicts (the caller may build a DataFrame); the graph and its source tables are untouched."""
+        rows = []
+        for p in self.of_type(parent_type):
+            row = {'key': p.key, 'entity_type': p.entity_type,
+                   'n_children': self.aggregate_children(p.key)}
+            row.update(p.measurements)
+            for m in measurements:
+                for red in reducers:
+                    row[f'{m}_{red}'] = self.aggregate_children(p.key, m, red)
+            rows.append(row)
+        return rows
 
 
 # ── assembly from tables PyCAT already produces ──────────────────────────────────────────────────

@@ -155,3 +155,42 @@ def test_cell_puncta_join_with_no_parent_column_yields_a_flat_graph():
     g = build_cell_puncta_graph(cells, flat)
     assert len(g.of_type('punctum')) == 2
     assert all(g.parent_of(p.key) is None for p in g.of_type('punctum'))   # unlinked → roots, not orphans
+
+
+# ── increment 3: aggregation (roll a child measurement up to its parent) ──────────────────────────
+
+def test_aggregate_children_counts_and_reduces_a_child_measurement():
+    cells, puncta = _stamped_cells_and_puncta()
+    g = build_cell_puncta_graph(cells, puncta)                  # cell 1: puncta area 5,6; cell 2: area 7
+    cell1 = next(c for c in g.of_type('cell') if c.measurements['label'] == 1)
+    cell2 = next(c for c in g.of_type('cell') if c.measurements['label'] == 2)
+    assert g.aggregate_children(cell1.key) == 2                 # count of direct children
+    assert g.aggregate_children(cell1.key, 'area', 'sum') == 11.0
+    assert g.aggregate_children(cell1.key, 'area', 'mean') == 5.5
+    assert g.aggregate_children(cell1.key, 'area', 'max') == 6.0
+    assert g.aggregate_children(cell2.key, 'area', 'sum') == 7.0
+
+
+def test_aggregate_over_no_numeric_values_is_None_not_a_guessed_zero():
+    cells, puncta = _stamped_cells_and_puncta()
+    g = build_cell_puncta_graph(cells, puncta)
+    cell1 = next(c for c in g.of_type('cell') if c.measurements['label'] == 1)
+    assert g.aggregate_children(cell1.key, 'no_such_measurement', 'sum') is None   # nothing to reduce
+    # a childless object: count 0, every other reducer None
+    leaf = g.of_type('punctum')[0]
+    assert g.aggregate_children(leaf.key) == 0
+    assert g.aggregate_children(leaf.key, 'area', 'mean') is None
+    with pytest.raises(ValueError):
+        g.aggregate_children(cell1.key, 'area', 'median')          # unknown reducer
+
+
+def test_child_summary_is_a_per_parent_rollup_table():
+    cells, puncta = _stamped_cells_and_puncta()                    # 4 puncta; one orphans absent cell 9
+    g = build_cell_puncta_graph(cells, puncta)
+    rows = {r['label']: r for r in g.child_summary('cell', measurements=('area',), reducers=('sum', 'mean'))}
+    assert set(rows) == {1, 2}                                     # one row per cell
+    assert rows[1]['n_children'] == 2 and rows[1]['area_sum'] == 11.0 and rows[1]['area_mean'] == 5.5
+    assert rows[2]['n_children'] == 1 and rows[2]['area_sum'] == 7.0
+    assert rows[1]['entity_type'] == 'cell' and rows[1]['area'] == 100.0   # the parent's own measurement survives
+    # the orphan punctum (named absent cell 9) contributes to NO cell's rollup
+    assert sum(r['n_children'] for r in rows.values()) == 3

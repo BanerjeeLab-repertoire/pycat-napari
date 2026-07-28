@@ -1,3 +1,17 @@
+## [1.6.420] - 2026-07-28
+### Added — **Biological object graph, increment 3 — aggregation (the graph earns its keep).**
+Increments 1–2 built the graph and the real cell→puncta join; this is the first thing that USES the structure to
+compute something. `ObjectGraph.aggregate_children(key, measurement, reduce)` rolls a child measurement up to its
+parent — `count` (children), or `sum`/`mean`/`min`/`max` over the numeric values — the graph-native "total
+punctum area in a cell." Non-numeric and NaN values are skipped; a reducer over no numeric values returns `None`,
+never a guessed zero. `ObjectGraph.child_summary(parent_type, measurements=, reducers=)` is the per-parent
+roll-up table: one plain dict per parent with its own measurements, `n_children`, and a `{measurement}_{reducer}`
+field for each requested pair — puncta-per-cell counts and total/mean punctum area from a cell→puncta graph,
+general over any parent/child types, changing neither the graph nor its source tables. This is the first step of
+the state-vector direction. Tests (`test_object_graph.py`, +3): counts and reductions over real cell→puncta
+graphs, the honest `None`/`0`/`ValueError` edges, and the per-parent summary (the orphan punctum contributes to
+no cell's rollup).
+
 ## [1.6.419] - 2026-07-28
 ### Added — **Biological object graph, increment 2 — the real cell→puncta join.**
 Increment 1 (1.6.227) built the generic read-only object graph (`BiologicalObject` / `ObjectGraph` /
