@@ -27,6 +27,9 @@ import numpy as np
 # Local application imports
 from pycat.data.data_modules import BaseDataClass
 
+pytestmark = pytest.mark.base      # imports pandas + the data stack at module scope
+
+
 
 @pytest.fixture
 def base_data():

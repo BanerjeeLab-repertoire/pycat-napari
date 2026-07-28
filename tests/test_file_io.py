@@ -31,6 +31,9 @@ import os
 from pycat.file_io.file_io import FileIOClass
 from pycat.data.data_modules import BaseDataClass
 
+pytestmark = pytest.mark.base      # imports skimage + file_io / data stack at module scope
+
+
 
 @pytest.fixture
 def mock_viewer():

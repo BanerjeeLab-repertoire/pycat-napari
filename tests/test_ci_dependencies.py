@@ -864,6 +864,10 @@ _SILENTLY_SKIPPABLE_AT_IMPORT = frozenset({
     "test_sidecar_discovery.py", "test_sidecar_metadata_step1.py", "test_stack_layer_builders_extraction.py",
     "test_stack_metadata_extraction.py", "test_storage_probe_deadline.py", "test_tiff_page_map.py",
     "test_tiff_reader_selection.py", "test_writers_session_outputs.py",
+    # N1 (1.6.415 next-steps): given an explicit `base` marker so they RUN in the base lane, but they import a
+    # GUI-bound pycat module (pycat.data / pycat.file_io) at module scope, so they still vanish when that stack
+    # is absent — grandfathered here until their imports are made lazy.
+    "test_data_management.py", "test_file_io.py",
 })
 
 
@@ -922,3 +926,38 @@ def test_no_NEW_test_file_is_silently_skippable_at_import():
     assert not fixed, (
         "these files no longer have the silent-skip shape — remove them from `_SILENTLY_SKIPPABLE_AT_IMPORT` "
         "so the debt list stays accurate:\n  " + "\n  ".join(fixed))
+
+
+@pytest.mark.core
+def test_heavy_import_tests_are_marked():
+    """A test file importing a base-stack package at MODULE SCOPE must be EXPLICITLY classified, so it is not
+    IMPLICITLY ignored: a `core`/`base`/`integration`/`gui` marker (module-level or per-test), a module-scope
+    ``importorskip``, or a module-scope GUI-bound pycat import (which `conftest.pytest_ignore_collect` already
+    ignores when the stack is absent). An UNMARKED clean-headless heavy-import file aborts collection in the
+    minimal `core` lane (the pandas ModuleNotFoundError of 2026-07-25) and never runs in the base gate.
+    Classification is what conftest keys off — make it explicit. N1 of the 1.6.415 next-steps spec."""
+    heavy = _BASE_SCIENTIFIC_MODULES | {"SimpleITK", "openpyxl"}
+    offenders = []
+    for f in sorted(pathlib.Path("tests").glob("test_*.py")):
+        src = f.read_text(encoding="utf-8", errors="ignore")
+        tree = ast.parse(src)
+        imported, gui_bound = set(), False
+        for node in tree.body:                        # module scope only
+            names = ([a.name for a in node.names] if isinstance(node, ast.Import)
+                     else [node.module] if isinstance(node, ast.ImportFrom) and node.module else [])
+            for name in names:
+                imported.add(name.split(".")[0])
+                if any(name.startswith(p) for p in _GUI_BOUND_PYCAT):
+                    gui_bound = True                  # conftest already ignores such a file when the stack is absent
+        marks = _module_level_marks(tree)
+        for node in ast.walk(tree):                   # a file classified entirely via per-test decorators counts too
+            if isinstance(node, ast.FunctionDef):
+                for d in node.decorator_list:
+                    marks |= _mark_names(d)
+        classified = bool(marks & {"core", "base", "integration", "gui"}) or gui_bound or "importorskip" in src
+        if (imported & heavy) and not classified:
+            offenders.append(f"{f.name}: module-scope {sorted(imported & heavy)} but no core/base/integration/gui marker")
+    assert not offenders, (
+        "Unmarked heavy-import test files (a base-stack import at module scope + no classification). Add "
+        "`pytestmark = pytest.mark.base` (or the right tier) so the file is EXPLICITLY classified, not "
+        "implicitly ignored:\n  " + "\n  ".join(offenders))
