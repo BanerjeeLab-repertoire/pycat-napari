@@ -9,7 +9,8 @@ import pandas as pd
 import pytest
 
 from pycat.utils.object_graph import (
-    BiologicalObject, ObjectGraph, objects_from_table, build_object_graph)
+    BiologicalObject, ObjectGraph, objects_from_table, build_object_graph,
+    build_cell_puncta_graph)
 
 pytestmark = pytest.mark.base
 
@@ -99,3 +100,58 @@ def test_the_graph_does_not_mutate_the_source_table():
     before = df.copy()
     build_object_graph(objects_from_table(df, 'cell'))
     pd.testing.assert_frame_equal(df, before)
+
+
+# ── increment 2: the schema-specific cell→puncta join ────────────────────────────────────────────
+
+def _stamped_cells_and_puncta():
+    """Real cell_df + puncta_df stamped the way PyCAT stamps them: cells keyed by their own `label`, puncta
+    naming their parent cell by `'cell label'` (the parent-column spelling puncta use)."""
+    from pycat.utils.entity_ref import stamp_entity_ids
+    cells = pd.DataFrame({'label': [1, 2], 'area': [100.0, 200.0]})
+    cells = stamp_entity_ids(cells, entity_type='cell', source_path='x.tif', operation_id='cell_analysis')
+    # two puncta in cell 1, one in cell 2, and one orphan naming a cell (9) that isn't in cell_df
+    puncta = pd.DataFrame({'label': [1, 2, 1, 1], 'cell label': [1, 1, 2, 9], 'area': [5.0, 6.0, 7.0, 8.0]})
+    puncta = stamp_entity_ids(puncta, entity_type='punctum', source_path='x.tif', operation_id='puncta_analysis')
+    return cells, puncta
+
+
+def test_cell_puncta_join_links_each_punctum_to_its_cell():
+    cells, puncta = _stamped_cells_and_puncta()
+    g = build_cell_puncta_graph(cells, puncta)
+    assert len(g.of_type('cell')) == 2 and len(g.of_type('punctum')) == 4
+    cell1 = next(c for c in g.of_type('cell') if c.measurements['label'] == 1)
+    cell2 = next(c for c in g.of_type('cell') if c.measurements['label'] == 2)
+    # the graph reproduces the segmentation nesting: cell 1 has two puncta, cell 2 has one
+    assert len(g.children_of(cell1.key)) == 2
+    assert len(g.children_of(cell2.key)) == 1
+    # a punctum's ancestor is its actual cell object (keyed on the existing _pycat_entity_id — no parallel id)
+    punctum = g.children_of(cell1.key)[0]
+    assert g.parent_of(punctum.key) is cell1
+
+
+def test_cell_puncta_join_surfaces_an_orphan_punctum_not_silently_roots_it():
+    cells, puncta = _stamped_cells_and_puncta()
+    g = build_cell_puncta_graph(cells, puncta)
+    # the cells are the roots; the punctum naming absent cell 9 is UNROOTED, not a root
+    assert {c.measurements['label'] for c in g.roots()} == {1, 2}
+    orphans = g.unrooted()
+    assert len(orphans) == 1 and orphans[0].measurements['cell label'] == 9
+
+
+def test_cell_puncta_join_changes_neither_table():
+    cells, puncta = _stamped_cells_and_puncta()
+    cb, pb = cells.copy(), puncta.copy()
+    build_cell_puncta_graph(cells, puncta)
+    pd.testing.assert_frame_equal(cells, cb)
+    pd.testing.assert_frame_equal(puncta, pb)
+
+
+def test_cell_puncta_join_with_no_parent_column_yields_a_flat_graph():
+    from pycat.utils.entity_ref import stamp_entity_ids
+    cells, _ = _stamped_cells_and_puncta()
+    flat = pd.DataFrame({'label': [1, 2], 'area': [5.0, 6.0]})       # no 'cell label' column
+    flat = stamp_entity_ids(flat, entity_type='punctum', source_path='x.tif', operation_id='puncta_analysis')
+    g = build_cell_puncta_graph(cells, flat)
+    assert len(g.of_type('punctum')) == 2
+    assert all(g.parent_of(p.key) is None for p in g.of_type('punctum'))   # unlinked → roots, not orphans

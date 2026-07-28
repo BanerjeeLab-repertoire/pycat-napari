@@ -1,3 +1,19 @@
+## [1.6.419] - 2026-07-28
+### Added — **Biological object graph, increment 2 — the real cell→puncta join.**
+Increment 1 (1.6.227) built the generic read-only object graph (`BiologicalObject` / `ObjectGraph` /
+`objects_from_table`) over any table carrying `_pycat_entity_id` + optionally a parent-id column. But PyCAT's
+real puncta table doesn't carry the parent's id: a punctum knows the LABEL of the cell it was segmented within
+(`'cell label'`, one of `entity_ref._PARENT_COLUMNS`; `make_entity_id` folds that label into the punctum's own id
+so per-cell labels don't collide), not that cell's stable id. New `build_cell_puncta_graph(cell_df, puncta_df)`
+is the schema-specific join that recovers it — matching each punctum's parent-cell label to the cell's own
+`label` in `cell_df` to get the parent cell's `_pycat_entity_id`, so PyCAT's real `cell_df` + `puncta_df` assemble
+into ONE graph: cells as roots, their puncta as children. Reuses the existing `_pycat_entity_id` (invents no id),
+changes neither table, and — honoring increment 1's explicit-orphan contract — a punctum whose named cell is
+absent from `cell_df` surfaces as **unrooted**, never silently rooted. `frame_col` keys the join per frame for a
+multi-frame table. Tests (`test_object_graph.py`, +4): the join reproduces the segmentation nesting on real
+`stamp_entity_ids`-stamped tables, surfaces an orphan punctum, changes neither table, and degrades to a flat
+graph when no parent column is present.
+
 ## [1.6.418] - 2026-07-28
 ### Added — **Two-channel colocalization — correct because it runs WITHIN a segmentation ROI (Phase 3).**
 Colocalization is a genuinely new navigator workflow, and the naive version is a documented science trap:
