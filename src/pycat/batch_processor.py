@@ -455,6 +455,7 @@ class BatchWorker(QThread):
         # Part 3), so a failed step is a structured 'error' status the caller can surface — not just a print.
         from pycat.utils.result_models import BatchStepResult
         from pycat.utils.errors import PyCATError
+        from pycat.batch.steps._common import analysis_results_for_step
         step_results = []
         for step_entry in self.config.get("steps", []):
             step_name = step_entry.get("step", "")
@@ -466,7 +467,10 @@ class BatchWorker(QThread):
                 continue
             try:
                 fn(state, image_path, params, output_dir)
-                step_results.append((step_name, BatchStepResult(status='ok')))
+                # A successful analysis step carries its measurement table as a typed AnalysisResult output
+                # (typed-result-models adoption) — validated identity, not just an 'ok' status. Additive.
+                step_results.append((step_name, BatchStepResult(
+                    status='ok', outputs=analysis_results_for_step(step_name, state))))
             except Exception as _step_exc:
                 import traceback
                 print(f"[PyCAT Batch] ERROR in step '{step_name}' for "

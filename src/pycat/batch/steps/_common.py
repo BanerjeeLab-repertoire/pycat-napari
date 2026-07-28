@@ -314,3 +314,37 @@ def _ivf_droplet_mask_and_image(state):
     if img is not None and img.ndim == 3:
         img = img[0]
     return mask, img
+
+
+# The batch analysis steps that produce a per-object measurement table, and the (entity_type, state / data-
+# instance key) of that table — so each such step's outcome can carry a typed AnalysisResult (typed-result-
+# models), not just a status. Keyed by the _STEP_MAP step name.
+_ANALYSIS_STEP_TABLES = {
+    'cell_analysis':          ('cell', 'cell_df'),
+    'ivf_droplet_analysis':   ('condensate', 'ivf_droplet_df'),
+    'bf_condensate_analysis': ('condensate', 'bf_condensate_df'),
+}
+
+
+def analysis_results_for_step(step_name, state):
+    """The typed ``AnalysisResult`` output(s) of a batch analysis ``step_name``, or ``()``.
+
+    When a step produced a known per-object measurement table, wrap it in an ``AnalysisResult`` — validated
+    identity (a non-empty operation_id / entity_type, a real DataFrame) — so the step's outcome carries the
+    STRUCTURED result, not just a status. Additive: it reads the table the step already wrote (from the
+    ``data_instance`` or ``state``), changes nothing, and never raises into the run."""
+    spec = _ANALYSIS_STEP_TABLES.get(step_name)
+    if spec is None:
+        return ()
+    entity_type, key = spec
+    di = state.get('data_instance')
+    table = di.get_data(key) if di is not None and hasattr(di, 'get_data') else None
+    if table is None:
+        table = state.get(key)
+    if table is None or not hasattr(table, 'columns'):
+        return ()
+    try:
+        from pycat.utils.result_models import AnalysisResult
+        return (AnalysisResult(operation_id=step_name, entity_type=entity_type, measurements=table),)
+    except Exception:  # broad-ok: optional_probe -- AnalysisResult is result metadata; a bad table must not fail the step
+        return ()

@@ -1,3 +1,21 @@
+## [1.6.421] - 2026-07-28
+### Changed — **Typed result models migration — batch analysis steps now carry a typed `AnalysisResult`.**
+The typed result envelopes shipped in 1.6.228; `BatchStepResult` was already adopted by the batch replay (each
+step records a typed `ok`/`skipped`/`error` outcome). `AnalysisResult` — the envelope that composes a
+measurements table + provenance + calibration for one operation — was defined and tested but adopted nowhere.
+This migrates the first consumer: when a batch analysis step succeeds, its outcome now carries the measurement
+table it produced as a typed `AnalysisResult` in the `BatchStepResult.outputs` (validated identity — a non-empty
+operation_id / entity_type, a real DataFrame — so an impossible result can't be built), not just an `ok` status.
+A new `batch/steps/_common.analysis_results_for_step(step_name, state)` maps the analysis steps
+(`cell_analysis` → cell, `ivf_droplet_analysis` / `bf_condensate_analysis` → condensate) to the table each writes
+and wraps it. Fully additive and non-breaking: it reads the table the step already wrote (from the data instance
+or state), changes nothing, and never raises into the run. Tests: the load-bearing logic is pinned HEADLESSLY in
+`test_analysis_result_output.py` (`base`, 3 — imports only the non-GUI helper, so the headless gate runs it: the
+mapping, reading from state vs the data instance, and the unmapped/missing-table/non-frame `()` edges); the
+Qt-bound `BatchWorker` integration is pinned in `test_batch_step_results.py` (+3, GUI lane, which the headless
+gate ignores because `batch_processor` imports PyQt5 at module scope) — an analysis step carries the
+AnalysisResult (the actual table, nothing re-derived), a non-analysis step and one that wrote no table carry `()`.
+
 ## [1.6.420] - 2026-07-28
 ### Added — **Biological object graph, increment 3 — aggregation (the graph earns its keep).**
 Increments 1–2 built the graph and the real cell→puncta join; this is the first thing that USES the structure to

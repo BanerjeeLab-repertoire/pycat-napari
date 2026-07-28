@@ -63,3 +63,49 @@ def test_batch_step_result_invariant_error_iff_pycat_error():
         BatchStepResult(status="error")                   # error status with no error → refused
     with pytest.raises(Exception):
         BatchStepResult(status="ok", error=PyCATError("x"))   # error attached but claims success → refused
+
+
+# ── AnalysisResult adoption: an analysis step carries its measurement table as a typed result ──────
+
+class _DI:
+    def __init__(self):
+        self.data_repository = {}
+
+    def set_data(self, k, v):
+        self.data_repository[k] = v
+
+    def get_data(self, k, d=None):
+        return self.data_repository.get(k, d)
+
+
+def test_an_analysis_step_carries_a_typed_AnalysisResult_output(tmp_path):
+    import pandas as pd
+    from pycat.utils.result_models import AnalysisResult
+    df = pd.DataFrame({'label': [1, 2], 'area': [10.0, 20.0]})
+
+    def cell_analysis(state, ip, pa, o):
+        state['data_instance'] = _DI()
+        state['data_instance'].set_data('cell_df', df)      # the step writes its table the way the real one does
+
+    out = BatchWorker._process_file(
+        _worker([{"step": "cell_analysis"}], {"cell_analysis": cell_analysis}), Path("x.tif"), tmp_path)
+    name, res = out[0]
+    assert res.status == 'ok' and len(res.outputs) == 1
+    ar = res.outputs[0]
+    assert isinstance(ar, AnalysisResult)
+    assert ar.operation_id == 'cell_analysis' and ar.entity_type == 'cell'
+    assert ar.measurements is df                            # the actual table — nothing re-derived or copied
+
+
+def test_a_non_analysis_step_carries_no_outputs(tmp_path):
+    out = BatchWorker._process_file(
+        _worker([{"step": "a"}], {"a": lambda s, p, pa, o: None}), Path("x.tif"), tmp_path)
+    assert out[0][1].status == 'ok' and out[0][1].outputs == ()
+
+
+def test_an_analysis_step_that_wrote_no_table_carries_no_output(tmp_path):
+    # cell_analysis is in the map, but if it produced nothing (no cell_df) there is no result to wrap — ()
+    out = BatchWorker._process_file(
+        _worker([{"step": "cell_analysis"}], {"cell_analysis": lambda s, p, pa, o: None}),
+        Path("x.tif"), tmp_path)
+    assert out[0][1].status == 'ok' and out[0][1].outputs == ()
