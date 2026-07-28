@@ -267,9 +267,13 @@ def _measure_ops() -> List[dict]:
         # ---- colocalization: two channels -> overlap ------------------------
         dict(id="pixel_wise_corr.pearson_manders", module="pixel_wise_corr_analysis_tools",
              role=InformationRole.MEASURE, provides=cap(R.MEASUREMENT_TABLE, "observable:colocalization"),
-             requires=[cap(R.INTENSITY_FIELD, T)], context=["two_channels"],
+             # Requires a SEGMENTATION mask (was a bare intensity field), so the planner chains a segmenter and
+             # the correlation runs WITHIN objects — not whole-frame. Whole-frame Pearson measures the cell shape
+             # both channels share (r≈0.99 even for independent channels), not colocalisation; the ROI is the fix.
+             # See coloc/metrics.py's whole-frame warning. (2026-07-28)
+             requires=[cap(R.INSTANCE_LABELS, T)], context=["two_channels"],
              observables=["colocalization"], propagate=False, preference=0.7,
-             purpose="Pixel Pearson / Manders / correlation length.",
+             purpose="Pixel Pearson / Manders within a segmentation ROI.",
              api="pixel_wise_corr_analysis_tools.pearsons_correlation"),
         dict(id="obj_based_coloc.manders", module="obj_based_coloc_analysis_tools",
              role=InformationRole.MEASURE, provides=cap(R.MEASUREMENT_TABLE, "observable:colocalization"),

@@ -179,6 +179,10 @@ def _ivf_size_dist_params(intent, ctx, state, reviewed):
     return _reviewed_or_default(reviewed, {"n_bins": 30})
 
 
+def _pixel_coloc_params(intent, ctx, state, reviewed):
+    return {}       # the two channels + the ROI are resolved from state; the raw coloc measures take no knob
+
+
 #: The declared adapters, keyed by the REAL navigator module name `execution_order` reports. The ONLY place a
 #: plan step is tied to a computation — a step absent here (or one whose batch step resolves to ``None``) is
 #: reported "run from its panel", never guessed at. Grows one workflow per phase, each behind a
@@ -203,6 +207,10 @@ _ADAPTERS: dict = {
     # mask, runs first via the state dispatch above.)
     "invitro.size_distribution": ExecAdapter("invitro.size_distribution", "ivf_size_distribution",
                                              _ivf_size_dist_params),
+    # Two-channel colocalization WITHIN the segmentation ROI (Pearson + Manders) — the op requires a mask so the
+    # planner chains a segmenter, and the correlation runs inside objects, not whole-frame.
+    "pixel_wise_corr.pearson_manders": ExecAdapter("pixel_wise_corr.pearson_manders", "pixel_colocalization",
+                                                   _pixel_coloc_params),
 }
 
 

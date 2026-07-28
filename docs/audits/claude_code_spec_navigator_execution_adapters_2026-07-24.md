@@ -79,6 +79,16 @@
 > `test_navigator_invitro_adapter.py` (`base`, 5): context selects the droplet segmenter, guided == manual
 > `segment_ivf_droplets` bit for bit, edited `min_area` drives the run. **Follow-on:** reconcile the canonical
 > `target='droplet'` cases to condensate+in_vitro (they currently pass unchanged), and the in-vitro measurement.
+> **Phase 3 (cont.) — two-channel COLOCALIZATION, within a segmentation ROI (1.6.418).** A genuinely new workflow.
+> The naive version is a science trap (`coloc/metrics.py` warns whole-frame Pearson measures the shared cell
+> shape, r≈0.99 for independent channels, not colocalisation). Fixed by requiring an ROI: `pixel_wise_corr.
+> pearson_manders`'s op contract changed `requires` from `intensity_field` → `instance_labels`, so the planner
+> chains a segmenter and the correlation runs WITHIN objects (`acquisition → subcellular_segment → coloc`). New
+> handler `replay_pixel_coloc` computes Pearson r + Manders overlap/k1/k2 (raw `coloc/metrics` measures) over the
+> union of the segmented objects; adapter `pixel_wise_corr.pearson_manders → pixel_colocalization`. `_measure_op`
+> edit, so no catalog regen / op-count change. Gate `test_navigator_coloc_adapter.py`: planner chains the
+> segmenter, guided == manual within the ROI bit for bit, and within-ROI Pearson ≠ whole-frame (the ROI is
+> applied). Workflow-5 (object-based m1/m2) is a different computation and stays a documented batch gap.
 > **Phase 3 (cont.) — in-vitro fluorescence droplet MEASUREMENT, a measure→interpret chain (1.6.417).** Completes
 > the in-vitro chain. MEASURE: `feature_analysis` on an in-vitro mask → new `replay_ivf_droplet_analysis`
 > (`partition_coefficient_local` on the mask + raw image → per-droplet table; the fluorescence analogue of

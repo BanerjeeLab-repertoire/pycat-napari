@@ -258,8 +258,10 @@ def _coloc_workflow():
         # round-trip — a coloc coefficient with its units dropped means something different.
         compare_metadata=compare_frame_metadata(['coefficient', 'value', 'units'], units_column='units'),
         documented_gaps={
-            'batch': "colocalization has no step in the batch replay registry — it is an interactive "
-                     "two-channel analysis, not a per-image batch step (no `replay_coloc` exists)"})
+            'batch': "this workflow's OBJECT-BASED m1/m2 coloc has no batch replay step — it is an interactive "
+                     "two-channel analysis. (A navigator PIXEL-coloc handler `replay_pixel_coloc` was added "
+                     "2026-07-28 for Pearson / Manders-overlap WITHIN a segmentation ROI, but that is a different "
+                     "computation than this route's thresholded m1/m2, so this route stays a gap.)"})
 
 
 # ── Workflow 6 — Time-series condensate partition (headless ≈ session; batch is a documented gap) ─

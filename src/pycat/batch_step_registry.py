@@ -46,7 +46,6 @@ if TYPE_CHECKING:
 
 
 
-
 # ---------------------------------------------------------------------------
 # Replay functions
 # Each signature: fn(state, image_path, params, output_dir) -> None
@@ -127,7 +126,7 @@ from pycat.batch.steps.preprocessing_steps import (replay_preprocessing, replay_
 from pycat.batch.steps.segmentation_steps import (replay_cellpose_segmentation, replay_ts_cellpose_keyframe)
 from pycat.batch.steps.brightfield_steps import (replay_bf_preprocess, replay_bf_condensate_segmentation, replay_bf_condensate_analysis, replay_bf_cell_segmentation, replay_ivbf_preprocess, replay_ivbf_segmentation)
 from pycat.batch.steps.invitro_steps import (replay_ivf_preprocess, replay_ivf_field_summary, replay_ivf_size_distribution, replay_ivf_spatial_metrology, replay_ivf_segmentation, replay_ivf_droplet_segment, replay_ivf_droplet_analysis, replay_client_enrichment)
-from pycat.batch.steps.analysis_steps import (replay_condensate_analysis, replay_measure_line, replay_cell_analysis, replay_sacf_analysis, replay_condensate_segmentation)
+from pycat.batch.steps.analysis_steps import (replay_condensate_analysis, replay_measure_line, replay_cell_analysis, replay_sacf_analysis, replay_condensate_segmentation, replay_pixel_coloc)
 
 from pycat.batch.steps._common import _get_data, _save_array, _raw_counts, _normalize_to_float  # for replay_background_removal (kept here: a source-level test pins it)
 
@@ -234,6 +233,7 @@ _STEP_MAP = {
     'export_timeseries_video':            lambda s,p,pa,o: print('[PyCAT Batch]   Video export skipped in headless mode.'),
     'timeseries_condensate_analysis':     lambda s,p,pa,o: print('[PyCAT Batch]   TS condensate analysis skipped in headless mode.'),
     'two_channel_condensate_coloc':       lambda s,p,pa,o: print('[PyCAT Batch]   Two-channel colocalization skipped in headless mode.'),
+    'pixel_colocalization':       replay_pixel_coloc,
     'bf_preprocess':              replay_bf_preprocess,
     'bf_cell_segmentation':       replay_bf_cell_segmentation,
     'bf_condensate_segmentation': replay_bf_condensate_segmentation,

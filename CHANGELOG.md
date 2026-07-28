@@ -1,3 +1,24 @@
+## [1.6.418] - 2026-07-28
+### Added — **Two-channel colocalization — correct because it runs WITHIN a segmentation ROI (Phase 3).**
+Colocalization is a genuinely new navigator workflow, and the naive version is a documented science trap:
+whole-frame Pearson measures the cell shape both channels share (r≈0.99 even for *independent* channels), not
+colocalization — `coloc/metrics.py` carries that warning. The fix is to restrict the correlation to a
+segmentation ROI:
+- **Op contract**: `pixel_wise_corr.pearson_manders` now `requires` an `instance_labels` mask (was a bare
+  `intensity_field`), so the planner chains a segmenter before it — a two-channel condensate coloc plan is
+  `acquisition → subcellular_segment → pixel_wise_corr.pearson_manders`. It's a `_measure_op`, so no catalog
+  regen and the op-count guard (94) is unchanged.
+- **New batch handler `replay_pixel_coloc`** (`pixel_colocalization` in `_STEP_MAP`): reads the two channels + the
+  segmentation ROI from state and computes Pearson r + Manders overlap / k1 / k2 (the raw, threshold-free
+  `coloc/metrics` measures) over the union of the segmented objects — never the whole frame. Adapter
+  `pixel_wise_corr.pearson_manders → pixel_colocalization`.
+
+Acceptance gate `tests/navigator/test_navigator_coloc_adapter.py` (`base`, 4): the planner chains a segmenter
+before coloc; the guided coefficients equal the manual `coloc/metrics` calls on the same channels within the same
+ROI, bit for bit; and the guided within-ROI Pearson **differs** from the whole-frame Pearson (proving the ROI
+restriction is applied). Full gate green. (The route-equivalence Workflow-5 gap note is updated: it tests a
+different object-based m1/m2 computation, which stays a batch gap.)
+
 ## [1.6.417] - 2026-07-27
 ### Added — **The in-vitro fluorescence droplet MEASUREMENT — a measure→interpret chain; the chain runs end to end (Phase 3).**
 1.6.416 shipped in-vitro droplet segmentation with the measurement staged. This wires the measurement as the

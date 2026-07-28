@@ -321,3 +321,40 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
     _save_array(total_refined_puncta_mask.astype(np.uint8),
                 output_dir / f"{image_path.stem}_total_refined_puncta_mask.tiff")
     print("[PyCAT Batch]   Condensate segmentation done.")
+
+
+def replay_pixel_coloc(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """Pixel-wise colocalization — Pearson r + Manders overlap / k1 / k2 between two channels, restricted to the
+    segmentation ROI the planner chained upstream. NOT whole-frame: whole-frame Pearson measures the cell shape
+    both channels share (r≈0.99 even for independent channels), not colocalisation — the ROI (the union of the
+    segmented objects, excluding background) is the fix. The raw threshold-free measures from `coloc/metrics`."""
+    from pycat.toolbox.coloc.metrics import (
+        pearsons_correlation, manders_overlap, manders_k1_calculation, manders_k2_calculation)
+    import pandas as pd
+    roi_src = state.get('puncta_mask')
+    if roi_src is None:
+        roi_src = state.get('labeled_cells')
+    if roi_src is None:
+        roi_src = state.get('cellpose_mask')
+    if roi_src is None:
+        print(f"[PyCAT Batch]   Colocalization skipped for {image_path.name}: no segmentation ROI in state.")
+        return
+    roi = np.asarray(roi_src) > 0
+    ch1 = np.asarray(_resolve_image_layer(state, params.get('image_layer1'),
+                                          fallback=state.get('preprocessed', state['image'])), dtype=np.float64)
+    named = state.get('channels_by_name', {}) or {}
+    ch2 = _resolve_image_layer(state, params.get('image_layer2'), fallback=next(iter(named.values()), None))
+    if ch2 is None:
+        print(f"[PyCAT Batch]   Colocalization skipped for {image_path.name}: no second channel in state.")
+        return
+    ch2 = np.asarray(ch2, dtype=np.float64)
+    pcc, pval = pearsons_correlation(ch1, ch2, roi)
+    moc, _ = manders_overlap(ch1, ch2, roi)
+    k1, _ = manders_k1_calculation(ch1, ch2, roi)
+    k2, _ = manders_k2_calculation(ch1, ch2, roi)
+    df = pd.DataFrame([{'pearson_r': pcc, 'pearson_p': pval, 'manders_overlap': moc,
+                        'manders_k1': k1, 'manders_k2': k2}])
+    state['coloc_df'] = df
+    state['data_instance'].set_data('coloc_df', df)
+    df.to_csv(output_dir / f"{image_path.stem}_colocalization.csv", index=False)
+    print(f"[PyCAT Batch]   Colocalization (within ROI): r={pcc}, MOC={moc}.")
