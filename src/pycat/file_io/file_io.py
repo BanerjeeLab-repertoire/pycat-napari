@@ -541,6 +541,20 @@ class FileIOClass(_LoadingMixin, _SessionActionsMixin, _DialogsMixin, _ProgressM
             self.central_manager.notify_data_changed()
         except Exception:
             pass
+
+        # Push a real metadata calibration onto the actual napari layer(s).
+        #
+        # Writing `microns_per_pixel_sq` to the data repository is NOT enough — the
+        # image layer's `.scale` stays at 1.0 and the scale bar keeps reading "px"
+        # even when the file's metadata gave a perfectly good µm/px value. The
+        # stack loader (`_finalise_stack_load`) has always done this; this 2-D path
+        # never did, so a plain single-TIFF load with real metadata (e.g. an ISS
+        # Vista file with a valid baseline-TIFF resolution tag) silently kept
+        # showing a pixel scale bar. `_enable_auto_scale_bar` is a no-op (px bar,
+        # scale left at 1) when no valid calibration exists, so this is safe to
+        # call unconditionally.
+        self._enable_auto_scale_bar()
+
         self._prompt_pixel_size_if_needed()
 
 

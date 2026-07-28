@@ -40,6 +40,22 @@ import os
 # True to revert to the eager behaviour if the on-demand path ever misbehaves.
 EAGER_DIAMETER_LAYERS = False
 
+def _safe_for_units(layer, _nl):
+    """**Can this layer's ``.units`` be set without risking the black-canvas bug?**
+
+    Setting ``Layer.units`` on a LAZY 3-D stack blacked out the canvas on napari 0.7.1 (see
+    ``draw_custom_scale_bar``'s docstring) — the trigger was specifically a dask/zarr-backed
+    image, not the attribute itself. Shapes/Points overlays store plain coordinate arrays and were
+    never implicated, so they are always safe. An Image/Labels layer is safe only when its `.data`
+    is an EAGER, plain ``numpy.ndarray`` — never one of PyCAT's lazy stack wrappers
+    (``_ZarrTYX``/``_ZarrTZYX``/``_TiffPageStack``/dask), which fail this check and are skipped.
+    """
+    if isinstance(layer, (_nl.Shapes, _nl.Points)):
+        return True
+    import numpy as _np
+    return isinstance(getattr(layer, 'data', None), _np.ndarray)
+
+
 def _is_calibrated(central_manager, px):
     """**Is this pixel size a real calibration, or the 1.0 fallback?**
 
@@ -97,12 +113,39 @@ def _align_layer_scales(viewer, central_manager):
         if ref_shape.size < 2:
             return
         ref_fov = ref_shape[-2:] * ref_scale[-2:]
+
+        # ── Propagate the µm UNIT alongside the scale ────────────────────────────
+        #
+        # Newer napari (>=0.8) deprecated `scale_bar.unit` into a no-op; the bar's displayed
+        # label is now computed from `viewer.layers.units` across every layer that carries one
+        # — and if even ONE layer disagrees (e.g. a Shapes overlay left at the default 'pixel'
+        # while the reference image is 'um'), napari calls the whole set "inconsistent" and
+        # drops back to no unit at all, which is worse than the plain px bar this replaces. So
+        # a real calibration must be pushed onto every layer being aligned here, not just the
+        # reference. `_safe_for_units` keeps this off lazy 3-D image data (the black-canvas
+        # trigger); Shapes/Points overlays are always safe.
+        ref_units_ok = _safe_for_units(ref, _nl)
+        if ref_units_ok:
+            try:
+                ref.units = ('um',) * ref.ndim
+            except Exception:
+                ref_units_ok = False
+
         for l in viewer.layers:
             if l is ref:
                 continue
             try:
                 sc = np.asarray(l.scale, float)
                 if sc.size >= 2 and np.any(np.abs(sc[-2:] - 1.0) > 1e-9):
+                    # Already scaled (e.g. an upscaled layer with its own physically-aligned
+                    # scale) — don't override the scale, but it still needs the SAME unit as
+                    # the reference, or it is the one layer that drags the whole viewer back
+                    # into "inconsistent units" (see the comment above `ref_units_ok`).
+                    if ref_units_ok and _safe_for_units(l, _nl):
+                        try:
+                            l.units = ('um',) * l.ndim
+                        except Exception:
+                            pass
                     continue   # already scaled — don't override
                 if isinstance(l, (_nl.Shapes, _nl.Points)):
                     new_yx = ref_scale[-2:]     # pixel-coordinate overlay
@@ -127,6 +170,11 @@ def _align_layer_scales(viewer, central_manager):
                 new_scale = list(np.asarray(l.scale, float))
                 new_scale[-2] = float(new_yx[0]); new_scale[-1] = float(new_yx[1])
                 l.scale = new_scale
+                if ref_units_ok and _safe_for_units(l, _nl):
+                    try:
+                        l.units = ('um',) * l.ndim
+                    except Exception:
+                        pass
             except Exception:
                 continue
     except Exception:
@@ -200,8 +248,11 @@ def _enable_auto_scale_bar(viewer, central_manager, image_layer=None):
       transform that never touches ``layer.data`` or any calculation).
     - No metadata               → pixel bar (scale left at 1).
 
-    NEVER sets ``layer.units`` — that is the confirmed cause of the black
-    canvas on lazy 3D stacks. The unit label comes from ``scale_bar.unit``.
+    ``scale_bar.unit`` is set for older napari, but newer napari (>=0.8) deprecated it into a
+    no-op — the displayed label there comes from ``Layer.units`` instead (set via
+    ``_align_layer_scales``, on this function's behalf, for every non-lazy layer). ``Layer.units``
+    is never set on a LAZY 3-D stack — that was the confirmed cause of the black canvas on
+    napari 0.7.1 — so a lazy stack still falls back to napari's old ``scale_bar.unit`` path only.
     """
     try:
         import napari.layers as _nl
