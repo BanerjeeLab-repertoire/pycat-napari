@@ -131,6 +131,12 @@ there) and a `CanonicalCase` in `tests/navigator/`.
 
 The order maximizes scientific value and reuses the most existing machinery:
 
+> **STATUS N2b-1(a) — DONE (1.6.423).** `replay_vpt_microrheology` built in `batch/steps/vpt_steps.py`, registered
+> (skip-stub replaced), op composition declared, registry held at its 432 ceiling. The whole chain runs headless;
+> the scale gate refuses a pixel-unit viscosity (verdict, not a number). Gate `test_vpt_microrheology_handler.py`
+> (`base`, 3): the full chain recovers the seeded viscosity within ±15% on a synthetic bead stack; both scale-gate
+> refusals proven. **Remaining: (b) the adapter `vpt.microrheology → vpt_microrheology` + (c) the CanonicalCase.**
+
 **1. VPT microrheology → viscosity (highest value; Gable's flagship).** The science chain
 (`detect_beads_stack → link → compute_msd → fit_anomalous_diffusion → viscosity_from_diffusion`) is all
 pure-Python and proven headless (the golden-master harness runs it). What's missing is the batch

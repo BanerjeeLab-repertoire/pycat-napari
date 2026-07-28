@@ -1,3 +1,23 @@
+## [1.6.423] - 2026-07-28
+### Added — **VPT microrheology batch handler — the flagship viscosity chain runs headless (spec N2b-1a).**
+The `vpt_microrheology` batch step was a skip-stub (`print('… skipped in headless mode')`) — one of ~35 stubbed
+steps the 1.6.415 audit flagged. This builds the real headless handler: `replay_vpt_microrheology` (new
+`batch/steps/vpt_steps.py`) runs the whole VPT chain — bead movie → `detect_beads_stack` → `link_trajectories`
+→ `compute_msd` → `fit_anomalous_diffusion` → `viscosity_from_diffusion` (Stokes–Einstein) — all pure
+numpy/scipy/skimage, no torch. Pixel size threads into detection (coords → µm), the frame interval into the MSD
++ fit (lags → seconds → D), and bead radius + temperature into the viscosity. Registered in `_STEP_MAP` (replacing
+the stub) with its op composition `'vpt_microrheology': ('vpt.microrheology',)` in `_STEP_OPERATIONS`; the
+registry stays at its 432-line ceiling (the 3-line stub → a 1-line handler reference offsets the import + entry).
+- **Scale gate (non-negotiable).** A viscosity in pixel units is meaningless, so the handler REFUSES to emit a
+  number when the pixel size is the loader's 1.0 placeholder (`has_real_pixel_size` / `pixel_size_um` → NaN) or
+  the frame interval is unknown — it writes a verdict row and stashes `state['_vpt_scale_validity']`, mirroring
+  `replay_client_enrichment`'s calibration-verdict pattern, never a pixel-unit η.
+
+Tests (`test_vpt_microrheology_handler.py`, `base`, 3, headless): the full chain recovers the seeded viscosity on
+a synthetic bead stack within the golden-master **±15%** band (Brownian beads rendered as Gaussian blobs, D→η via
+Stokes–Einstein); the scale gate refuses without a real pixel size and without a frame interval (verdict, no
+number). The adapter (`vpt.microrheology → vpt_microrheology`) + the CanonicalCase are the next increment (N2b-1b/c).
+
 ## [1.6.422] - 2026-07-28
 ### Fixed — **`BatchStepResult.to_dict` serializes its typed `AnalysisResult` outputs (completes 1.6.421).**
 1.6.421 made a step's `outputs` able to hold a typed `AnalysisResult`, but `BatchStepResult.to_dict` still did a
