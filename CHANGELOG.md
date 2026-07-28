@@ -1,3 +1,26 @@
+## [1.6.417] - 2026-07-27
+### Added — **The in-vitro fluorescence droplet MEASUREMENT — a measure→interpret chain; the chain runs end to end (Phase 3).**
+1.6.416 shipped in-vitro droplet segmentation with the measurement staged. This wires the measurement as the
+**measure→interpret chain** the science owner asked for, completing the in-vitro fluorescence workflow.
+- **MEASURE** — `feature_analysis.cell_analysis` on an in-vitro droplet mask now runs a new batch handler
+  `replay_ivf_droplet_analysis`: `partition_coefficient_local` on the droplet mask + **raw** image (in-vitro, no
+  cells, no dark reference — partition/intensity ratios need the true zero point) → the per-droplet table
+  (partition coefficient, dense/dilute intensities, area, circularity). The fluorescence-droplet analogue of the
+  brightfield `bf_condensate_metrics` measure. Routed via the run-time state dispatch (`ivf_droplet_mask` present).
+- **INTERPRET** — `invitro.size_distribution` fits the droplet size distribution / C_sat (`fit_size_distribution`).
+  Its op contract now **requires the measurement table** (`MEASUREMENT_TABLE{observable:size}`, satisfied by
+  feature_analysis's `observable:*`) instead of the raw labels, so the planner inserts the measure as its
+  dependency — `segment → measure → interpret`. An `in_vitro` context gate + a **positive-only** context bonus in
+  `_pick_terminal` make the size-distribution the 'size' terminal **only** in-vitro (an in-cell plan falls back to
+  the per-object measure by preference — the bonus never demotes, so the msd/workbook terminal orderings are
+  unchanged). New adapter `invitro.size_distribution → ivf_size_distribution`; `n_bins` reviewable.
+
+Acceptance gate `tests/navigator/test_navigator_invitro_adapter.py` (updated): the planner chains
+`feature_analysis → invitro.size_distribution` in-vitro (and NOT in-cell); the full plan
+`segment → measure → interpret` runs every step; the guided per-droplet table equals the manual
+`partition_coefficient_local` and the guided fit equals the manual `fit_size_distribution`, bit for bit. Full gate
+green. **The in-vitro fluorescence droplet workflow now runs end to end in the guided flow.**
+
 ## [1.6.416] - 2026-07-27
 ### Added — **The in-vitro fluorescence droplet SEGMENTATION — a context branch, not a new target (Phase 3).**
 Droplets and condensates are the same target (synonymous, per the science owner). What distinguishes the in-vitro

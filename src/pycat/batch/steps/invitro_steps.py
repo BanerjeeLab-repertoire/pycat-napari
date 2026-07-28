@@ -116,6 +116,7 @@ def replay_ivf_size_distribution(state: dict, image_path: Path, params: dict, ou
         print(f'[PyCAT Batch]   IVF size distribution skipped ({len(radii)} droplets < 5).')
         return
     res = fit_size_distribution(radii, n_bins=int(params.get('n_bins', 30)))
+    state['ivf_size_distribution'] = res        # expose the fit to the navigator (additive; batch unaffected)
     row = {k: v for k, v in res.items() if not hasattr(v, '__len__')}
     pd.DataFrame([row]).to_csv(
         output_dir / f"{image_path.stem}_ivf_size_distribution.csv", index=False)
@@ -271,6 +272,28 @@ def replay_ivf_droplet_segment(state: dict, image_path: Path, params: dict, outp
                 output_dir / f"{image_path.stem}_ivf_droplet_mask.tiff")
     print(f"[PyCAT Batch]   IVF droplet segmentation ({params.get('method', 'otsu')}): "
           f"{int(labeled.max())} droplets.")
+
+
+def replay_ivf_droplet_analysis(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """Per-droplet MEASURE for the in-vitro navigator chain: ``partition_coefficient_local`` on the droplet mask +
+    RAW image (in-vitro, no cells, no dark reference) → the per-droplet table (partition coefficient, dense/dilute
+    intensities). The fluorescence-droplet analogue of the brightfield ``bf_condensate_metrics`` measure; it feeds
+    the size-distribution INTERPRET. RAW counts, not a normalised image: partition/intensity ratios need the true
+    zero point (same reason as brightfield OD)."""
+    from pycat.toolbox.invitro_tools import partition_coefficient_local
+    mask = state.get('ivf_droplet_mask')
+    if mask is None or int(np.asarray(mask).max()) == 0:
+        print(f"[PyCAT Batch]   IVF droplet analysis skipped for {image_path.name}: no droplets.")
+        return
+    raw = np.asarray(state['image'], dtype=np.float64)
+    part = partition_coefficient_local(raw, np.asarray(mask).astype(np.int32),
+                                       sample_type='in_vitro', allow_no_reference=True)
+    df = part.get('per_droplet_df') if isinstance(part, dict) else None
+    state['ivf_droplet_df'] = df
+    state['data_instance'].set_data('ivf_droplet_df', df)
+    if df is not None:
+        df.to_csv(output_dir / f"{image_path.stem}_ivf_droplet_df.csv", index=False)
+    print(f"[PyCAT Batch]   IVF droplet analysis: {0 if df is None else len(df)} droplets measured.")
 
 
 # ---------------------------------------------------------------------------

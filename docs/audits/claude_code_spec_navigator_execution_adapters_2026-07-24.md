@@ -79,6 +79,17 @@
 > `test_navigator_invitro_adapter.py` (`base`, 5): context selects the droplet segmenter, guided == manual
 > `segment_ivf_droplets` bit for bit, edited `min_area` drives the run. **Follow-on:** reconcile the canonical
 > `target='droplet'` cases to condensate+in_vitro (they currently pass unchanged), and the in-vitro measurement.
+> **Phase 3 (cont.) — in-vitro fluorescence droplet MEASUREMENT, a measure→interpret chain (1.6.417).** Completes
+> the in-vitro chain. MEASURE: `feature_analysis` on an in-vitro mask → new `replay_ivf_droplet_analysis`
+> (`partition_coefficient_local` on the mask + raw image → per-droplet table; the fluorescence analogue of
+> `bf_condensate_metrics`). INTERPRET: `invitro.size_distribution` (`fit_size_distribution`), its op contract
+> changed to REQUIRE the `MEASUREMENT_TABLE{observable:size}` feature_analysis provides (was `INSTANCE_LABELS`), so
+> the planner chains segment → measure → interpret. An `in_vitro` context gate + a POSITIVE-ONLY context bonus in
+> `_pick_terminal` make the size-distribution the 'size' terminal only in-vitro (in-cell falls back by preference;
+> the bonus never demotes, so msd/workbook terminal orderings are unchanged). Adapter
+> `invitro.size_distribution → ivf_size_distribution`, `n_bins` reviewable. Gate: planner chains it in-vitro only;
+> full plan runs every step; guided per-droplet table == manual `partition_coefficient_local` and guided fit ==
+> manual `fit_size_distribution`, bit for bit. **The in-vitro fluorescence droplet workflow now runs end to end.**
 > **Phase 1 — DONE (1.6.332).** `navigator/executor.py`: `run_plan(plan, state, …)` drives the batch `_STEP_MAP`
 > handlers in `execution_order` order, threading `state`; `ExecAdapter` maps a plan step → batch handler +
 > `params_from`; a step with no adapter is reported ('needs_panel'), never invoked with guessed args; gate

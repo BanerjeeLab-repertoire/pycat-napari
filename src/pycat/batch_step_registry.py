@@ -126,11 +126,10 @@ from pycat.batch.steps.io_steps import (replay_open_image, replay_open_stack, re
 from pycat.batch.steps.preprocessing_steps import (replay_preprocessing, replay_upscaling, replay_calibration_correction)
 from pycat.batch.steps.segmentation_steps import (replay_cellpose_segmentation, replay_ts_cellpose_keyframe)
 from pycat.batch.steps.brightfield_steps import (replay_bf_preprocess, replay_bf_condensate_segmentation, replay_bf_condensate_analysis, replay_bf_cell_segmentation, replay_ivbf_preprocess, replay_ivbf_segmentation)
-from pycat.batch.steps.invitro_steps import (replay_ivf_preprocess, replay_ivf_field_summary, replay_ivf_size_distribution, replay_ivf_spatial_metrology, replay_ivf_segmentation, replay_ivf_droplet_segment, replay_client_enrichment)
+from pycat.batch.steps.invitro_steps import (replay_ivf_preprocess, replay_ivf_field_summary, replay_ivf_size_distribution, replay_ivf_spatial_metrology, replay_ivf_segmentation, replay_ivf_droplet_segment, replay_ivf_droplet_analysis, replay_client_enrichment)
 from pycat.batch.steps.analysis_steps import (replay_condensate_analysis, replay_measure_line, replay_cell_analysis, replay_sacf_analysis, replay_condensate_segmentation)
 
 from pycat.batch.steps._common import _get_data, _save_array, _raw_counts, _normalize_to_float  # for replay_background_removal (kept here: a source-level test pins it)
-
 
 # replay_background_removal stays in this file: test_batch_matches_the_recording reads its SOURCE here
 # (a white-box scale-logic check), so moving it would break a test the spec forbids editing.
@@ -242,6 +241,7 @@ _STEP_MAP = {
     'ivf_preprocess':             replay_ivf_preprocess,
     'ivf_segmentation':           replay_ivf_segmentation,
     'ivf_droplet_segment':        replay_ivf_droplet_segment,
+    'ivf_droplet_analysis':       replay_ivf_droplet_analysis,
     'ivf_field_summary':          replay_ivf_field_summary,
     'ivf_size_distribution':      replay_ivf_size_distribution,
     'ivf_spatial_metrology':      replay_ivf_spatial_metrology,

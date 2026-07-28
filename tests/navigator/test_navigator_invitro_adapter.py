@@ -14,8 +14,11 @@ What this pins:
   guided run equals the manual call.
 - **The reviewed knob drives the run.** An edited ``min_area`` makes the guided mask equal the manual at that
   value, not the default.
-- **The measurement is staged.** The field-summary / size-distribution measurement is the next increment; until
-  then the analysis step honestly reports 'run from its panel' (dispatched on the produced ``ivf_droplet_mask``).
+- **The measurement is a measure→interpret chain.** The plan chains a per-droplet MEASURE
+  (``feature_analysis`` → ``ivf_droplet_analysis``, i.e. ``partition_coefficient_local`` on the droplet mask) into
+  the size-distribution INTERPRET (``invitro.size_distribution`` → ``fit_size_distribution``) — the in-vitro
+  size/C_sat result. The interpret op requires the measure's table, so the planner inserts it as a dependency, and
+  an ``in_vitro`` context gate makes the interpret the 'size' terminal only for the in-vitro workflow.
 """
 import numpy as np
 import pytest
@@ -126,20 +129,69 @@ def test_an_edited_min_area_drives_the_run():
     assert not np.array_equal(guided, _manual_mask(img))                        # ≠ the default result
 
 
-# ── the measurement is staged (dispatch on the produced mask) ──────────────────────────────────────────
+# ── the measure → interpret chain runs, in-vitro only, and each step == manual ─────────────────────────
 
-def test_ivf_measurement_reports_needs_panel_for_now():
-    img = _scene()
+def _many_droplets():
+    """A fluorescence field with ENOUGH varied-radius droplets (≥5) for the size-distribution fit to run."""
+    img = np.full((120, 120), 0.05, np.float32)
+    yy, xx = np.ogrid[:120, :120]
+    for cy, cx, r in [(20, 20, 6), (20, 50, 5), (20, 80, 4), (50, 20, 7), (50, 50, 3),
+                      (60, 90, 5), (90, 30, 6), (90, 70, 4), (100, 100, 5), (40, 110, 3)]:
+        img[(yy - cy) ** 2 + (xx - cx) ** 2 <= r ** 2] = 0.9
+    img += np.random.default_rng(0).normal(0, 0.01, img.shape).astype(np.float32)
+    return np.clip(img, 0, None).astype(np.float32)
+
+
+def test_the_planner_chains_measure_then_interpret_in_vitro_only():
+    from pycat.navigator.session import NavigatorSession
+    from pycat.navigator.execution import execution_order
+
+    def _measure_steps(in_vitro):
+        s = NavigatorSession(); s.ctx.set("modality", "fluorescence"); s.ctx.set("axes", ["y", "x"])
+        if in_vitro:
+            s.ctx.set("in_vitro", True)
+        s.intent = AnalysisIntent(target="condensate", observables=["size", "count"])
+        names = [x.name for x in execution_order(s.planner.compile(s.intent, s.ctx, pins={}))]
+        return [n for n in names if n in ("feature_analysis.cell_analysis", "invitro.size_distribution")]
+
+    inv = _measure_steps(True)
+    assert inv == ["feature_analysis.cell_analysis", "invitro.size_distribution"]   # measure THEN interpret
+    assert "invitro.size_distribution" not in _measure_steps(False)                 # in-cell: no size-dist
+
+
+def test_the_full_in_vitro_chain_runs_and_each_step_equals_manual():
+    from pycat.toolbox.invitro_tools import partition_coefficient_local, fit_size_distribution
+    import skimage as sk
+    img = _many_droplets()
     state = _state(img)
+    state["data_instance"].set_data("microns_per_pixel_sq", 0.04)      # 0.2 µm/px
     report = run_plan(_plan(_step("ivf_droplet_segment"),
-                            _step("feature_analysis.cell_analysis", InformationRole.MEASURE)), state)
-    outcomes = {s.name: s.outcome for s in report.steps}
-    assert outcomes["ivf_droplet_segment"] == "ran"
-    assert outcomes["feature_analysis.cell_analysis"] == "needs_panel"     # staged: field-summary/size next
+                            _step("feature_analysis.cell_analysis", InformationRole.MEASURE),
+                            _step("invitro.size_distribution", InformationRole.INTERPRET)), state)
+    assert [s.outcome for s in report.steps] == ["ran", "ran", "ran"]   # segment → measure → interpret all run
+
+    mask = np.asarray(state["ivf_droplet_mask"]).astype(np.int32)
+    # MEASURE: guided per-droplet table == manual partition_coefficient_local (in-vitro, no reference)
+    manual_measure = partition_coefficient_local(np.asarray(img, dtype=np.float64), mask,
+                                                 sample_type="in_vitro", allow_no_reference=True)["per_droplet_df"]
+    import pandas as pd
+    pd.testing.assert_frame_equal(state["ivf_droplet_df"], manual_measure)
+
+    # INTERPRET: guided size-distribution fit == manual fit_size_distribution on the same radii
+    mpx = 0.04 ** 0.5
+    radii = np.array([np.sqrt(p.area * mpx ** 2 / np.pi) for p in sk.measure.regionprops(mask)])
+    manual_fit = fit_size_distribution(radii, n_bins=30)
+    guided_fit = state["ivf_size_distribution"]
+    scalar = {k: v for k, v in manual_fit.items() if not hasattr(v, "__len__")}
+    assert {k: guided_fit[k] for k in scalar} == scalar                 # every scalar fit statistic matches
+
+
+def test_ivf_measure_dispatches_on_the_produced_mask():
     intent = _plan().intent
     assert resolve_batch_step("feature_analysis.cell_analysis", intent,
-                              {"ivf_droplet_mask": np.ones((4, 4), int)}) is None
+                              {"ivf_droplet_mask": np.ones((4, 4), int)}) == "ivf_droplet_analysis"
     assert resolve_batch_step("feature_analysis.cell_analysis", intent,
                               {"bf_condensate_mask": np.ones((4, 4), int)}) == "bf_condensate_analysis"
     assert resolve_batch_step("feature_analysis.cell_analysis", intent,
                               {"puncta_mask": np.zeros((4, 4))}) == "condensate_analysis"
+    assert resolve_batch_step("invitro.size_distribution") == "ivf_size_distribution"

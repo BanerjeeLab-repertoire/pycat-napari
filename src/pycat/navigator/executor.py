@@ -102,7 +102,7 @@ def _feature_analysis_step(intent, state=None):
             if state.get("bf_condensate_mask") is not None:
                 return "bf_condensate_analysis"
             if state.get("ivf_droplet_mask") is not None:
-                return None
+                return "ivf_droplet_analysis"     # per-droplet MEASURE; the size-distribution INTERPRET follows
         return "condensate_analysis"
     return None
 
@@ -175,6 +175,10 @@ def _ivf_segment_params(intent, ctx, state, reviewed):
     return _reviewed_or_default(reviewed, _IVF_SEG_DEFAULTS)
 
 
+def _ivf_size_dist_params(intent, ctx, state, reviewed):
+    return _reviewed_or_default(reviewed, {"n_bins": 30})
+
+
 #: The declared adapters, keyed by the REAL navigator module name `execution_order` reports. The ONLY place a
 #: plan step is tied to a computation — a step absent here (or one whose batch step resolves to ``None``) is
 #: reported "run from its panel", never guessed at. Grows one workflow per phase, each behind a
@@ -194,6 +198,11 @@ _ADAPTERS: dict = {
     # In-vitro fluorescence droplet segmentation (droplets ≡ condensates; the in-vitro CONTEXT selects it over the
     # in-cell puncta segmenter). The op runs the extracted producer `segment_ivf_droplets` → `ivf_droplet_mask`.
     "ivf_droplet_segment": ExecAdapter("ivf_droplet_segment", "ivf_droplet_segment", _ivf_segment_params),
+    # The in-vitro measure→interpret chain's INTERPRET: `invitro.size_distribution` fits the droplet size
+    # distribution / C_sat. (The MEASURE, `feature_analysis.cell_analysis` → `ivf_droplet_analysis` on an in-vitro
+    # mask, runs first via the state dispatch above.)
+    "invitro.size_distribution": ExecAdapter("invitro.size_distribution", "ivf_size_distribution",
+                                             _ivf_size_dist_params),
 }
 
 

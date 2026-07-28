@@ -289,10 +289,26 @@ class Planner:
             caps = list(m.requires_inputs) + list(m.provides)
             return 1 if any(c.target() == tgt for c in caps) else 0
 
-        best = max(candidates, key=lambda m: (specificity(m), m.preference, -ord(m.name[0])))
-        # deterministic: if several share the top (specificity, preference), the
+        def ctx_bonus(m: ModuleContract) -> int:
+            # PROMOTE a terminal gated on a WORKFLOW-SELECTING context (`in_vitro`) when that context is confirmed
+            # — so the in-vitro size-distribution INTERPRET wins the 'size' terminal on an in-vitro plan, while an
+            # in-cell plan falls back to the per-object measure by preference. Restricted to `in_vitro` ON PURPOSE:
+            # a workflow flag selects WHICH analysis to run, whereas quality/dimensionality gates (`calibrated`,
+            # `z_stack`, `time_series`) only gate a chosen op — promoting those would re-order the msd/coarsening/
+            # fusion terminals (whose ordering is preference-based). See the 2026-07-27 in-vitro chain.
+            try:
+                if "in_vitro" in getattr(m, "requires_context", ()) \
+                        and ctx.context_requirement("in_vitro") is True:
+                    return 1
+            except Exception:      # broad-ok: optional_probe — an unknown gate key just yields no bonus
+                pass
+            return 0
+
+        best = max(candidates, key=lambda m: (ctx_bonus(m), specificity(m), m.preference, -ord(m.name[0])))
+        # deterministic: if several share the top (context bonus, specificity, preference), the
         # base policy (preference, cost, name) breaks the tie.
-        top = [m for m in candidates if specificity(m) == specificity(best)]
+        top = [m for m in candidates
+               if ctx_bonus(m) == ctx_bonus(best) and specificity(m) == specificity(best)]
         return self.select(top, ctx)
 
     def _resolve_module(self, module: ModuleContract, produces_goal: Capability,

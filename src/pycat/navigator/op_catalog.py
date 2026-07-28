@@ -307,7 +307,11 @@ def _measure_ops() -> List[dict]:
              quality=QualityRequirement(needs_calibration=True, measurement_key='client_enrichment')),
         dict(id="invitro.size_distribution", module="invitro_tools",
              role=InformationRole.INTERPRET, provides=cap(R.MODEL_FIT, T, "observable:size"),
-             requires=[cap(R.INSTANCE_LABELS, T)], context=[],
+             # A measure→interpret CHAIN: the size-distribution fit INTERPRETS the per-droplet measurement table
+             # (feature_analysis's `measurement_table{observable:*}` satisfies `observable:size`), so the planner
+             # inserts the measure before it — segment → measure → size-distribution. `in_vitro` context so it is
+             # the terminal only for the in-vitro droplet workflow, not in-cell condensates. (2026-07-27)
+             requires=[cap(R.MEASUREMENT_TABLE, T, "observable:size")], context=["in_vitro"],
              observables=["size", "count", "saturation_concentration"], propagate=True,
              preference=0.6, purpose="Field summary / size-distribution / C_sat.",
              api="invitro_tools.fit_size_distribution"),
