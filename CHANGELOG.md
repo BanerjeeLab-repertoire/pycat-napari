@@ -1,3 +1,20 @@
+## [1.6.426] - 2026-07-28
+### Added — **VPT microrheology adapter — the flagship viscosity terminal runs from a navigator plan (spec N2b-1b).**
+1.6.423 built the `vpt_microrheology` batch handler (the full detect→link→MSD→fit→Stokes–Einstein chain). This
+wires it into the navigator: the `vpt.microrheology` INTERPRET op now has an `ExecAdapter` →
+`vpt_microrheology`, so a bead/viscosity plan computes end to end instead of reporting "run from its panel". The
+handler is self-contained (it runs the whole chain from the raw stack), so the terminal carries the workflow; the
+upstream detect/link steps stay panel-only until they get their own handlers. `_vpt_microrheology_params` threads
+the reviewed bead radius / temperature / min-track-length over grounded defaults — pixel size and frame interval
+come from the file metadata (the scale gate), never guessed. The `vpt.microrheology` op already declares
+`needs_pixel_size`, so the planner blocks it without calibration; the handler's scale gate refuses a pixel-unit
+viscosity as a second line of defence. The "Video Particle Tracking" `CanonicalCase` (already reproducible at the
+plan level) now runs end to end (N2b-1c).
+
+Tests (`tests/navigator/test_navigator_vpt_adapter.py`, `base`, 3): the adapter resolves and the plan chains it;
+a guided run's viscosity equals the manual `replay_vpt_microrheology` bit for bit on the seeded bead stack; the
+scale gate still refuses a pixel-unit viscosity through the adapter path. Full gate green.
+
 ## [1.6.425] - 2026-07-28
 ### Added — **Manuscript Supp panel: runtime by method (the benchmark's performance axis) — Part C, measured not asserted.**
 Fig 2 (1.6.424) added the benchmark's *accuracy* axis (Dice vs ground truth); this adds its *speed* axis, so the

@@ -135,7 +135,12 @@ The order maximizes scientific value and reuses the most existing machinery:
 > (skip-stub replaced), op composition declared, registry held at its 432 ceiling. The whole chain runs headless;
 > the scale gate refuses a pixel-unit viscosity (verdict, not a number). Gate `test_vpt_microrheology_handler.py`
 > (`base`, 3): the full chain recovers the seeded viscosity within ±15% on a synthetic bead stack; both scale-gate
-> refusals proven. **Remaining: (b) the adapter `vpt.microrheology → vpt_microrheology` + (c) the CanonicalCase.**
+> refusals proven.
+> **STATUS N2b-1(b,c) — DONE (1.6.426).** Adapter `ExecAdapter("vpt.microrheology", "vpt_microrheology",
+> _vpt_microrheology_params)` in `_ADAPTERS`; the bead/viscosity plan chains the microrheology terminal, which runs
+> the whole chain. The "Video Particle Tracking" CanonicalCase (already reproducible at plan level) now runs end to
+> end. Gate `test_navigator_vpt_adapter.py` (`base`, 3): adapter resolves, guided viscosity == manual bit for bit,
+> scale gate still refuses through the adapter path. **N2b-1 COMPLETE — the VPT flagship computes in the guided flow.**
 
 **1. VPT microrheology → viscosity (highest value; Gable's flagship).** The science chain
 (`detect_beads_stack → link → compute_msd → fit_anomalous_diffusion → viscosity_from_diffusion`) is all

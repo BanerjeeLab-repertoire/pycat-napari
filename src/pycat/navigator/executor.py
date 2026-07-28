@@ -183,6 +183,16 @@ def _pixel_coloc_params(intent, ctx, state, reviewed):
     return {}       # the two channels + the ROI are resolved from state; the raw coloc measures take no knob
 
 
+#: VPT microrheology knobs the handler reads from `params` — the bead radius + temperature + min track length
+#: for the Stokes–Einstein viscosity. Pixel size and frame interval come from the file metadata (the scale gate),
+#: NOT from here — a viscosity in pixel units is refused, never guessed.
+_VPT_MICRORHEOLOGY_DEFAULTS: dict = {"bead_radius_um": 0.5, "temperature_C": 24.0, "min_track_length": 10}
+
+
+def _vpt_microrheology_params(intent, ctx, state, reviewed):
+    return _reviewed_or_default(reviewed, _VPT_MICRORHEOLOGY_DEFAULTS)
+
+
 #: The declared adapters, keyed by the REAL navigator module name `execution_order` reports. The ONLY place a
 #: plan step is tied to a computation — a step absent here (or one whose batch step resolves to ``None``) is
 #: reported "run from its panel", never guessed at. Grows one workflow per phase, each behind a
@@ -211,6 +221,11 @@ _ADAPTERS: dict = {
     # planner chains a segmenter, and the correlation runs inside objects, not whole-frame.
     "pixel_wise_corr.pearson_manders": ExecAdapter("pixel_wise_corr.pearson_manders", "pixel_colocalization",
                                                    _pixel_coloc_params),
+    # VPT microrheology (Gable's flagship): the `vpt.microrheology` INTERPRET terminal runs the whole
+    # detect→link→MSD→fit→Stokes-Einstein chain in `replay_vpt_microrheology` (self-contained from the raw bead
+    # stack). The op declares `needs_pixel_size`, so the planner blocks it without calibration; the handler's
+    # scale gate refuses a pixel-unit viscosity as a second line of defence. See spec N2b-1.
+    "vpt.microrheology": ExecAdapter("vpt.microrheology", "vpt_microrheology", _vpt_microrheology_params),
 }
 
 
