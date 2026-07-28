@@ -82,3 +82,26 @@ def test_batch_step_round_trips_through_the_dict_boundary():
     back = BatchStepResult.from_dict(d)
     assert back.status == 'error' and isinstance(back.error, PyCATError) and str(back.error) == 'boom'
     assert back.warnings == ('slow',)
+
+
+def test_a_BatchStepResult_carrying_an_AnalysisResult_output_round_trips_serializably():
+    # the gap the batch AnalysisResult adoption (1.6.421) opened: outputs may be typed results, so to_dict must
+    # serialize them (a bare object in the list is not JSON-serializable), and from_dict must rebuild them.
+    ar = AnalysisResult(operation_id='cell_analysis', entity_type='cell',
+                        measurements=pd.DataFrame({'label': [1, 2], 'area': [10.0, 20.0]}))
+    d = BatchStepResult(status='ok', outputs=(ar,)).to_dict()
+    assert all(isinstance(o, dict) for o in d['outputs'])      # each output serialized to its dict form
+    assert json.dumps(d)                                       # the whole envelope is JSON-serializable
+
+    back = BatchStepResult.from_dict(d)
+    assert len(back.outputs) == 1 and isinstance(back.outputs[0], AnalysisResult)   # rebuilt to the typed object
+    out = back.outputs[0]
+    assert out.operation_id == 'cell_analysis' and out.entity_type == 'cell'
+    assert hasattr(out.measurements, 'columns') and list(out.measurements['area']) == [10.0, 20.0]
+
+
+def test_a_non_AnalysisResult_output_survives_the_round_trip_unchanged():
+    # a plain-string output (no to_dict, no operation_id) is passed through both ways, not mangled
+    d = BatchStepResult(status='ok', outputs=('some_layer_id',)).to_dict()
+    assert d['outputs'] == ['some_layer_id'] and json.dumps(d)
+    assert BatchStepResult.from_dict(d).outputs == ('some_layer_id',)

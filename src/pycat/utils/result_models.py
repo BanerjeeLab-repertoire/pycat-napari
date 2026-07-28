@@ -121,7 +121,9 @@ class BatchStepResult:
     def to_dict(self) -> dict:
         return {
             'status': self.status,
-            'outputs': list(self.outputs),
+            # Outputs may be typed results (an `AnalysisResult`); serialize each to its dict form so `to_dict`
+            # returns a fully-plain, serializable dict (its whole purpose) — a bare object in the list is not.
+            'outputs': [o.to_dict() if hasattr(o, 'to_dict') else o for o in self.outputs],
             'warnings': list(self.warnings),
             'error': (None if self.error is None
                       else {'type': type(self.error).__name__, 'message': str(self.error)}),
@@ -129,14 +131,19 @@ class BatchStepResult:
 
     @classmethod
     def from_dict(cls, d: dict) -> 'BatchStepResult':
-        """Rebuild from the boundary dict form. A serialized error returns as a ``PyCATError`` carrying its
-        message (the concrete subclass is not preserved across serialization — only the base contract is)."""
+        """Rebuild from the boundary dict form. An output that is an `AnalysisResult`'s dict form (it carries an
+        ``operation_id``) is rebuilt into the typed object, so a ``to_dict`` → ``from_dict`` round-trip is
+        symmetric. A serialized error returns as a ``PyCATError`` carrying its message (the concrete subclass is
+        not preserved across serialization — only the base contract is)."""
         err = d.get('error')
         error = None
         if err is not None:
             error = PyCATError(err.get('message', '') if isinstance(err, dict) else str(err))
+        outputs = tuple(
+            AnalysisResult.from_dict(o) if isinstance(o, dict) and 'operation_id' in o else o
+            for o in (d.get('outputs') or ()))
         return cls(
             status=d['status'],
-            outputs=tuple(d.get('outputs') or ()),
+            outputs=outputs,
             warnings=tuple(d.get('warnings') or ()),
             error=error)

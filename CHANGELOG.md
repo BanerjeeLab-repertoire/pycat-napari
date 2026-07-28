@@ -1,3 +1,14 @@
+## [1.6.422] - 2026-07-28
+### Fixed — **`BatchStepResult.to_dict` serializes its typed `AnalysisResult` outputs (completes 1.6.421).**
+1.6.421 made a step's `outputs` able to hold a typed `AnalysisResult`, but `BatchStepResult.to_dict` still did a
+bare `list(self.outputs)` — leaving un-serialized objects in what is supposed to be a fully-plain, serializable
+dict (the whole purpose of `to_dict`). Now each output is serialized to its own dict form (`o.to_dict()` when it
+has one), so the envelope is JSON-serializable, and `from_dict` rebuilds an `AnalysisResult` output (detected by
+its `operation_id`) back into the typed object — a symmetric round-trip. Non-typed outputs (e.g. a bare layer-id
+string) pass through unchanged both ways. Tests (`test_result_models.py`, +2): a `BatchStepResult` carrying an
+`AnalysisResult` round-trips serializably (measurements rebuilt to a DataFrame); a plain-string output survives
+untouched.
+
 ## [1.6.421] - 2026-07-28
 ### Changed — **Typed result models migration — batch analysis steps now carry a typed `AnalysisResult`.**
 The typed result envelopes shipped in 1.6.228; `BatchStepResult` was already adopted by the batch replay (each
