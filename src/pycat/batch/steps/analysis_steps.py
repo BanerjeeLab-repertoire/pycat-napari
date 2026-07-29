@@ -451,3 +451,58 @@ def replay_dynamic_spatial(state: dict, image_path: Path, params: dict, output_d
     state['_dynamic_spatial_done'] = True
     n_tracks = int(tracks['track_id'].nunique()) if 'track_id' in tracks.columns else len(tracks)
     print(f"[PyCAT Batch]   Dynamic spatial: {n_tracks} track(s), {len(events)} merge/fission event(s).")
+
+
+def replay_msd_analysis(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """Ensemble MSD -> anomalous-diffusion fit over the condensate trajectories `dynamic_spatial` linked
+    (spec N2b-4). This is the "build the stack-level handler" branch of the msd_analysis decision: `compute_msd`
+    needs a whole-stack trajectory table, and the batch loop now has one — `replay_dynamic_spatial` writes
+    `state['dynamic_spatial_tracks_df']` (track_id / frame / y_um / x_um, exactly compute_msd's contract). Same
+    scale discipline as VPT microrheology: a diffusion coefficient is a physical rate (um^2/s), so the handler
+    REFUSES (a validity flag, no number) when the pixel size is a 1.0 placeholder or the frame interval is
+    missing — it never emits a pixel^2/frame "D". Replaces the msd_analysis skip-stub."""
+    from pycat.toolbox.condensate_physics_tools import compute_msd, fit_anomalous_diffusion
+    from pycat.utils.pixel_size import has_real_pixel_size
+    from pycat.utils.frame_interval import frame_interval_s
+    import pandas as pd
+
+    if state.get('_msd_done'):
+        return                                        # compute_msd + fit ops both resolve here; run once per plan
+
+    tracks = state.get('dynamic_spatial_tracks_df')
+    if tracks is None or len(tracks) == 0:
+        print(f"[PyCAT Batch]   MSD analysis skipped for {image_path.name}: "
+              f"needs linked trajectories (run dynamic_spatial first).")
+        return
+
+    repo = state['data_instance'].data_repository
+    dt_s = frame_interval_s(repo, context='msd_analysis')
+    if not has_real_pixel_size(repo) or not np.isfinite(dt_s):
+        state['_msd_scale_validity'] = {'scale_valid': False}
+        print(f"[PyCAT Batch]   MSD analysis refused for {image_path.name}: a diffusion coefficient needs a "
+              f"calibrated pixel size AND a frame interval (um^2/s) — refusing a pixel^2/frame value.")
+        return
+
+    min_track_length = int(params.get('min_track_length', 200))
+    max_lag = params.get('max_lag')
+    msd = compute_msd(tracks, frame_interval_s=dt_s, min_track_length=min_track_length,
+                      max_lag=(int(max_lag) if max_lag is not None else None))
+    if msd is None or len(msd) == 0:
+        print(f"[PyCAT Batch]   MSD analysis: no track met the {min_track_length}-frame minimum length.")
+        return
+    fit = fit_anomalous_diffusion(msd, frame_interval_s=dt_s)
+
+    di = state['data_instance']
+    state['msd_df'] = msd
+    state['msd_fit'] = fit
+    state['_msd_scale_validity'] = {'scale_valid': True}
+    state['_msd_done'] = True
+    di.set_data('msd_df', msd)
+    di.set_data('msd_D_um2_per_s', fit.get('D_um2_per_s'))
+    msd.to_csv(output_dir / f"{image_path.stem}_msd.csv", index=False)
+    # the fit dict carries nested/array diagnostics — write only the scalar summary fields to the CSV.
+    scalar_fit = {k: fit.get(k) for k in
+                  ('D_um2_per_s', 'alpha', 'motion_type', 'r_squared', 'localization_error_nm', 'log_log_slope')}
+    pd.DataFrame([scalar_fit]).to_csv(output_dir / f"{image_path.stem}_msd_fit.csv", index=False)
+    print(f"[PyCAT Batch]   MSD analysis: D={fit.get('D_um2_per_s')} um^2/s, alpha={fit.get('alpha')} "
+          f"({fit.get('motion_type')}).")

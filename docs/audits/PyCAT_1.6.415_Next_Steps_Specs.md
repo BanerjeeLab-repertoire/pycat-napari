@@ -202,7 +202,18 @@ pure-Python and proven headless (the golden-master harness runs it). What's miss
      correctly once a real handler exists.
    - **(b) Adapter** keyed on the tracking op-id; **(c)** tests.
 
-**4. MSD / condensate biophysics** — `msd_analysis` (:253) is stubbed as *"time-series; not a per-image
+**4. MSD / condensate biophysics — DONE (1.6.430, the "build it" branch).**
+   - STATUS: The stub's "not a per-image batch step" premise was refuted by VPT (a whole-stack handler already
+     runs in the batch loop) and by `dynamic_spatial` now writing a trajectory table that is exactly
+     `compute_msd`'s contract (track_id / frame / y_um / x_um). So the decision is resolved by BUILDING, not
+     documenting: `replay_msd_analysis` (`analysis_steps.py`) reads `state['dynamic_spatial_tracks_df']` → shared
+     `compute_msd` → `fit_anomalous_diffusion`, writing `*_msd.csv` + `*_msd_fit.csv` and storing `D_um2_per_s`.
+     Both diffusion ops (`condensate_physics.compute_msd` + `.fit_anomalous_diffusion`) key to it via `_msd_params`
+     (guard `_msd_done`); the scale gate refuses a pixel²/frame D (needs calibrated pixel size + frame interval),
+     exactly like VPT. Registered net-negative against the 432 ceiling. Route test
+     `tests/navigator/test_navigator_msd_adapter.py` (D≈0.05 recovered, guided == manual, guard, scale refusal).
+     Full gate green.
+   - ORIGINAL SPEC (for reference): `msd_analysis` (:253) is stubbed as *"time-series; not a per-image
 batch step."* This one is genuinely different: MSD needs the *whole* stack, not per-frame replay. Either
 build a stack-level handler (the batch loop would need a stack-aware entry) **or** leave it panel-only
 and document why. Decide explicitly; don't leave it as a silent stub that an adapter might later point

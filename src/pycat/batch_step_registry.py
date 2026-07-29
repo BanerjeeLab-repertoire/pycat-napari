@@ -127,7 +127,7 @@ from pycat.batch.steps.segmentation_steps import (replay_cellpose_segmentation, 
 from pycat.batch.steps.brightfield_steps import (replay_bf_preprocess, replay_bf_condensate_segmentation, replay_bf_condensate_analysis, replay_bf_cell_segmentation, replay_ivbf_preprocess, replay_ivbf_segmentation)
 from pycat.batch.steps.invitro_steps import (replay_ivf_preprocess, replay_ivf_field_summary, replay_ivf_size_distribution, replay_ivf_spatial_metrology, replay_ivf_segmentation, replay_ivf_droplet_segment, replay_ivf_droplet_analysis, replay_client_enrichment)
 from pycat.batch.steps.vpt_steps import replay_vpt_microrheology
-from pycat.batch.steps.analysis_steps import (replay_condensate_analysis, replay_measure_line, replay_cell_analysis, replay_sacf_analysis, replay_condensate_segmentation, replay_pixel_coloc, replay_spatial_metrology, replay_dynamic_spatial)
+from pycat.batch.steps.analysis_steps import (replay_condensate_analysis, replay_measure_line, replay_cell_analysis, replay_sacf_analysis, replay_condensate_segmentation, replay_pixel_coloc, replay_spatial_metrology, replay_dynamic_spatial, replay_msd_analysis)
 
 from pycat.batch.steps._common import _get_data, _save_array, _raw_counts, _normalize_to_float  # for replay_background_removal (kept here: a source-level test pins it)
 
@@ -252,8 +252,7 @@ _STEP_MAP = {
         '[PyCAT Batch]   IVF phase diagram skipped (dilution series; manual multi-condition input).'),
     'ivf_frame_qc':               lambda s,p,pa,o: print(
         '[PyCAT Batch]   IVF frame QC skipped (time-series; not a per-image batch step).'),
-    'msd_analysis':               lambda s,p,pa,o: print(
-        '[PyCAT Batch]   MSD / condensate biophysics skipped (time-series; not a per-image batch step).'),
+    'msd_analysis':               replay_msd_analysis,
     'ivbf_preprocess':            replay_ivbf_preprocess,
     'ivbf_segmentation':          replay_ivbf_segmentation,
     'zstack_bg_removal':              lambda s,p,pa,o: print(

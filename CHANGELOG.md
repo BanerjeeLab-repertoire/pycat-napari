@@ -1,3 +1,26 @@
+## [1.6.430] - 2026-07-28
+### Added — **Condensate MSD adapter — ensemble MSD → anomalous-diffusion fit runs from a navigator plan (spec N2b-4, the "build it" decision).**
+`msd_analysis` was a headless skip-stub documented "time-series; not a per-image batch step." That framing was no
+longer true: VPT microrheology (1.6.423) already runs a whole-stack detect→link→MSD→fit chain in the batch loop,
+and `dynamic_spatial` (1.6.428) now writes a trajectory table — `track_id / frame / y_um / x_um`, exactly
+`compute_msd`'s contract. So the N2b-4 decision is resolved by BUILDING the stack-level handler, not documenting
+why it can't exist. `replay_msd_analysis` (`analysis_steps.py`) reads the trajectories `dynamic_spatial` linked,
+runs the shared `compute_msd` (ensemble MSD with per-track independence) → `fit_anomalous_diffusion` (MSD = 4D·τ^α
+by log-log regression), writes `*_msd.csv` + `*_msd_fit.csv`, and stores `D_um2_per_s` in state / data_instance.
+
+Same scale discipline as VPT: a diffusion coefficient is a physical rate (µm²/s), so the handler REFUSES (a
+`_msd_scale_validity` flag, no number) when the pixel size is a 1.0 placeholder or the frame interval is missing —
+it never emits a pixel²/frame "D". Both diffusion ops (`condensate_physics.compute_msd` +
+`.fit_anomalous_diffusion`, each requiring `TRAJECTORIES`, both `needs_pixel_size`) resolve to the one handler; a
+`_msd_done` guard keeps a plan holding both from fitting twice. `_msd_params` threads the reviewed minimum track
+length (science default 200 frames) / lag cap. Registered net-negative against the `batch_step_registry.py`
+complexity ceiling (extended the `analysis_steps` import, swapped the 2-line skip-stub for a 1-line reference).
+
+Tests (`tests/navigator/test_navigator_msd_adapter.py`, `base`, 4): both ops resolve to `msd_analysis`; a guided
+`run_plan` over 12 seeded Brownian tracks recovers D ≈ 0.05 µm²/s and equals a direct `replay_msd_analysis` call
+bit for bit (both CSVs written); a both-ops plan fits once (guard); and the scale gate refuses a pixel-unit
+diffusion through the adapter path. The adapter-coverage guard now pins `msd_analysis`. Full gate green.
+
 ## [1.6.429] - 2026-07-28
 ### Changed — **Coloc "M1"-family labels are now self-distinguishing + adapter-keying convention documented (spec N5, clarity only — no math change).**
 **N5a — Costes/Manders label provenance.** A merged colocalization table could show `Costes Automatic Thresholded

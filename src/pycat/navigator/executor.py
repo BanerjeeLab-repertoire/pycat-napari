@@ -206,6 +206,16 @@ def _dynamic_spatial_params(intent, ctx, state, reviewed):
     return _reviewed_or_default(reviewed, _DYNAMIC_SPATIAL_DEFAULTS)
 
 
+#: MSD analysis knobs — the min track length to admit (the science default is 200 frames) and an optional lag cap.
+#: The trajectory table comes from the upstream `dynamic_spatial` step; pixel size + frame interval (the scale
+#: gate) come from the file metadata, never from here.
+_MSD_DEFAULTS: dict = {"min_track_length": 200}
+
+
+def _msd_params(intent, ctx, state, reviewed):
+    return _reviewed_or_default(reviewed, _MSD_DEFAULTS)
+
+
 #: The declared adapters — the ONLY place a plan step is tied to a computation. A step absent here (or one whose
 #: batch step resolves to ``None``) is reported "run from its panel", never guessed at. Grows one workflow per
 #: phase, each behind a route-equivalence test: ``background_removal`` (rolling-ball) and ``cellpose_segmentation``
@@ -258,6 +268,14 @@ _ADAPTERS: dict = {
                                                      _dynamic_spatial_params),
     "dynamic_spatial.detect_merge_fission": ExecAdapter("dynamic_spatial.detect_merge_fission", "dynamic_spatial",
                                                         _dynamic_spatial_params),
+    # Condensate MSD (spec N2b-4): the stack-level branch of the msd_analysis decision. BOTH diffusion ops
+    # (`condensate_physics.compute_msd` + `.fit_anomalous_diffusion`, each requiring TRAJECTORIES) resolve to the
+    # one handler, which reads the trajectory table `dynamic_spatial` linked, computes the ensemble MSD and fits
+    # anomalous diffusion. A `_msd_done` guard keeps a plan holding both from fitting twice; the handler's scale
+    # gate refuses a pixel^2/frame "D" (needs a calibrated pixel size + frame interval), like VPT.
+    "condensate_physics.compute_msd": ExecAdapter("condensate_physics.compute_msd", "msd_analysis", _msd_params),
+    "condensate_physics.fit_anomalous_diffusion": ExecAdapter("condensate_physics.fit_anomalous_diffusion",
+                                                              "msd_analysis", _msd_params),
 }
 
 
