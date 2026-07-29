@@ -368,7 +368,16 @@ re-checked in the 1.6.415 pass. Each needs a *verification* pass (run it on a co
 deciding whether it needs a fix — don't fix blind. In priority order:
 
 1. **SpIDA noise-tail truncation** — confirm whether the histogram fit still truncates the low-intensity
-   tail in a way that biases the monomer fraction.
+   tail in a way that biases the monomer fraction. **VERIFIED — bias CONFIRMED at low density (1.6.x, test-only).**
+   `build_intensity_histogram` drops every pixel at/below the noise floor (`p = p[p > 0]`). At low density a large
+   fraction of pixels see zero molecules (P(k=0)=e^-N), so the cut removes real information and inflates N: +56%
+   at true N=2, catastrophic (>20x) at N=1, tracking the dropped-zero fraction; the valid regime (N>=5, e^-N
+   negligible) is unaffected — which is why the pre-existing N=8 baseline test passes. Encoded in
+   `tests/test_group_a_moments.py`: a CHARACTERISATION test pinning the mechanism (bias scales with dropped
+   fraction; N=5 unaffected) + a strict-`xfail` FAILING GOLDEN-MASTER asserting N≈2 recovery, the acceptance test
+   for the fix. FIX DIRECTION (evidence-backed, deferred to its own real-data-validated change — changing a core
+   fit's histogram for all users must not be done blind): keep the low tail instead of `p[p>0]` — on noisy
+   synthetics that recovers low-N D≈truth and leaves the high-N regime bit-identical.
 2. **Partition-coefficient clipping** — check whether `partition_coefficient_field` clips or floors in a
    way that distorts K_p at low dilute-phase intensity.
 3. **GLCM / LBP over the bbox** — confirm texture features are computed over the object mask, not the

@@ -112,6 +112,47 @@ def test_the_pedestal_destroys_spida_and_is_now_caught(pedestal, min_error):
     )
 
 
+# ── N6-1: low-density tail-truncation bias (verify-then-fix) ────────────────────────────────────────────
+# `build_intensity_histogram` drops every pixel at/below the noise floor (`p = p[p > 0]`). At LOW density a large
+# fraction of pixels see zero molecules (P(k=0) = e^-N), so that cut removes a real, information-bearing part of
+# the distribution and biases N upward. The bias scales with the dropped-zero fraction; the valid regime (N >= 5,
+# where e^-N is negligible) is unaffected — which is why the baseline test above, at N=8, passes.
+
+@pytest.mark.base
+def test_spida_low_density_bias_tracks_the_dropped_zero_fraction():
+    """CHARACTERISATION (the mechanism, pinned): the low-density N over-estimate is caused by the p>0 truncation
+    and scales with the fraction of zero-molecule pixels dropped. Guards the ROOT CAUSE, so a fix that keeps the
+    low tail can be measured against it, and pins that the valid regime (N=5) is NOT to be regressed by that fix."""
+    spida = pytest.importorskip("pycat.toolbox.spida_tools")
+
+    def frac_dropped_and_ratio(n_true):
+        px = _spida_pixels(n_true=n_true)
+        frac0 = float(np.mean(px <= 0))                 # pixels the p>0 cut removes
+        x, y = spida.build_intensity_histogram(px, n_bins=256)
+        fit = spida.fit_spida_histogram(x, y)
+        return frac0, fit["N"] / n_true
+
+    f2, ratio2 = frac_dropped_and_ratio(2.0)            # ~14% of pixels dropped
+    f5, ratio5 = frac_dropped_and_ratio(5.0)            # <1% dropped
+    assert f2 > 0.10 and f5 < 0.02                      # the truncation bites at N=2, not at N=5
+    assert ratio2 > 1.4                                 # > 40% over-estimate at true N=2 (the real bias)
+    assert 0.9 < ratio5 < 1.1                           # N=5 is within the valid regime — a fix must keep it so
+
+
+@pytest.mark.base
+@pytest.mark.xfail(reason="N6-1 fix spec: build_intensity_histogram's `p = p[p > 0]` truncates the k=0 population "
+                          "and biases low-density N (~+56% at N=2). Keeping the low tail recovers it on noisy "
+                          "synthetics (D≈truth). Remove this xfail when the truncation is fixed.", strict=True)
+def test_spida_recovers_low_density_N_once_the_truncation_is_fixed():
+    """FAILING GOLDEN-MASTER: at a true density of 2, SpIDA should recover N ≈ 2. It currently returns ~3.1
+    (+56%) because the zero-molecule pixels are truncated before the fit. This is the acceptance test the fix
+    must satisfy — it flips from xfail to pass the moment the low tail is retained."""
+    spida = pytest.importorskip("pycat.toolbox.spida_tools")
+    x, y = spida.build_intensity_histogram(_spida_pixels(n_true=2.0), n_bins=256)
+    fit = spida.fit_spida_histogram(x, y)
+    assert fit["N"] == pytest.approx(2.0, rel=0.3)
+
+
 @pytest.mark.base
 def test_the_spida_pedestal_check_does_not_cry_wolf():
     """0 false alarms in 20 clean seeds. A check that fires on good data gets switched off."""
