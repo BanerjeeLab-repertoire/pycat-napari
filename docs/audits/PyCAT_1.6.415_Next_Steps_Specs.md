@@ -379,11 +379,44 @@ deciding whether it needs a fix — don't fix blind. In priority order:
    fit's histogram for all users must not be done blind): keep the low tail instead of `p[p>0]` — on noisy
    synthetics that recovers low-N D≈truth and leaves the high-N regime bit-identical.
 2. **Partition-coefficient clipping** — check whether `partition_coefficient_field` clips or floors in a
-   way that distorts K_p at low dilute-phase intensity.
+   way that distorts K_p at low dilute-phase intensity. **VERIFIED — recovers truth; CLOSED with a guard
+   (test-only).** For a well-posed (uniform) dilute phase, Kp = dense/bulk is recovered EXACTLY across the whole
+   low range (bulk 0.3 → 0.001, Kp 2 → 600, 0% error) — the percentile == mean == bulk, so neither floor engages.
+   The two floors (mean-fallback when the percentile is degenerate; the `bulk_div > 1e-6` guard) only engage on a
+   degenerate right-skewed dark background, where they trade a ~1e8 divide-by-≈0 explosion for a bounded bias — a
+   documented, deliberate choice. Encoded in `tests/test_partition.py`: a parametrized golden-master pinning exact
+   Kp recovery across low dilute intensities (the regression guard) + a characterization pinning that the
+   mean-fallback stays bounded (not an explosion) on the degenerate background. No fix needed.
 3. **GLCM / LBP over the bbox** — confirm texture features are computed over the object mask, not the
-   full bounding box (bbox includes background → contaminated texture).
+   full bounding box (bbox includes background → contaminated texture). **VERIFIED — GLCM IS contaminated
+   (test-only golden-master; fix deferred).** `calculate_glcm_features` crops the ROI *bounding box*
+   (`crop_bounding_box(...)[0]`) and runs `graycomatrix` over it with NO mask restriction — a uniform disc (true
+   contrast 0) reports contrast ≈ 11919, entirely the object/background edge (even a zero-noise background does
+   it). `calculate_image_entropy` restricts via `cropped_mask`; LBP restricts its histogram but computes codes
+   over the bbox, so its boundary ring is contaminated too — GLCM is the clear case. The pre-existing
+   `test_glcm_features_with_mask` missed it (rectangular mask → bbox == mask). Encoded in
+   `tests/test_feature_analysis.py`: a characterization pinning the contamination + a strict-`xfail` FAILING
+   GOLDEN-MASTER asserting ≈0 contrast for a uniform object. FIX (deferred to its own change — it alters every
+   GLCM value and must match skimage's offset convention in the all-True-mask limit): restrict the co-occurrence
+   to both-in-mask pixel pairs.
 4. **Size-distribution detection-limit truncation** — check the MLE size distribution handles the
-   left-truncation at the detection limit.
+   left-truncation at the detection limit. **VERIFIED — it does NOT (test-only golden-master; fix deferred).**
+   `fit_size_distribution_mle`'s whole-sample fits (lognormal via closed-form log-moments; gamma/weibull/
+   exponential via scipy `.fit(floc=0)`) are UNTRUNCATED MLEs; only the power law uses a lower cut-off (Clauset
+   x_min). The `xmin` parameter in the signature is DEAD — it never reaches the whole-sample fits. Left-truncating
+   a true lognormal (median 5 µm) at a detection limit inflates the fitted median (+14% at r_min=3, +49% at
+   r_min=5) and deflates the spread; passing `xmin` corrects nothing. Encoded in
+   `tests/test_size_distribution_mle_characterization.py`: a baseline (untruncated recovers truth) + a
+   characterization pinning the truncation bias of the default fit + a strict-`xfail` FAILING GOLDEN-MASTER that
+   `xmin` should recover the true lognormal from detection-limited data. FIX (deferred, and additive since `xmin`
+   defaults to None so existing untruncated behaviour is unchanged): honour `xmin` with a truncated likelihood
+   `f(r)/(1−F(xmin))` per candidate.
+
+**N6 SUMMARY:** all four verified. #2 (partition) recovers truth → CLOSED with a regression guard. #1 (SpIDA
+low-density), #3 (GLCM bbox), #4 (size-dist truncation) each CONFIRMED biased → each pinned with a
+characterization + a strict-`xfail` failing golden-master that becomes its fix's acceptance test. All test-only;
+fixes to the three core science functions deferred to focused, individually-validated changes (each alters a
+shipping function's output broadly and must not be done blind).
 
 **Spec per item:** write a golden-master test on a synthetic input with a known answer (a known monomer
 fraction, a known K_p, a known texture, a known size distribution), run the current function, and record

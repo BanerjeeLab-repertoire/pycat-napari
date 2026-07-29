@@ -122,3 +122,44 @@ def test_glcm_features_invalid_input():
     # Test with negative object size
     with pytest.raises(Exception):
         calculate_glcm_features(np.ones((5, 5)), object_size=-1)
+
+# ── N6-3: GLCM texture is computed over the ROI bbox, not the object mask (verify-then-fix) ──────────────
+# calculate_glcm_features crops the ROI's BOUNDING BOX (`crop_bounding_box(...)[0]`) and runs graycomatrix over it
+# WITHOUT restricting to the mask, so background pixels AND the object/background edge enter the co-occurrence
+# matrix. For a non-rectangular object a UNIFORM interior (true texture = 0) then reports a large contrast that is
+# entirely edge/background. (`calculate_image_entropy` restricts via `cropped_mask`; LBP restricts its histogram
+# but still computes codes over the bbox, so its boundary ring is contaminated too — GLCM is the clear case, and
+# the pre-existing `test_glcm_features_with_mask` misses it because its mask is rectangular, so bbox == mask.)
+
+def _uniform_disc(H=80, W=80, r=18, obj=0.5):
+    """A UNIFORM-intensity disc (zero true texture) on a zero background — bbox != mask, so any GLCM contrast the
+    function reports comes from the object/background edge the bbox includes, not the object."""
+    yy, xx = np.ogrid[:H, :W]
+    disc = (yy - H // 2) ** 2 + (xx - W // 2) ** 2 <= r * r
+    img = np.zeros((H, W), dtype=float)
+    img[disc] = obj
+    return img, disc.astype(np.uint8)
+
+
+@pytest.mark.base
+def test_glcm_contrast_is_contaminated_by_the_bbox_background():
+    """CHARACTERISATION: a uniform object has zero true texture, yet calculate_glcm_features runs graycomatrix
+    over the ROI bounding box (background + edge included) and reports a large contrast. Pins the contamination
+    (and that even a zero-noise background contaminates — the object/background step alone does it)."""
+    img, mask = _uniform_disc()
+    contrast = float(calculate_glcm_features(img, object_size=3, roi_mask=mask)["contrast"].iloc[0])
+    assert contrast > 100.0, f"a uniform object should give ~0 contrast; got {contrast:.1f} from the bbox edge"
+
+
+@pytest.mark.base
+@pytest.mark.xfail(reason="N6-3 fix spec: calculate_glcm_features runs graycomatrix over the ROI bounding box, not "
+                          "the object mask, so a uniform object reports large contrast from the edge/background. "
+                          "The fix restricts the co-occurrence to both-in-mask pixel pairs (matching skimage in "
+                          "the all-True-mask limit). Remove this xfail when GLCM is mask-restricted.", strict=True)
+def test_glcm_contrast_of_a_uniform_object_is_near_zero_once_masked():
+    """FAILING GOLDEN-MASTER: a uniform object has no texture, so a mask-restricted GLCM must give ~0 contrast.
+    This is the acceptance test the fix must satisfy — it flips from xfail to pass once GLCM stops averaging in
+    the bbox background/edge."""
+    img, mask = _uniform_disc()
+    contrast = float(calculate_glcm_features(img, object_size=3, roi_mask=mask)["contrast"].iloc[0])
+    assert contrast < 1.0
