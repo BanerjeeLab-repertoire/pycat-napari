@@ -222,7 +222,19 @@ is visible, not implicit.
 
 ---
 
-## N3 — Extract a shared skeleton-geodesic helper (consistency, cosmetic)
+## N3 — Extract a shared skeleton-geodesic helper (consistency, cosmetic) — DONE (test-only, git-only).
+STATUS: Delivered the anti-drift **cross-check test** (the spec's preferred deliverable), skipped the optional
+helper extraction (its "nice-to-have" internal tidiness isn't worth touching working geodesic code). Added to
+`tests/test_tortuosity_consistency.py` (`base`, +4): a parametrized guard that `tortuosity_per_object` (MC,
+scipy-sparse) and `fibril_morphometry`'s main segment (FB, NetworkX per-edge) agree to `< 1e-9` on UNBRANCHED
+skeletons (rod, L-bend, and a new curved arc — they share the end-to-end geodesic, so they agree to ~1e-15), plus
+a companion test pinning that on a BRANCHED Y they **legitimately diverge** (MC = whole-object geodesic diameter
+across two arms; FB = longest single segment) so the difference is never mistaken for a bug and "fixed" into
+false agreement. IMPORTANT CORRECTION to the spec's snippet: its illustrative `test_tortuosity_impls_agree` put a
+Y-shape in the agreement set — empirically the Y diverges by ~0.09 (they measure different quantities on a branch),
+so the agreement fixtures MUST be unbranched; the Y belongs in the divergence test instead. Full gate green.
+
+
 
 **Finding.** The S3 fix put a correct geodesic-diameter computation in
 `morphological_complexity_tools.py:291` (scipy sparse + KD-tree `query_pairs`, degree-1 endpoints,
