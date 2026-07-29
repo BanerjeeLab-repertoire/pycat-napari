@@ -66,6 +66,17 @@ panel lifecycle.
 entry, the pop-out guidance, live re-selection of tools. Spec 1 ends when the widget appears, works,
 and can be used to complete the analysis by hand.
 
+> **STATUS (1.6.432): 1.1 + 1.5 SHIPPED (the headlessly-verifiable foundation).** `section_bindings.json` (22
+> verified bindings, schema_version 1), `navigator/sections.py` (`section_for` / `mapped_op_ids` /
+> `builder_for`, refuse-to-guess), and `tests/navigator/test_section_coverage.py` (5 `base` tests: well-formed,
+> builders-exist-via-AST, floor 22, `builder_for` contract, canonical-plan-ops-declared) are in. Keying is by the
+> REAL id a `PlanStep` carries — catalog op-ids for enhancement/segmentation, measure-op ids
+> (`feature_analysis.cell_analysis`, `pixel_wise_corr.pearson_manders`) for analysis — which corrected a few of
+> this spec's example rows (`background_removal` → `rolling_ball`, `cell_analysis` → `feature_analysis.cell_analysis`)
+> that predated the current catalog. `_KNOWN_GAPS` = {`data_qc.assess`, `acquisition`}. **Remaining in Spec 1:**
+> 1.2 (`GeneratedMethodUI`), 1.3 (parameter seeding), 1.4 (dock "🛠 Build method panel"), 1.6 (acceptance) — all
+> GUI-bound (Qt panel + dock lifecycle), so they build on this foundation but are not headlessly verifiable.
+
 ## 1.1 — The missing mapping: op-id → section builder
 
 This is the fifth naming system in the stack (the audit's point 7 is real: question-tree step IDs,

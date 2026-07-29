@@ -1,3 +1,28 @@
+## [1.6.432] - 2026-07-29
+### Added — **Navigator → generated method panel, foundation: the op-id → UI-section mapping + coverage ratchet (Method-Widget Spec 1.1 + 1.5).**
+A PyCAT method panel is an ordered sequence of `_add_*` section builders; a Navigator plan is an ordered sequence
+of steps. The one missing piece to *generate* a panel from a plan is a mapping from step op-id to section builder.
+This lands it as explicit DATA (the `layer_bindings.json` precedent), not a fifth runtime name-similarity guess:
+
+- **`src/pycat/navigator/data/section_bindings.json`** (schema-versioned) — 22 verified bindings covering the
+  cell/condensate pipeline end to end. Keyed by the id a `PlanStep` actually carries — catalog op-ids for
+  enhancement/segmentation/labels (`cellpose`, `subcellular_segment`, `rolling_ball`, …) AND measure-op ids for
+  analysis steps (`feature_analysis.cell_analysis`, `pixel_wise_corr.pearson_manders`). NOTE: the spec's example
+  rows used a few ids from the 1.6.422 tree (`background_removal`, `cell_analysis`) that are not the current
+  catalog/plan ids; every binding here was verified against the real op the planner emits and the real builder.
+- **`src/pycat/navigator/sections.py`** — the loader: `section_for(op_id)`, `mapped_op_ids()`, and
+  `builder_for(central_manager, op_id)` which resolves a bound builder or returns `None` — never raises, never
+  guesses (the same refuse-to-guess discipline as the execution adapters; the caller renders a visible
+  placeholder for an unmapped step rather than dropping it).
+- **`tests/navigator/test_section_coverage.py`** (`base`, 5) — the ratchet: the JSON is well-formed; every mapped
+  builder EXISTS (AST-scan of the UI source — a stale name would be a silently missing section); coverage only
+  grows (floor 22); `builder_for` resolves-or-refuses; and every op a canonical cell/condensate plan selects is
+  either mapped or a declared `_KNOWN_GAPS` entry (`data_qc.assess`, `acquisition` — automatic gates, not tools),
+  mirroring the route-equivalence declared-gap discipline.
+
+This is the headlessly-verifiable foundation; the generated Qt panel (`GeneratedMethodUI`), parameter seeding, and
+the dock's "🛠 Build method panel" action (Spec 1.2–1.4/1.6) build on it next and are GUI-bound. Full gate green.
+
 ## [1.6.431] - 2026-07-29
 ### Fixed — **Size-distribution MLE now honours the detection limit (N6-4 fix — the truncated likelihood, additive).**
 N6-4 confirmed that `fit_size_distribution_mle` ignored left-truncation: its whole-sample candidates (lognormal,

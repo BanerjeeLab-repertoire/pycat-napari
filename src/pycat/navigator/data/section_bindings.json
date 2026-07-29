@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "_comment": "op-id -> UI section-builder mapping for the Navigator-generated method panel (Spec 1.1). Keyed by the id a PlanStep carries: catalog op-ids for enhancement/segmentation/labels (navigator/data/operation_catalog.json) AND measure-op ids for analysis steps (op_catalog._measure_ops, e.g. 'feature_analysis.cell_analysis'). 'owner' is the attribute on central_manager holding the builder; every _add_* builder lives on the composed ToolboxFunctionsUI (via its mixins), so owner is 'toolbox_functions_ui' throughout. Coverage only grows (tests/navigator/test_section_coverage.py). Add a row only when the builder is verified to exist and to correspond to the op.",
+  "sections": {
+    "rolling_ball":                    {"builder": "_add_run_rb_gaussian_background_removal", "owner": "toolbox_functions_ui"},
+    "preprocess":                      {"builder": "_add_pre_process", "owner": "toolbox_functions_ui"},
+    "bandpass":                        {"builder": "_add_run_fft_bandpass", "owner": "toolbox_functions_ui"},
+    "clahe":                           {"builder": "_add_run_clahe", "owner": "toolbox_functions_ui"},
+    "bilateral":                       {"builder": "_add_run_apply_bilateral_filter", "owner": "toolbox_functions_ui"},
+    "log":                             {"builder": "_add_run_apply_laplace_of_gauss_filter", "owner": "toolbox_functions_ui"},
+    "dpr":                             {"builder": "_add_run_dpr", "owner": "toolbox_functions_ui"},
+    "wbns":                            {"builder": "_add_run_wbns", "owner": "toolbox_functions_ui"},
+    "rescale":                         {"builder": "_add_run_apply_rescale_intensity", "owner": "toolbox_functions_ui"},
+    "upscale":                         {"builder": "_add_run_upscaling", "owner": "toolbox_functions_ui"},
+    "best_slice":                      {"builder": "_add_run_best_slice", "owner": "toolbox_functions_ui"},
+    "invert":                          {"builder": "_add_run_invert_image", "owner": "toolbox_functions_ui"},
+    "cellpose":                        {"builder": "_add_run_cellpose_segmentation", "owner": "toolbox_functions_ui"},
+    "subcellular_segment":             {"builder": "_add_run_segment_subcellular_objects", "owner": "toolbox_functions_ui"},
+    "local_threshold":                 {"builder": "_add_run_local_thresholding", "owner": "toolbox_functions_ui"},
+    "felzenszwalb":                    {"builder": "_add_run_fz_segmentation_and_merging", "owner": "toolbox_functions_ui"},
+    "binary_morph":                    {"builder": "_add_run_binary_morph_operation", "owner": "toolbox_functions_ui"},
+    "expand_labels":                   {"builder": "_add_run_expand_labels", "owner": "toolbox_functions_ui"},
+    "labels_to_mask":                  {"builder": "_add_run_convert_labels_to_mask", "owner": "toolbox_functions_ui"},
+    "label_mask":                      {"builder": "_add_run_label_binary_mask", "owner": "toolbox_functions_ui"},
+    "feature_analysis.cell_analysis":  {"builder": "_add_run_cell_analysis_func", "owner": "toolbox_functions_ui"},
+    "pixel_wise_corr.pearson_manders": {"builder": "_add_run_pwcca", "owner": "toolbox_functions_ui"}
+  }
+}
