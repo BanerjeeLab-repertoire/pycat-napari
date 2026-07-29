@@ -358,3 +358,49 @@ def replay_pixel_coloc(state: dict, image_path: Path, params: dict, output_dir: 
     state['data_instance'].set_data('coloc_df', df)
     df.to_csv(output_dir / f"{image_path.stem}_colocalization.csv", index=False)
     print(f"[PyCAT Batch]   Colocalization (within ROI): r={pcc}, MOC={moc}.")
+
+
+def replay_spatial_metrology(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """Per-cell spatial organisation of the segmented objects — Ripley's L / nearest-neighbour / radial density
+    (`run_all_spatial_metrics`) on the puncta centroids WITHIN each cell. Replaces the `spatial_metrology`
+    skip-stub (spec N2b-2); the cellular analogue of `replay_ivf_spatial_metrology`, which treats the whole field
+    as one 'cell'."""
+    from pycat.toolbox.spatial_metrology_tools import get_puncta_centroids, run_all_spatial_metrics
+    import pandas as pd
+
+    puncta = state.get('puncta_mask')
+    cells = state.get('labeled_cells')
+    if puncta is None or cells is None:
+        print(f"[PyCAT Batch]   Spatial metrology skipped for {image_path.name}: "
+              f"needs a puncta mask + labelled cells.")
+        return
+    puncta = np.asarray(puncta)
+    cells = np.asarray(cells)
+    mpx = state['data_instance'].data_repository.get('microns_per_pixel_sq', 1.0) ** 0.5
+
+    def _flatten(prefix, obj, out):
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                _flatten(f"{prefix}_{k}" if prefix else str(k), v, out)
+        elif np.isscalar(obj):
+            out[prefix] = obj
+
+    coords_df = get_puncta_centroids(puncta, cells, mpx)
+    rows = []
+    for cl in [c for c in coords_df['cell_label'].unique() if c != 0]:
+        sub = coords_df[coords_df['cell_label'] == cl]
+        coords = sub[['y_um', 'x_um']].values
+        if len(coords) < 2:                       # Ripley/NN need at least two points in the cell
+            continue
+        res = run_all_spatial_metrics(coords, (cells == cl), mpx)
+        row = {'cell_label': int(cl)}
+        _flatten('', res, row)
+        rows.append(row)
+    if not rows:
+        print(f"[PyCAT Batch]   Spatial metrology skipped for {image_path.name}: no cell had >= 2 objects.")
+        return
+    df = pd.DataFrame(rows)
+    state['spatial_metrology_df'] = df
+    state['data_instance'].set_data('spatial_metrology_df', df)
+    df.to_csv(output_dir / f"{image_path.stem}_spatial_metrology.csv", index=False)
+    print(f"[PyCAT Batch]   Spatial metrology: {len(rows)} cell(s) analysed.")

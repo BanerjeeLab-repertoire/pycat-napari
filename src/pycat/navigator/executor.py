@@ -193,6 +193,10 @@ def _vpt_microrheology_params(intent, ctx, state, reviewed):
     return _reviewed_or_default(reviewed, _VPT_MICRORHEOLOGY_DEFAULTS)
 
 
+def _spatial_metrology_params(intent, ctx, state, reviewed):
+    return {}       # the object labels + cell ROIs come from state; Ripley/NN/radial run on grounded defaults
+
+
 #: The declared adapters, keyed by the REAL navigator module name `execution_order` reports. The ONLY place a
 #: plan step is tied to a computation — a step absent here (or one whose batch step resolves to ``None``) is
 #: reported "run from its panel", never guessed at. Grows one workflow per phase, each behind a
@@ -226,6 +230,12 @@ _ADAPTERS: dict = {
     # stack). The op declares `needs_pixel_size`, so the planner blocks it without calibration; the handler's
     # scale gate refuses a pixel-unit viscosity as a second line of defence. See spec N2b-1.
     "vpt.microrheology": ExecAdapter("vpt.microrheology", "vpt_microrheology", _vpt_microrheology_params),
+    # Spatial metrology (spec N2b-2): the `spatial_metrology.ripley` MEASURE runs Ripley's L / nearest-neighbour /
+    # radial density PER CELL on the segmented objects' centroids (`replay_spatial_metrology` → the shared
+    # `run_all_spatial_metrics`). It requires INSTANCE_LABELS, so the planner chains a segmenter first; the metrics
+    # run within each cell ROI, never whole-frame. Replaces the old headless skip-stub.
+    "spatial_metrology.ripley": ExecAdapter("spatial_metrology.ripley", "spatial_metrology",
+                                            _spatial_metrology_params),
 }
 
 

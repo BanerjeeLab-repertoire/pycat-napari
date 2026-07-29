@@ -1,3 +1,25 @@
+## [1.6.427] - 2026-07-28
+### Added — **Spatial metrology adapter — per-cell Ripley/nearest-neighbour/radial organisation runs from a navigator plan (spec N2b-2).**
+The `spatial_metrology` batch step was a headless skip-stub (it printed "skipped in headless mode" and computed
+nothing), and the `spatial_metrology.ripley` MEASURE op had no `ExecAdapter`, so a spatial-organisation plan
+reported "run from its panel". This builds the real handler and wires it in. `replay_spatial_metrology`
+(`analysis_steps.py`) is the cellular analogue of the existing `replay_ivf_spatial_metrology`: it reads the
+segmented objects (`puncta_mask`) and the real cell ROIs (`labeled_cells`), extracts per-cell centroids via the
+shared `get_puncta_centroids`, and runs the shared `run_all_spatial_metrics` (Ripley's L / nearest-neighbour /
+radial density) **within each cell**, writing one flattened row per cell to `*_spatial_metrology.csv` and into
+`state['spatial_metrology_df']`. The metrics are keyed per real cell ROI, never whole-frame — a cell with fewer
+than two objects is skipped (Ripley/NN are undefined there). The `spatial_metrology.ripley` op requires
+`INSTANCE_LABELS`, so the planner chains a segmenter first; `_spatial_metrology_params` takes no knobs (the object
+labels and cell ROIs come from state, the metrics run on grounded radial defaults). Registered net-zero against
+the `batch_step_registry.py` complexity ceiling (432) by extending the existing `analysis_steps` import and
+swapping the 1-line skip-stub for the handler reference.
+
+Tests (`tests/navigator/test_navigator_spatial_metrology_adapter.py`, `base`, 3): the adapter resolves to a real
+registered step; a guided `run_plan` on a synthetic two-cell / multi-punctum field equals a direct
+`replay_spatial_metrology` call column for column; and the output is keyed per cell (two rows, one CSV), not a
+whole-frame collapse. The adapter-coverage guard (`test_every_adapter_targets_a_real_registered_batch_step`) now
+pins `spatial_metrology` in the expected batch-step set. Full gate green.
+
 ## [1.6.426] - 2026-07-28
 ### Added — **VPT microrheology adapter — the flagship viscosity terminal runs from a navigator plan (spec N2b-1b).**
 1.6.423 built the `vpt_microrheology` batch handler (the full detect→link→MSD→fit→Stokes–Einstein chain). This

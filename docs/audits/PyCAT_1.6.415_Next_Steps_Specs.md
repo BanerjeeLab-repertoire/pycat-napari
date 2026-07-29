@@ -166,7 +166,17 @@ pure-Python and proven headless (the golden-master harness runs it). What's miss
      absent/1.0, never emit a pixel-unit viscosity. This is the same discipline as
      `check_calibration_validity`.
 
-**2. Spatial metrology (Ripley's L / nearest-neighbour) — reuses an existing tool.**
+**2. Spatial metrology (Ripley's L / nearest-neighbour) — reuses an existing tool. — DONE (1.6.427).**
+   - STATUS: `replay_spatial_metrology` built in `analysis_steps.py` (the cellular analogue of the existing
+     `replay_ivf_spatial_metrology`) — it wraps the shared `run_all_spatial_metrics` (Ripley's L + NN + radial
+     density, which subsumes `ripleys_l`) run PER CELL on the segmented objects' centroids via
+     `get_puncta_centroids`, writes `<stem>_spatial_metrology.csv` + `state['spatial_metrology_df']`, and skips
+     any cell with < 2 objects. Registered net-zero against the 432 ceiling (extended the `analysis_steps`
+     import + swapped the skip-stub). Adapter `ExecAdapter("spatial_metrology.ripley", "spatial_metrology",
+     _spatial_metrology_params)` added; coverage guard updated. Route test in
+     `tests/navigator/test_navigator_spatial_metrology_adapter.py` (guided == manual, keyed per cell). Full gate
+     green. NOTE: no separate `CanonicalCase` yet — deferred with N2b-3's, since both share the segmentation
+     upstream and are better added together.
    - **(a) Build `replay_spatial_metrology`** wrapping `spatial_metrology_tools.ripleys_l` (+ the
      nearest-neighbour / radial-profile family — note S1's `radial_localization_profile` is now correct,
      so it's safe to expose headlessly). Input: a points/labels layer + the cell mask. Output:
