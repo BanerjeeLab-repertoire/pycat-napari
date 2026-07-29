@@ -410,7 +410,11 @@ deciding whether it needs a fix — don't fix blind. In priority order:
    characterization pinning the truncation bias of the default fit + a strict-`xfail` FAILING GOLDEN-MASTER that
    `xmin` should recover the true lognormal from detection-limited data. FIX (deferred, and additive since `xmin`
    defaults to None so existing untruncated behaviour is unchanged): honour `xmin` with a truncated likelihood
-   `f(r)/(1−F(xmin))` per candidate.
+   `f(r)/(1−F(xmin))` per candidate. **FIX SHIPPED (1.6.431).** `xmin` now drives a left-truncated MLE for all four
+   whole-sample candidates (numerical maximisation of `Σ log f(rᵢ) − n·log(1−F(xmin))`, seeded by the untruncated
+   estimate); the AIC and the Vuong test carry the same truncation correction. The golden-master flipped from
+   strict-`xfail` to passing (recovers mu≈log 5, σ≈0.5 from data truncated at 4 µm). `xmin=None` stays
+   byte-identical (existing callers unaffected); the result dict gains `detection_limit_xmin`.
 
 **N6 SUMMARY:** all four verified. #2 (partition) recovers truth → CLOSED with a regression guard. #1 (SpIDA
 low-density), #3 (GLCM bbox), #4 (size-dist truncation) each CONFIRMED biased → each pinned with a

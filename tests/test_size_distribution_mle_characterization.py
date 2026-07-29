@@ -105,17 +105,15 @@ def test_size_mle_default_fit_is_biased_by_detection_limit_truncation():
     assert p['sigma'] < 0.5 * 0.85                   # spread deflated below the true 0.5
 
 
-@pytest.mark.xfail(reason="N6-4 fix spec: fit_size_distribution_mle ignores left-truncation — the whole-sample "
-                          "fits are untruncated and the `xmin` parameter is dead (never used in the body). A "
-                          "truncation-aware MLE (likelihood f(r)/(1-F(xmin))) should recover the true lognormal "
-                          "from detection-limited data. Remove this xfail when `xmin` drives a truncated fit.",
-                   strict=True)
-def test_size_mle_recovers_truth_from_truncated_data_once_xmin_is_honoured():
-    """FAILING GOLDEN-MASTER: given the detection limit as `xmin`, the fit should recover the TRUE lognormal
-    (median 5 um, sigma 0.5) from left-truncated radii. It currently cannot — `xmin` is a no-op."""
+def test_size_mle_recovers_truth_from_truncated_data_when_xmin_is_honoured():
+    """N6-4 FIX (was the failing golden-master): given the detection limit as `xmin`, the left-truncated MLE
+    recovers the TRUE lognormal (median 5 um, sigma 0.5) from detection-limited radii — where the untruncated
+    default (the characterization above) inflates the median to ~6.5 um and deflates sigma."""
     from pycat.toolbox.invitro_tools import fit_size_distribution_mle
     full = _lognormal_radii()
     truncated = full[full >= 4.0]
-    p = fit_size_distribution_mle(truncated, xmin=4.0)['models']['lognormal']['params']
+    res = fit_size_distribution_mle(truncated, xmin=4.0)
+    p = res['models']['lognormal']['params']
     assert p['mu'] == pytest.approx(np.log(5.0), abs=0.08)
     assert p['sigma'] == pytest.approx(0.5, abs=0.08)
+    assert res['detection_limit_xmin'] == 4.0        # the fit records the truncation it applied

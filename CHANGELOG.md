@@ -1,3 +1,24 @@
+## [1.6.431] - 2026-07-29
+### Fixed — **Size-distribution MLE now honours the detection limit (N6-4 fix — the truncated likelihood, additive).**
+N6-4 confirmed that `fit_size_distribution_mle` ignored left-truncation: its whole-sample candidates (lognormal,
+gamma, weibull, exponential) used the UNTRUNCATED MLE, and the `xmin` parameter in the signature was dead. When
+droplets below the detection limit are missing, that inflates the fitted median (+49% on a true-5 µm lognormal
+truncated at 5 µm) and deflates the spread. This wires `xmin` through to a proper left-truncated MLE: when a
+detection limit is given, each candidate is fit by numerically maximising `Σ log f(rᵢ) − n·log(1−F(xmin))`
+(Nelder-Mead, seeded by the untruncated estimate — no candidate has a closed form once truncated), the AIC uses
+that truncated log-likelihood, and the Vuong distinguishability test carries the same per-model truncation
+correction so the model comparison stays like-for-like. On the golden-master (a true lognormal, median 5 µm σ 0.5,
+truncated at 4 µm) the fit now recovers mu≈log 5 and σ≈0.5 where the untruncated default returns a ~6.5 µm median.
+
+The change is **additive**: `xmin` defaults to `None`, and that path is byte-identical to before (same closed-form
+lognormal log-moments, same `scipy .fit(floc=0)`, same log-likelihoods) — every existing caller is unaffected,
+pinned by the untruncated characterization tests. The result dict gains `detection_limit_xmin` recording the
+truncation applied.
+
+Tests (`tests/test_size_distribution_mle_characterization.py`): the N6-4 strict-`xfail` golden-master is promoted
+to a passing test (`test_size_mle_recovers_truth_from_truncated_data_when_xmin_is_honoured`); the untruncated
+baseline + bias characterization stay green. Full gate green.
+
 ## [1.6.430] - 2026-07-28
 ### Added — **Condensate MSD adapter — ensemble MSD → anomalous-diffusion fit runs from a navigator plan (spec N2b-4, the "build it" decision).**
 `msd_analysis` was a headless skip-stub documented "time-series; not a per-image batch step." That framing was no
