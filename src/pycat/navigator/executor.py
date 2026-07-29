@@ -197,6 +197,15 @@ def _spatial_metrology_params(intent, ctx, state, reviewed):
     return {}       # the object labels + cell ROIs come from state; Ripley/NN/radial run on grounded defaults
 
 
+#: Dynamic-spatial linking/merge-fission knobs the handler reads from `params` — the max per-frame displacement,
+#: the gap-bridging window, and the merge/fission proximity. The mask stack + pixel size come from state.
+_DYNAMIC_SPATIAL_DEFAULTS: dict = {"max_displacement_um": 2.0, "max_gap_frames": 1, "proximity_um": 1.0}
+
+
+def _dynamic_spatial_params(intent, ctx, state, reviewed):
+    return _reviewed_or_default(reviewed, _DYNAMIC_SPATIAL_DEFAULTS)
+
+
 #: The declared adapters, keyed by the REAL navigator module name `execution_order` reports. The ONLY place a
 #: plan step is tied to a computation — a step absent here (or one whose batch step resolves to ``None``) is
 #: reported "run from its panel", never guessed at. Grows one workflow per phase, each behind a
@@ -236,6 +245,14 @@ _ADAPTERS: dict = {
     # run within each cell ROI, never whole-frame. Replaces the old headless skip-stub.
     "spatial_metrology.ripley": ExecAdapter("spatial_metrology.ripley", "spatial_metrology",
                                             _spatial_metrology_params),
+    # Dynamic spatial (spec N2b-3): BOTH the motion op (`dynamic_spatial.link_trajectories`, CREATE) and the
+    # fusion op (`dynamic_spatial.detect_merge_fission`, INTERPRET) resolve to the one self-contained handler,
+    # which runs extract_frame_properties -> link + merge/fission over the segmented (T,H,W) stack. A plan holding
+    # both ops only tracks once (the handler's `_dynamic_spatial_done` guard). No 3-D stack in state -> clear skip.
+    "dynamic_spatial.link_trajectories": ExecAdapter("dynamic_spatial.link_trajectories", "dynamic_spatial",
+                                                     _dynamic_spatial_params),
+    "dynamic_spatial.detect_merge_fission": ExecAdapter("dynamic_spatial.detect_merge_fission", "dynamic_spatial",
+                                                        _dynamic_spatial_params),
 }
 
 

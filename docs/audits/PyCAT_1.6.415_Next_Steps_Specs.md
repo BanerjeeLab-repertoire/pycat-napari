@@ -185,7 +185,17 @@ pure-Python and proven headless (the golden-master harness runs it). What's miss
    - **(b) Adapter:** `ExecAdapter("spatial_metrology.ripley", "spatial_metrology", _spatial_metrology_params)`.
    - **(c)** route test + `CanonicalCase`.
 
-**3. Dynamic spatial (trajectory linking → merge/fission) — 2D+t.**
+**3. Dynamic spatial (trajectory linking → merge/fission) — 2D+t. — DONE (1.6.428).**
+   - STATUS: `replay_dynamic_spatial` built in `analysis_steps.py` — self-contained from a segmented (T,H,W)
+     label stack: `extract_frame_properties` → `link_trajectories` (motion) and `detect_merge_fission` (fusion),
+     writing `*_dynamic_spatial_tracks.csv` + `*_dynamic_spatial_events.csv`. BOTH ops
+     (`dynamic_spatial.link_trajectories` CREATE + `dynamic_spatial.detect_merge_fission` INTERPRET) key to the
+     one handler via `_dynamic_spatial_params`; a `_dynamic_spatial_done` guard stops a both-ops plan tracking
+     twice. Refuses cleanly with no 3-D stack (never fabricates a per-frame segmentation). Registered net-zero
+     against the 432 ceiling. Route test in `tests/navigator/test_navigator_dynamic_spatial_adapter.py` (guided ==
+     manual, guard, clean refusal). Full gate green. NOTE: no `CanonicalCase` yet — deferred (see N2b-2's note);
+     the batch lane has no upstream producer of a labelled time-series stack today, so the end-to-end plan-level
+     case waits on a time-series segmentation handler.
    - **(a) Build `replay_dynamic_spatial`** wrapping `dynamic_spatial_tools.link_trajectories` (+
      `detect_merge_fission`). Register `'dynamic_spatial'` (replacing the skip-stub at :233). Dispatch on
      dimensionality — this is a time-series op, so the `_context_score` machinery already ranks it

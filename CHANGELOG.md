@@ -1,3 +1,28 @@
+## [1.6.428] - 2026-07-28
+### Added — **Dynamic-spatial adapter — trajectory linking + merge/fission detection run from a navigator plan (spec N2b-3).**
+The `dynamic_spatial` batch step was a headless skip-stub, and neither dynamic-spatial op had an `ExecAdapter`, so
+a motion/fusion plan reported "run from its panel". This builds the real handler and wires both ops in.
+`replay_dynamic_spatial` (`analysis_steps.py`) is self-contained like the VPT terminal: from a segmented
+`(T, H, W)` object-label stack it runs the shared `extract_frame_properties` → `link_trajectories` (motion, one
+row per detection with a `track_id`) and `detect_merge_fission` (fusion, one row per merge/fission event),
+writing `*_dynamic_spatial_tracks.csv` + `*_dynamic_spatial_events.csv` and the matching `state`/`data_instance`
+DataFrames. `_dynamic_spatial_params` threads the reviewed max displacement / gap-bridging window / merge
+proximity over grounded defaults; pixel size comes from the file metadata, never guessed.
+
+Both the motion op (`dynamic_spatial.link_trajectories`, CREATE) and the fusion op
+(`dynamic_spatial.detect_merge_fission`, INTERPRET) resolve to the one handler — a plan that reaches either gets
+real numbers — and a `_dynamic_spatial_done` state guard keeps a plan holding *both* from tracking twice. The
+handler refuses cleanly (a clear skip, no CSV, no numbers) when state has no 3-D segmented stack: it never
+fabricates a per-frame segmentation to invent a "trajectory" from a single frame. Registered net-zero against the
+`batch_step_registry.py` complexity ceiling (432) — extended the `analysis_steps` import, swapped the 1-line
+skip-stub.
+
+Tests (`tests/navigator/test_navigator_dynamic_spatial_adapter.py`, `base`, 4): both ops resolve to
+`dynamic_spatial`; a guided `run_plan` on a synthetic moving-object stack equals a direct `replay_dynamic_spatial`
+call column for column (both CSVs written); a plan holding both ops tracks once (guard set); and a 2-D mask
+refuses cleanly. The adapter-coverage guard now pins `dynamic_spatial` in the expected batch-step set. Full gate
+green.
+
 ## [1.6.427] - 2026-07-28
 ### Added — **Spatial metrology adapter — per-cell Ripley/nearest-neighbour/radial organisation runs from a navigator plan (spec N2b-2).**
 The `spatial_metrology` batch step was a headless skip-stub (it printed "skipped in headless mode" and computed

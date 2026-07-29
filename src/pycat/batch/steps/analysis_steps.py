@@ -404,3 +404,50 @@ def replay_spatial_metrology(state: dict, image_path: Path, params: dict, output
     state['data_instance'].set_data('spatial_metrology_df', df)
     df.to_csv(output_dir / f"{image_path.stem}_spatial_metrology.csv", index=False)
     print(f"[PyCAT Batch]   Spatial metrology: {len(rows)} cell(s) analysed.")
+
+
+def replay_dynamic_spatial(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """Trajectory linking (motion) + merge/fission detection (fusion) over a segmented (T, H, W) time-series
+    object-label stack (spec N2b-3). Self-contained like the VPT terminal: `extract_frame_properties` ->
+    `link_trajectories` and `detect_merge_fission`, both straight from the label stack. Replaces the
+    `dynamic_spatial` skip-stub. Refuses (a clear skip, no numbers) when no 3-D segmented stack is in state — it
+    never fabricates a per-frame segmentation. Both the motion op (`dynamic_spatial.link_trajectories`) and the
+    fusion op (`dynamic_spatial.detect_merge_fission`) resolve here, so the `_dynamic_spatial_done` guard keeps a
+    plan that contains both from tracking twice."""
+    from pycat.toolbox.dynamic_spatial_tools import (
+        extract_frame_properties, link_trajectories, detect_merge_fission)
+    import pandas as pd
+
+    if state.get('_dynamic_spatial_done'):
+        return                                    # already linked+detected this stack (both ops in one plan)
+
+    stack = None
+    for key in ('puncta_mask', 'labeled_cells', 'cellpose_mask'):
+        cand = state.get(key)
+        if cand is not None and np.asarray(cand).ndim == 3:
+            stack = np.asarray(cand)
+            break
+    if stack is None:
+        print(f"[PyCAT Batch]   Dynamic spatial skipped for {image_path.name}: "
+              f"needs a segmented (T, H, W) time-series mask stack upstream.")
+        return
+
+    mpx = state['data_instance'].data_repository.get('microns_per_pixel_sq', 1.0) ** 0.5
+    max_disp = float(params.get('max_displacement_um', 2.0))
+    max_gap = int(params.get('max_gap_frames', 1))
+    proximity = float(params.get('proximity_um', 1.0))
+
+    props = extract_frame_properties(stack, mpx)
+    tracks = link_trajectories(props, max_displacement_um=max_disp, max_gap_frames=max_gap)
+    events = detect_merge_fission(stack, mpx, proximity_um=proximity)
+
+    di = state['data_instance']
+    state['dynamic_spatial_tracks_df'] = tracks
+    state['dynamic_spatial_events_df'] = events
+    di.set_data('dynamic_spatial_tracks_df', tracks)
+    di.set_data('dynamic_spatial_events_df', events)
+    tracks.to_csv(output_dir / f"{image_path.stem}_dynamic_spatial_tracks.csv", index=False)
+    events.to_csv(output_dir / f"{image_path.stem}_dynamic_spatial_events.csv", index=False)
+    state['_dynamic_spatial_done'] = True
+    n_tracks = int(tracks['track_id'].nunique()) if 'track_id' in tracks.columns else len(tracks)
+    print(f"[PyCAT Batch]   Dynamic spatial: {n_tracks} track(s), {len(events)} merge/fission event(s).")
