@@ -1,3 +1,22 @@
+## [1.6.433] - 2026-07-29
+### Added — **Navigator → generated method panel: the plan→sections resolution logic (Method-Widget Spec 1.2 core, headless).**
+The join at the heart of the generated-method widget: a plan is an ordered list of steps, a panel is an ordered
+list of sections. `resolve_plan_sections(plan)` (`navigator/sections.py`) walks a compiled plan in the executor's
+execution order and returns an ordered list of `PlannedSection(op_id, builder_name, owner, gap)` — each mapped
+step carrying its `_add_*` builder name, each unmapped step flagged `gap=True` (builder `None`) so the panel
+renders a visible placeholder rather than silently dropping a step the plan said was necessary. It is pure over
+`(plan, section_bindings)` — no `central_manager`, no Qt — so the whole plan→panel decision is verified
+headlessly; the Qt panel (Spec 1.2 proper) only adds calling the bound builder / rendering the placeholder, and
+resolves `builder_name` to a live callable at render time via `builder_for`. Order is the executor's, never
+re-derived.
+
+Test (`tests/navigator/test_section_coverage.py`, `base`, +1): resolving a real cell plan yields its steps in
+execution order (matching `execution_order` exactly), `cellpose`/`feature_analysis.cell_analysis` carry their
+real builders, `data_qc.assess` is a gap with no builder, and every gap↔no-builder pairing is consistent. This
+completes the headlessly-verifiable core of Spec 1 (1.1 mapping + 1.5 ratchet + this 1.2 resolution logic); the
+remaining pieces — the `GeneratedMethodUI` Qt panel, parameter seeding, and the dock's "🛠 Build method panel"
+action (1.2 rendering / 1.3 / 1.4 / 1.6) — are GUI-bound and need a manual napari acceptance run. Full gate green.
+
 ## [1.6.432] - 2026-07-29
 ### Added — **Navigator → generated method panel, foundation: the op-id → UI-section mapping + coverage ratchet (Method-Widget Spec 1.1 + 1.5).**
 A PyCAT method panel is an ordered sequence of `_add_*` section builders; a Navigator plan is an ordered sequence

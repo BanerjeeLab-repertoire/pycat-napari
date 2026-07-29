@@ -115,6 +115,33 @@ def test_builder_for_resolves_or_refuses_but_never_guesses():
 
 
 @pytest.mark.base
+def test_resolve_plan_sections_walks_a_real_plan_in_order_with_gaps_flagged():
+    """The Spec 1.2 join, headlessly: resolving a real cell plan yields its steps IN EXECUTION ORDER, each mapped
+    step carrying its builder name and each unmapped step flagged as a gap (never dropped). This is what
+    GeneratedMethodUI walks; the only thing it adds is calling the bound builder / rendering the placeholder."""
+    from pycat.navigator.session import NavigatorSession
+    from pycat.navigator.execution import execution_order
+    from pycat.navigator.contracts import AnalysisIntent
+    from pycat.navigator.sections import resolve_plan_sections
+
+    session = NavigatorSession()
+    session.intent = AnalysisIntent(target="cell", observables=["morphology"])
+    plan = session.planner.compile(session.intent, session.ctx, pins={})
+
+    planned = resolve_plan_sections(plan)
+    # order and op-ids match the executor's, exactly — never re-derived
+    assert [ps.op_id for ps in planned] == [step.name for step in execution_order(plan)]
+    by_op = {ps.op_id: ps for ps in planned}
+    # the segmentation + analysis steps resolve to their real builders
+    assert by_op["cellpose"].builder_name == "_add_run_cellpose_segmentation" and not by_op["cellpose"].gap
+    assert by_op["feature_analysis.cell_analysis"].builder_name == "_add_run_cell_analysis_func"
+    # the automatic gates are gaps: no builder, flagged for a placeholder, NOT dropped
+    assert by_op["data_qc.assess"].gap and by_op["data_qc.assess"].builder_name is None
+    # every gap has no builder and every non-gap has one — the placeholder/render decision is unambiguous
+    assert all((ps.builder_name is None) == ps.gap for ps in planned)
+
+
+@pytest.mark.base
 def test_planner_ops_that_lack_sections_are_declared():
     """Any op a canonical plan can select but that has no section must be in _KNOWN_GAPS — so 'this step has no
     UI' is a recorded decision, not a surprise at build time. Mirrors the route-equivalence declared-gap harness."""

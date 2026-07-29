@@ -14,11 +14,26 @@ missing step rather than silently dropping it or wiring the wrong control.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 _BINDINGS_PATH = Path(__file__).parent / "data" / "section_bindings.json"
+
+
+@dataclass(frozen=True)
+class PlannedSection:
+    """One section of a generated method panel: the plan step's op-id, the ``_add_*`` builder and its owner
+    (``None`` when the step has no section), and whether it is a gap (render a placeholder, never drop it).
+
+    Deliberately static — it names the builder rather than binding it, so this whole structure is computable
+    from a plan alone with no ``central_manager`` and no Qt. ``GeneratedMethodUI`` binds ``builder_name`` to a
+    live callable at render time via :func:`builder_for`."""
+    op_id: str
+    builder_name: Optional[str]
+    owner: Optional[str]
+    gap: bool
 
 
 @lru_cache(maxsize=1)
@@ -45,6 +60,29 @@ def section_for(op_id: str) -> Optional[dict]:
 def mapped_op_ids() -> frozenset:
     """Every op-id that has a section binding — the coverage ratchet (test_section_coverage) reads this."""
     return frozenset(_sections().keys())
+
+
+def resolve_plan_sections(plan) -> List[PlannedSection]:
+    """Walk a compiled plan in EXECUTION ORDER and return the ordered sections a generated panel must render.
+
+    This is the join at the heart of the generated-method widget: a plan is an ordered list of steps, a panel is
+    an ordered list of sections. It is pure over ``(plan, section_bindings)`` — no ``central_manager``, no Qt — so
+    the plan→panel decision is fully testable headlessly; the Qt panel resolves each ``builder_name`` to a bound
+    callable at render time. A step with no binding comes back with ``gap=True`` (and ``builder_name is None``) so
+    the panel renders a visible placeholder naming the step rather than silently dropping it — dropping a step the
+    plan said was necessary would be a scientific-integrity failure, not a UI gap. Order is the executor's, never
+    re-derived."""
+    from pycat.navigator.execution import execution_order
+
+    sections: List[PlannedSection] = []
+    for step in execution_order(plan):
+        op_id = step.name
+        binding = section_for(op_id)
+        if binding:
+            sections.append(PlannedSection(op_id, binding["builder"], binding["owner"], gap=False))
+        else:
+            sections.append(PlannedSection(op_id, None, None, gap=True))
+    return sections
 
 
 def builder_for(central_manager, op_id: str):
