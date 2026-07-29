@@ -311,7 +311,18 @@ benchmark-agreement input the MRI cluster wants.)*
 
 ---
 
-## N5 — Small consistency fixes (fold into the next change touching each file)
+## N5 — Small consistency fixes (fold into the next change touching each file) — DONE (1.6.429).
+STATUS: Both parts shipped. N5a — Costes output rows now read `Costes Automatic Thresholded M1/M2 (intensity,
+auto-threshold)` and object-based rows read `Mander's M1/M2 (object overlap)` (provenance suffixes, stem
+preserved; the object-based relabel is at the output row only via `_OBCA_OUTPUT_LABELS`, selection key untouched);
+added `_M1_FAMILY_LABEL_GLOSSARY` in `coloc/analysis.py` mapping every M1-family label to its definition + ref.
+`tests/test_costes_manders.py` updated to the suffixed labels. N5b — replaced the (now-inaccurate) "keyed by the
+REAL module name" comment above `_ADAPTERS` with the dual-convention note (module-name vs op-id keys) + author
+guidance. Full gate green. NOTE: the Manders k1/k2 and Overlap Coefficient labels were left as-is (they are
+already distinct from "M1" by name) — the glossary documents them; only the two literally-"M1"-named collisions
+got suffixes.
+
+
 
 **N5a — Costes/Manders "M1" labelling.** Confirmed multiple distinct labels for related-but-different
 quantities across the coloc panels: `coloc/analysis.py` emits `'Costes Automatic Thresholded M1'`

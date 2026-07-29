@@ -206,11 +206,16 @@ def _dynamic_spatial_params(intent, ctx, state, reviewed):
     return _reviewed_or_default(reviewed, _DYNAMIC_SPATIAL_DEFAULTS)
 
 
-#: The declared adapters, keyed by the REAL navigator module name `execution_order` reports. The ONLY place a
-#: plan step is tied to a computation — a step absent here (or one whose batch step resolves to ``None``) is
-#: reported "run from its panel", never guessed at. Grows one workflow per phase, each behind a
-#: route-equivalence test: ``background_removal`` (rolling-ball) and ``cellpose_segmentation`` are the batch
-#: steps `test_route_equivalence` proves compute identically to the manual route.
+#: The declared adapters — the ONLY place a plan step is tied to a computation. A step absent here (or one whose
+#: batch step resolves to ``None``) is reported "run from its panel", never guessed at. Grows one workflow per
+#: phase, each behind a route-equivalence test: ``background_removal`` (rolling-ball) and ``cellpose_segmentation``
+#: are the batch steps `test_route_equivalence` proves compute identically to the manual route.
+#:
+#: KEYING (N5b) — a key may be EITHER a module name (resolved for an op-id step via _OP_TO_ADAPTER_MODULE) OR an
+#: op-id matched directly. _adapter_for tries the step name directly first, then the op->module translation.
+#: When you add an adapter: if plan_step is an op-id with no module indirection, key it directly here (e.g.
+#: "vpt.microrheology", "spatial_metrology.ripley"); if it's a coarse module fronting several ops, key it by
+#: module (e.g. "segmentation_tools") and add the op->module rows to _OP_TO_ADAPTER_MODULE below.
 _ADAPTERS: dict = {
     "image_processing_tools": ExecAdapter("image_processing_tools", "background_removal",
                                           _background_removal_params),

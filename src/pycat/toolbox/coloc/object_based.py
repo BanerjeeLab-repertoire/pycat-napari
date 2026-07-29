@@ -36,6 +36,15 @@ import skimage as sk
 
 # Local application imports
 
+#: N5a — self-distinguishing OUTPUT labels for the object-based coefficients, so a merged coloc table separates
+#: these object-overlap Manders M1/M2 from the intensity-based Costes M1/M2 (coloc/analysis.py). Keyed by the
+#: selection name (unchanged), applied only when building the results table — see process_obca_methods. Full
+#: definitions live in analysis.py's _M1_FAMILY_LABEL_GLOSSARY.
+_OBCA_OUTPUT_LABELS = {
+    "Mander's M1 value": "Mander's M1 (object overlap)",
+    "Mander's M2 value": "Mander's M2 (object overlap)",
+}
+
 
 def manders_coloc(image1, mask2, roi_mask):
     """
@@ -931,8 +940,10 @@ def process_obca_methods(selected_methods, method_functions, mask1, mask2, roi_m
         if method in method_functions:
             # Calculate the coefficient for the current method.
             coeff = method_functions[method](mask1, mask2, roi_mask)
-            # Append the result to the DataFrame.
-            row = {'Method': method, 'Coefficient': coeff}
+            # Append the result to the DataFrame, under the self-distinguishing OUTPUT label (N5a) — the
+            # selection key stays "Mander's M1 value" so UI wiring and saved presets are untouched; only the
+            # table's 'Method' text carries "(object overlap)" to separate it from the intensity-based Costes M1.
+            row = {'Method': _OBCA_OUTPUT_LABELS.get(method, method), 'Coefficient': coeff}
             data_table1 = pd.concat([data_table1, pd.DataFrame([row])], ignore_index=True)
 
     return data_table1

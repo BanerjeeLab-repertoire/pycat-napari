@@ -23,7 +23,8 @@ def _m1m2(image1, image2, roi_mask=None):
         table1, _, _ = mod.pixel_wise_correlation_analysis(
             image1, image2, roi_mask, ["Costes Automatic Thresholded M1 & M2"], True, None)
     d = dict(zip(table1["Method"], table1["Coefficient"]))
-    return d["Costes Automatic Thresholded M1"], d["Costes Automatic Thresholded M2"]
+    return (d["Costes Automatic Thresholded M1 (intensity, auto-threshold)"],
+            d["Costes Automatic Thresholded M2 (intensity, auto-threshold)"])
 
 
 @pytest.mark.base

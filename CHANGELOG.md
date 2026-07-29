@@ -1,3 +1,26 @@
+## [1.6.429] - 2026-07-28
+### Changed — **Coloc "M1"-family labels are now self-distinguishing + adapter-keying convention documented (spec N5, clarity only — no math change).**
+**N5a — Costes/Manders label provenance.** A merged colocalization table could show `Costes Automatic Thresholded
+M1`, `Mander's M1 value`, and `Mander's k1 value` side by side — three "M1"-family entries that measure different
+things (intensity-after-Costes-threshold vs object-mask overlap vs an intensity split coefficient) with nothing on
+the label saying how. The arithmetic was already correct (A3 fixed the channel cross-referencing); this makes the
+labels self-explaining. The Costes output rows now read `Costes Automatic Thresholded M1/M2 (intensity,
+auto-threshold)` (`coloc/analysis.py`), and the object-based rows read `Mander's M1/M2 (object overlap)`
+(`coloc/object_based.py`). Both are provenance *suffixes*, not renames — the `…M1`/`…M2` stem is preserved. The
+object-based relabel is applied only when building the results table (`process_obca_methods`); the selection key
+(`"Mander's M1 value"`) is untouched, so UI wiring and saved presets still resolve. A new
+`_M1_FAMILY_LABEL_GLOSSARY` string block in `coloc/analysis.py` maps every M1-family label to its definition and
+reference (Costes 2004; Manders 1993), seeding the measurement-ontology roadmap item.
+
+**N5b — adapter-keying convention.** The comment above `_ADAPTERS` (`navigator/executor.py`) previously claimed
+the dict is "keyed by the REAL navigator module name" — no longer true now that op-id keys (`vpt.microrheology`,
+`spatial_metrology.ripley`, `dynamic_spatial.*`) sit alongside module keys (`segmentation_tools`). Replaced it
+with an accurate note of the dual convention: a key is either a module name (resolved for an op-id step via
+`_OP_TO_ADAPTER_MODULE`) or an op-id matched directly; `_adapter_for` tries the step name directly first, then the
+op→module translation — with guidance on which to use when adding an adapter. Zero behaviour change.
+
+Test: `tests/test_costes_manders.py` updated to look up the suffixed Costes labels. Full gate green.
+
 ## [1.6.428] - 2026-07-28
 ### Added — **Dynamic-spatial adapter — trajectory linking + merge/fission detection run from a navigator plan (spec N2b-3).**
 The `dynamic_spatial` batch step was a headless skip-stub, and neither dynamic-spatial op had an `ExecAdapter`, so
