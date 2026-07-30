@@ -1,3 +1,21 @@
+## [1.6.441] - 2026-07-30
+### Added — **The planner explains its DEPENDENCY choice too: "why this segmenter, not the others" (Method-Widget Spec 5 core, extended).**
+Extends the terminal explainer (1.6.440) to the dependency layer. `Planner.explain_provider_choice(goal, ctx)`
+returns, for a resolution goal (a Capability — e.g. the instance-labels a segmenter must provide), the candidate
+providers with their CONTEXT SCORE (+1 context-matched specialist / 0 general / −1 unconfirmed specialist / −2
+context-violated) and preference, and which `_pick` selects; `explain_segmentation_choice(intent, ctx)` is the
+convenience that builds the segmentation goal for the target. Reuses `_pick` for the winner and the shared
+`_context_score` for the scores — no drift.
+
+It surfaces the dependency-layer anti-black-box insight: on **brightfield**, `bf_segment` (a context-matched
+specialist, score +1) wins the condensate segmenter over the generic `subcellular_segment` **even though the
+generic has higher preference** — the context score is the deciding factor, now legible. On neutral 2D
+fluorescence the same call shows `cellpose` chosen by preference among a full field of alternatives.
+
+Tests (`tests/navigator/test_navigator_selection_explain.py`, `base`, +4): preference-wins-when-neutral;
+specialist-beats-higher-preference-generic (bf_segment +1 vs subcellular_segment 0 with higher preference); the
+explained segmenter matches the compiled plan (no-drift guard); and no-target → None. Full gate green.
+
 ## [1.6.440] - 2026-07-29
 ### Added — **The planner explains its terminal choice: "why this op, not that" (Method-Widget Spec 5 core).**
 The anti-black-box payoff, from the planner's OWN logic (no authored content needed): `Planner.explain_terminal_choice(intent, ctx)`

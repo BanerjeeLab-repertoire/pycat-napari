@@ -342,6 +342,40 @@ class Planner:
             }
         return report
 
+    def explain_provider_choice(self, goal, ctx, pins=None):
+        """The dependency-layer analogue of :meth:`explain_terminal_choice`: for a resolution GOAL (a Capability
+        — e.g. the instance-labels a segmenter must provide), the candidate providers the planner weighs, each
+        with its CONTEXT SCORE (+1 context-matched specialist / 0 general / -1 unconfirmed specialist / -2 context
+        violated) and preference, and which one ``_pick`` selects. Reuses ``_pick`` for the winner and the shared
+        ``_context_score`` for the scores, so it cannot drift from the actual dependency choice. ``None`` if the
+        goal has no provider. Candidates ordered winner-first."""
+        pins = pins or {}
+        providers = self.registry.providers_of(goal)
+        if not providers:
+            return None
+        kind_hint = getattr(getattr(goal, "representation", None), "value", None)
+        chosen = self._pick(providers, ctx, pins, kind_hint=kind_hint)
+        return {
+            "goal": str(goal),
+            "chosen": chosen.name,
+            "candidates": sorted(
+                ({"name": p.name,
+                  "context_score": _context_score(p, ctx),
+                  "preference": p.preference,
+                  "chosen": p.name == chosen.name} for p in providers),
+                key=lambda d: (not d["chosen"], -d["context_score"], -d["preference"], d["name"])),
+        }
+
+    def explain_segmentation_choice(self, intent, ctx, pins=None):
+        """Why THIS segmenter, not the others: the provider choice for the instance-labels of the intent's target
+        (e.g. ``cellpose`` for cells on 2D, ``cellpose_3d`` on a z-stack, ``bf_segment`` for brightfield
+        condensates). A convenience over :meth:`explain_provider_choice` that builds the segmentation goal.
+        ``None`` when the intent has no target."""
+        if not getattr(intent, "target", None):
+            return None
+        goal = Capability(Representation.INSTANCE_LABELS, frozenset([f"target:{intent.target}"]))
+        return self.explain_provider_choice(goal, ctx, pins)
+
     def _resolve_module(self, module: ModuleContract, produces_goal: Capability,
                         reason: str, ctx: AnalysisContext, plan: Plan,
                         memo: Dict[str, PlanStep], stack: List[str],

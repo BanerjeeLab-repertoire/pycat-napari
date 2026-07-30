@@ -71,3 +71,60 @@ def test_an_observable_with_no_terminal_is_simply_absent_never_guessed():
     report = pl.explain_terminal_choice(AnalysisIntent(target="cell", observables=["not_a_real_observable"]),
                                         AnalysisContext())
     assert "not_a_real_observable" not in report          # no candidates -> no fabricated entry
+
+
+# ── the dependency layer: why THIS segmenter, not the others ─────────────────────────────────────────────
+
+def _fluor_ctx():
+    from pycat.navigator.context import Source
+    c = AnalysisContext()
+    c.set("modality", "fluorescence", source=Source.USER)
+    return c
+
+
+def _brightfield_ctx():
+    from pycat.navigator.context import Source
+    c = AnalysisContext()
+    c.set("modality", "brightfield", source=Source.USER)
+    return c
+
+
+def test_segmentation_explanation_picks_by_preference_when_context_is_neutral():
+    pl = _planner()
+    report = pl.explain_segmentation_choice(AnalysisIntent(target="cell", observables=["count"]), _fluor_ctx())
+    assert report["chosen"] == "cellpose"
+    assert report["candidates"][0]["name"] == "cellpose" and report["candidates"][0]["chosen"] is True
+    # a real field of alternatives was weighed
+    names = {c["name"] for c in report["candidates"]}
+    assert {"subcellular_segment", "watershed", "stardist"} <= names
+
+
+def test_segmentation_explanation_shows_a_context_SPECIALIST_beating_a_higher_preference_generic():
+    """The anti-black-box insight at the dependency layer: on brightfield, bf_segment (a context-matched
+    specialist, score +1) wins over the generic subcellular_segment even though the generic has HIGHER
+    preference. The surfaced context_score shows exactly why."""
+    pl = _planner()
+    report = pl.explain_segmentation_choice(AnalysisIntent(target="condensate", observables=["count"]),
+                                            _brightfield_ctx())
+    cands = {c["name"]: c for c in report["candidates"]}
+    assert report["chosen"] == "bf_segment"
+    assert cands["bf_segment"]["context_score"] == 1                     # a context-matched specialist
+    assert cands["subcellular_segment"]["context_score"] == 0
+    assert cands["subcellular_segment"]["preference"] > cands["bf_segment"]["preference"]  # generic is preferred
+    # ...yet the specialist won — so the context score is the deciding factor, made legible
+
+
+def test_segmentation_explanation_matches_the_compiled_plan_no_drift():
+    pl = _planner()
+    ctx = _brightfield_ctx()
+    intent = AnalysisIntent(target="condensate", observables=["count"])
+    chosen = pl.explain_segmentation_choice(intent, ctx)["chosen"]
+    plan_steps = [s.name for s in execution_order(pl.compile(intent, ctx))]
+    assert chosen in plan_steps, f"explained segmenter {chosen!r} not in the compiled plan {plan_steps}"
+
+
+def test_segmentation_choice_is_none_without_a_target():
+    # no target → no segmentation goal to explain; None, never a fabricated one
+    pl = _planner()
+    assert pl.explain_segmentation_choice(AnalysisIntent(target=None, observables=["count"]),
+                                          AnalysisContext()) is None
