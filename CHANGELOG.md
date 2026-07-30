@@ -1,3 +1,32 @@
+## [1.6.455] - 2026-07-30
+### Added — **Live plan revision from the guidance pop-out (Method-Widget Spec 4, the larger half).**
+The pop-out that showed a section's alternatives (1.6.454) can now ACT on them: each alternative carries a
+**Use this instead** button, and clicking it swaps that step's op and rebuilds the panel from the amended plan.
+This is where the generated panel stops being a read-only rendering of one plan and becomes an editing surface —
+choose watershed over cellpose and the whole panel recompiles around the choice, the rest of the pipeline intact.
+
+Split, as always, into a headlessly-verified core and a thin GUI shell:
+- **`navigator.session.revise_plan(session, current_op, new_op)`** (tested, `base`) is the whole intelligence:
+  it pins the chosen op at the REPRESENTATION its predecessor filled and recompiles, so the planner re-satisfies
+  the new op's requirements and PRESERVES the rest of the plan (swap the segmenter and the cell-analysis + QC
+  stay). Reuses the planner's existing pin mechanism — no new planning path. An undeterminable role recompiles
+  unchanged rather than guessing a wrong swap. Pins accumulate on the session, so successive revisions stack.
+- **`navigator.session.alternatives_for_op(session, op_id)`** (tested, `base`) is the swappable set the pop-out
+  offers: every provider of the same role, PEER-filtered to those that consume the same representation. That
+  filter is load-bearing — it keeps a from-scratch cell segmenter's alternatives to the other from-scratch
+  segmenters and excludes label→label transforms (relabel, expand-labels, merges) that provide the same
+  `instance_labels` but only by reworking an existing segmentation; offering one would silently change what the
+  step eats. `provided_representation(registry, op_id)` exposes the pin key.
+- **`ui/guidance_popout.py`** renders each alternative as a row with a **Use this instead** button (when a revise
+  callback is wired); **`GeneratedMethodUI`** provides that callback — it builds/caches a session from the panel's
+  intent + live context, revises, docks the replacement panel, then removes the superseded dock so the surface
+  never blinks empty.
+
+Five headless tests pin the core: the segmenter swaps while the analysis + QC survive; the revision persists and
+can be re-revised; the alternatives are peer segmenters not transforms; an undeterminable role is a no-op. Full
+navigator gate green (176 passed). GUI-bound: the buttons + rebuild need a manual napari acceptance run; the
+revision logic is tested apart from the panel it rebuilds.
+
 ## [1.6.454] - 2026-07-30
 ### Added — **Pop-out guidance on generated-panel sections (Method-Widget Spec 4).**
 Each section of a generated method panel now carries a **❔** affordance on its header; clicking it pops out the

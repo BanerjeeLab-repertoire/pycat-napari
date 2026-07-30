@@ -64,20 +64,80 @@ class GeneratedMethodUI(AnalysisMethodsUI):
                             "border-radius: 4px; padding: 4px; margin: 2px;")
         self.method_layout.addWidget(label)
 
+    # ── Spec 4 live revision: build/reuse a session so a chosen alternative can swap + recompile ──────────
+    def _ensure_session(self):
+        """The session used to live-revise this panel (Spec 4). Built once from the panel's intent + the live
+        data context and cached, so successive revisions accumulate their pins (swap the segmenter, then swap the
+        enhancer, and both stick). ``None`` when the plan carries no intent — revision needs an intent to recompile
+        against, so without one the panel is guidance-only."""
+        if self._intent is None:
+            return None
+        if getattr(self, "_session", None) is None:
+            from pycat.navigator.session import NavigatorSession, context_from_session
+            s = NavigatorSession()
+            s.intent = self._intent
+            try:
+                s.ctx = context_from_session(self.central_manager)
+            except Exception as exc:  # broad-ok: optional_probe — revision falls back to default context
+                debug_log("generated method: could not populate revision context; using defaults", exc)
+            self._session = s
+        return self._session
+
+    def _peer_alternatives(self, op_id):
+        """The peer ops this section could be swapped for (empty if revision is unavailable or none exist)."""
+        session = self._ensure_session()
+        if session is None:
+            return []
+        try:
+            from pycat.navigator.session import alternatives_for_op
+            return alternatives_for_op(session, op_id)
+        except Exception as exc:  # broad-ok: optional_probe — alternatives are a nicety, never fatal
+            debug_log(f"generated method: could not compute alternatives for {op_id!r}", exc)
+            return []
+
+    def _revise_to(self, current_op_id, new_op_id):
+        """Swap ``current_op_id`` for ``new_op_id`` and rebuild the panel from the amended plan (Spec 4). The
+        recompiled panel is docked first, then this one's dock removed, so the surface never blinks empty. The
+        session (with its pins) is carried forward so the next revision stacks on this one."""
+        session = self._ensure_session()
+        if session is None:
+            return
+        from pycat.navigator.session import revise_plan
+        amended = revise_plan(session, current_op_id, new_op_id)
+        replacement = GeneratedMethodUI(self.viewer, self.central_manager, amended,
+                                        review=self._review, intent=self._intent, name=self._name)
+        replacement._session = session
+        replacement.setup_ui()
+        self._remove_dock()
+
+    def _remove_dock(self):
+        dock = getattr(self, "_dock", None)
+        if dock is None:
+            return
+        try:
+            self.viewer.window.remove_dock_widget(dock)
+        except Exception as exc:  # broad-ok: ui_cleanup — a stale dock is harmless if removal fails
+            debug_log("generated method: could not remove superseded panel dock", exc)
+
     def _add_guidance_affordance(self, op_id):
         """A small `?`-style link before each section (Spec 4): clicking it pops out the op's when-to-use /
-        advantages / limitations / alternatives in place. Best-effort — a guidance link must never block or crash
-        the section it decorates."""
+        advantages / limitations / alternatives in place, and — when peer ops exist — a **Use this instead**
+        button per alternative that swaps the step and rebuilds the panel (live revision). Best-effort — a guidance
+        link must never block or crash the section it decorates."""
         from PyQt5.QtWidgets import QToolButton
         from pycat.ui.guidance_popout import open_guidance_popout
+        alts = self._peer_alternatives(op_id)
+        on_revise = (lambda new, cur=op_id: self._revise_to(cur, new)) if alts else None
         btn = QToolButton()
         btn.setText("❔  " + op_id.split(".")[-1].replace("_", " "))   # ❔
         btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
         btn.setCursor(Qt.PointingHandCursor)
-        btn.setToolTip(f"When to use {op_id}, its tradeoffs, and alternatives")
+        tip = f"When to use {op_id}, its tradeoffs" + (", and swap it for an alternative" if alts else "")
+        btn.setToolTip(tip)
         btn.setStyleSheet("QToolButton { color: #0d7d78; border: none; font-size: 11px; padding: 2px 0; }"
                           "QToolButton:hover { text-decoration: underline; }")
-        btn.clicked.connect(lambda _=False, o=op_id: open_guidance_popout(self, o))
+        btn.clicked.connect(lambda _=False, o=op_id, a=alts, r=on_revise:
+                            open_guidance_popout(self, o, alternatives=a, on_revise=r))
         self.method_layout.addWidget(btn)
 
     def setup_ui(self):
@@ -117,7 +177,8 @@ class GeneratedMethodUI(AnalysisMethodsUI):
         except Exception:  # broad-ok: ui_cleanup — optional width relaxation, non-fatal to the dock
             pass
         scroll_area.setWidget(main_widget)
-        self.viewer.window.add_dock_widget(scroll_area, name=self._name)
+        # Keep the dock handle so a live revision (Spec 4) can remove this panel once its replacement is docked.
+        self._dock = self.viewer.window.add_dock_widget(scroll_area, name=self._name)
         main_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         scroll_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.method_layout.setAlignment(Qt.AlignTop)
