@@ -115,6 +115,19 @@ def test_builder_for_resolves_or_refuses_but_never_guesses():
 
 
 @pytest.mark.base
+def test_placeholder_text_names_the_step_and_where_to_run_it():
+    """The gap placeholder must name the step and say where to run it — a deferred step is visible, never a
+    silent drop. Pure text, tested here; the Qt panel only wraps it in a QLabel."""
+    from pycat.navigator.sections import placeholder_text
+    txt = placeholder_text("spatial_statistics")
+    assert "spatial statistics" in txt                       # the op label, humanised
+    assert "no panel section is wired" in txt
+    assert "Run it from its own method panel" in txt
+    # a dotted measure-op id uses its last segment as the label
+    assert "cell analysis" in placeholder_text("feature_analysis.cell_analysis")
+
+
+@pytest.mark.base
 def test_resolve_plan_sections_walks_a_real_plan_in_order_with_gaps_flagged():
     """The Spec 1.2 join, headlessly: resolving a real cell plan yields its steps IN EXECUTION ORDER, each mapped
     step carrying its builder name and each unmapped step flagged as a gap (never dropped). This is what

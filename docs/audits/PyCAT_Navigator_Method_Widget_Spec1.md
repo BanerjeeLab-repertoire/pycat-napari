@@ -76,6 +76,15 @@ and can be used to complete the analysis by hand.
 > that predated the current catalog. `_KNOWN_GAPS` = {`data_qc.assess`, `acquisition`}. **Remaining in Spec 1:**
 > 1.2 (`GeneratedMethodUI`), 1.3 (parameter seeding), 1.4 (dock "🛠 Build method panel"), 1.6 (acceptance) — all
 > GUI-bound (Qt panel + dock lifecycle), so they build on this foundation but are not headlessly verifiable.
+>
+> **UPDATE (1.6.434): 1.2 + 1.3 + 1.4 SHIPPED.** `ui/generated_method_ui.py::GeneratedMethodUI` (subclasses
+> `AnalysisMethodsUI`; `setup_ui` walks `resolve_plan_sections`, calls each builder, renders `placeholder_text`
+> for gaps; seeds reviewed params into the repo before building; stores provenance). Dock: primary "🛠 Build
+> method panel" (`build_method_panel_via_central_manager`), gated by `run_blocked_reason`; the executor path is
+> now the secondary "▶ Run the steps that support it". `placeholder_text` is headlessly tested; both GUI modules
+> compile + import. **STILL OPEN: 1.6 acceptance** — a manual napari run (answer → Build → confirm each section
+> is live and matches the hand-written `CondensateAnalysisUI` outputs). That is the one piece I cannot verify
+> headlessly; everything feeding it is tested.
 
 ## 1.1 — The missing mapping: op-id → section builder
 

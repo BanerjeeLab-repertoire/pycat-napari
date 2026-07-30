@@ -85,6 +85,16 @@ def resolve_plan_sections(plan) -> List[PlannedSection]:
     return sections
 
 
+def placeholder_text(op_id: str) -> str:
+    """The message a generated panel shows IN PLACE OF an unmapped step (`gap=True`). It names the step and says
+    to run it from its own panel, so a step the plan deemed necessary is visibly deferred, never silently dropped
+    — dropping it would be a scientific-integrity failure. Pure text, so the exact wording is tested headlessly;
+    the Qt panel only wraps it in a QLabel."""
+    label = op_id.split(".")[-1].replace("_", " ").strip() or op_id
+    return (f"⚠  {label} — no panel section is wired for this step yet.\n"
+            f"    Run it from its own method panel, then continue here.")
+
+
 def builder_for(central_manager, op_id: str):
     """Resolve an op-id to a BOUND section-builder callable on ``central_manager``, or ``None``.
 

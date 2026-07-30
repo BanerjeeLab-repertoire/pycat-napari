@@ -1,3 +1,27 @@
+## [1.6.434] - 2026-07-29
+### Added — **Navigator → generated method panel: the Qt panel + dock action (Method-Widget Spec 1.2/1.3/1.4).**
+The "Build method" outcome the navigator was missing: an actual dockable PyCAT analysis panel, generated from the
+plan. `GeneratedMethodUI` (`ui/generated_method_ui.py`) subclasses `AnalysisMethodsUI` — inheriting the workflow
+header, pixel gate, dock lifecycle, and save/clear footer — and its `setup_ui` walks the plan via the
+headless-tested `resolve_plan_sections`, calling each mapped step's bound builder into one layout and rendering a
+visible placeholder (`placeholder_text`) for any unmapped step, so a planned step is never silently dropped.
+Because every `_add_*` builder already produces complete controls (tag-bound dropdowns, status circles, run
+buttons), the panel is fully functional with no per-step UI code. Parameter seeding (Spec 1.3) writes the reviewed
+values into the data repository BEFORE the builders run, so each section constructs already seeded; a reviewed
+param with no repository home is skipped and logged, never given an invented location. Provenance (`_plan`,
+`_intent`, `_review`) is stored on the instance for Specs 2/4.
+
+Dock wiring (Spec 1.4, `navigator_dock.py`): the primary action becomes **🛠 Build method panel**
+(`build_method_panel_via_central_manager` constructs and docks the panel through the standard lifecycle), gated by
+`run_blocked_reason` so an untrustworthy plan says why rather than building a panel that would produce a wrong
+number; the old executor path stays as a secondary **▶ Run the steps that support it**, labelled honestly.
+
+Headlessly verified: `placeholder_text` (names the step + where to run it) is tested, on top of the already-tested
+`resolve_plan_sections`/`builder_for`/coverage ratchet; both GUI modules compile and import. The panel's rendering
+and the dock button are GUI-bound (PyQt5) — **Spec 1.6 acceptance is a manual napari run** of the cell/condensate
+pipeline: answer the navigator, Build, and confirm each section is live and produces the same outputs as the
+hand-written `CondensateAnalysisUI`. Full headless gate green.
+
 ## [1.6.433] - 2026-07-29
 ### Added — **Navigator → generated method panel: the plan→sections resolution logic (Method-Widget Spec 1.2 core, headless).**
 The join at the heart of the generated-method widget: a plan is an ordered list of steps, a panel is an ordered
