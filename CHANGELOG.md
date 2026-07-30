@@ -1,3 +1,27 @@
+## [1.6.439] - 2026-07-29
+### Added — **Operation-guidance infrastructure: schema + reader + coverage ratchet + authoring workbook (Method-Widget Spec 3, infra only).**
+Spec 3 lets the Navigator not just choose an op but *explain* one — when to use it, its advantages, limitations,
+alternatives, when it does not apply, and references. That content is a scientific judgement authored by hand and
+must never be machine-generated, so this ships the INFRASTRUCTURE with the content store deliberately EMPTY:
+
+- **`navigator/data/operation_guidance.json`** (schema-versioned, `guidance: {}`) — the store, keyed by op-id
+  like `section_bindings.json`. Each entry (once authored) has `when_to_use` (prose) + `advantages` /
+  `limitations` / `alternatives` / `not_applicable_when` / `references` (lists).
+- **`navigator/guidance.py`** — the reader: `guidance_for(op_id)` returns the authored entry or `None` for an
+  unauthored op (refuse-to-guess, the same discipline as the adapters and section bindings), `authored_op_ids()`
+  for the ratchet, and the authoring vehicle — `generate_guidance_workbook(path)` writes a fill-in `.xlsx` (one
+  row per catalog op, factual columns pre-filled, judgement columns blank) and `ingest_guidance_workbook(path)`
+  reads a filled workbook back into the JSON (list fields split one-per-line; blank rows are not entries). The
+  runtime reader needs only `json`; the workbook helpers import `openpyxl` lazily.
+- **`tests/navigator/test_guidance_coverage.py`** (`base`, 5) — the ratchet: the store is well-formed and
+  schema-versioned; every authored entry references a REAL op (catalog + measure ops) with only known fields of
+  the right types; the reader refuses to guess; authored coverage only grows (floor 0 while empty); and the
+  workbook round-trips (generate → author one op → ingest yields it, ingesting to a tmp path so the shipped store
+  is never mutated).
+
+This is the schema + reader + ratchet + authoring vehicle the Spec-3 curation project needs; the guidance CONTENT
+is the scientist's to author (and gates Specs 4–5). Full gate green.
+
 ## [1.6.438] - 2026-07-29
 ### Added — **Custom Methods submenu — saved methods rebuild into a generated panel (Method-Widget Spec 2, complete).**
 Completes Spec 2: the persisted methods (1.6.437) now surface in the analysis tree and rebuild on demand. Two

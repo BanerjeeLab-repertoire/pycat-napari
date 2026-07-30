@@ -272,6 +272,14 @@ rebuilt from the saved-method store. Deleting/renaming/duplicating a saved metho
 **Depends on:** Spec 1.
 
 ### Spec 3 — The guidance content model *(the gating item — this is a curation project)*
+> **STATUS (1.6.439): INFRASTRUCTURE SHIPPED; content is yours to author.** `operation_guidance.json`
+> (schema-versioned, ships empty), `navigator/guidance.py` (reader `guidance_for` refuse-to-guess +
+> `authored_op_ids`; authoring vehicle `generate_guidance_workbook` / `ingest_guidance_workbook`), and
+> `tests/navigator/test_guidance_coverage.py` (5 `base` — well-formed, real-op + valid-field guard, refuse-to-guess,
+> coverage ratchet floor 0, workbook round-trip). To author: run `generate_guidance_workbook`, fill the judgement
+> columns (when_to_use / advantages / limitations / alternatives / not_applicable_when / references), then
+> `ingest_guidance_workbook`, and raise the ratchet floor. The scientific content — the deliverable that gates
+> Specs 4–5 — is yours; the machine will never invent it.
 **Honest finding:** the op catalog's 94 entries carry only a terse one-line `summary` ("FFT bandpass
 filter"). The content your vision needs — *when to use this, its advantages, its limitations, why it is
 or isn't relevant here* — **does not exist anywhere in the codebase and must be authored.**
