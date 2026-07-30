@@ -1,9 +1,9 @@
-"""**The cross-route equivalence matrix — seventeen canonical workflows, asserted identical per route.**
+"""**The cross-route equivalence matrix — twenty-one canonical workflows, asserted identical per route.**
 
 Read `tests/route_equivalence.py` first: it explains why this exists (the same analysis must not yield
 different numbers depending on how it was launched) and what a route / a documented gap is.
 
-The matrix grew from three to six workflows (increment A) and then to **seventeen** (increment B added pure
+The matrix grew from three to six workflows (increment A) and then to **twenty-one** (increment B added pure
 image filters — Gaussian, DoG, bilateral, LoG, FFT-bandpass, invert, rescale, gabor, upscale — and two torch-free segmenters (local-threshold, Felzenszwalb)),
 chosen for distinct data shapes and failure modes — not the 15 the audit imagined at once, because
 three-per-increment that genuinely run will grow and fifteen written at once are abandoned. Adding another is
@@ -12,7 +12,7 @@ one `Workflow(...)` entry.
 A fourth route, **`kernel`** (the Spec-6 execution kernel, `OperationService.execute`), joins headless / batch /
 session: a workflow whose op is migrated to the kernel adds a `kernel` route asserted identical to the rest, and
 one not yet migrated declares `kernel` a documented gap — so an unmigrated op is a VISIBLE gap, never a silent
-absence. Every workflow above has a `kernel` route (19 ops migrated across the matrix).
+absence. Every workflow above has a `kernel` route (23 ops migrated across the matrix).
 
 | workflow | headless | batch replay | session reload |
 |---|---|---|---|
@@ -28,6 +28,7 @@ absence. Every workflow above has a `kernel` route (19 ops migrated across the m
 | **local-threshold segmentation** (increment B — torch-free segmenter) | ✓ | gap: no batch step | ✓ |
 | **invert / rescale / gabor / upscale** (increment B — enhancers) | ✓ | gap: no batch step | ✓ |
 | **Felzenszwalb segmentation** (increment B — torch-free segmenter) | ✓ | gap: no batch step | ✓ |
+| **ridge / tone-map / local-contrast / peak+edge** (increment B) | ✓ | gap: no batch step | ✓ |
 
 The batch **gaps are declared, not skipped silently** — and the harness fails if a gap closes or a route
 vanishes without the table being updated. They mark where the headless batch API stops: colocalization has
@@ -529,6 +530,34 @@ _gabor_workflow = _filter_only_workflow('gabor filter', 'gabor', 12, 'Gabor Filt
 _fz_workflow = _filter_only_workflow('felzenszwalb segmentation', 'felzenszwalb', 13, 'FZ Labels', _fz_call, {})
 _upscale_workflow = _filter_only_workflow('interpolation upscaling', 'upscale', 14, 'Upscaled', _upscale_call,
                                           {'upscale_factor': 2})
+
+
+def _ridge_call(raw):
+    from pycat.toolbox.contrast_cascade_tools import ridge_enhance
+    return ridge_enhance(raw)
+
+
+def _tone_map_call(raw):
+    from pycat.toolbox.contrast_cascade_tools import tone_map
+    return tone_map(raw)
+
+
+def _local_contrast_call(raw):
+    from pycat.toolbox.contrast_cascade_tools import local_contrast_normalize
+    return local_contrast_normalize(raw)
+
+
+def _peak_edge_call(raw):
+    from pycat.toolbox.image_processing.filters import peak_and_edge_enhancement_func
+    return peak_and_edge_enhancement_func(raw, 5)
+
+
+_ridge_workflow = _filter_only_workflow('ridge enhancement', 'ridge', 15, 'Ridge', _ridge_call, {})
+_tone_map_workflow = _filter_only_workflow('tone mapping', 'tone_map', 16, 'Tone Mapped', _tone_map_call, {})
+_local_contrast_workflow = _filter_only_workflow('local contrast', 'local_contrast', 17, 'Local Contrast',
+                                                 _local_contrast_call, {})
+_peak_edge_workflow = _filter_only_workflow('peak+edge enhancement', 'peak_edge', 18, 'Peak Edge',
+                                            _peak_edge_call, {'ball_radius': 5})
 _log_workflow = _filter_only_workflow(
     'LoG filter', 'log', 7, 'LoG Filtered', _log_call, {'sigma': 3})
 _bandpass_workflow = _filter_only_workflow(
@@ -555,6 +584,10 @@ _WORKFLOW_BUILDERS = {
     'gabor': _gabor_workflow,                # increment B
     'felzenszwalb': _fz_workflow,            # increment B — a second torch-free segmenter
     'upscale': _upscale_workflow,            # increment B
+    'ridge': _ridge_workflow,                # increment B
+    'tone_map': _tone_map_workflow,          # increment B
+    'local_contrast': _local_contrast_workflow,   # increment B
+    'peak_edge': _peak_edge_workflow,        # increment B
 }
 
 

@@ -279,8 +279,42 @@ def _kernel_upscale(inputs: dict, params: dict) -> AnalysisResult:
     return AnalysisResult(operation_id="upscale", entity_type="image", measurements=None, artifacts=(out,))
 
 
+def _kernel_ridge(inputs: dict, params: dict) -> AnalysisResult:
+    """Ridge (vesselness) enhancement — the SAME `ridge_enhance` call. Enhance op."""
+    from pycat.toolbox.contrast_cascade_tools import ridge_enhance
+    return AnalysisResult(operation_id="ridge", entity_type="image", measurements=None,
+                          artifacts=(ridge_enhance(inputs["image"]),))
+
+
+def _kernel_tone_map(inputs: dict, params: dict) -> AnalysisResult:
+    """Tone mapping — the SAME `tone_map` call. Enhance op."""
+    from pycat.toolbox.contrast_cascade_tools import tone_map
+    out = tone_map(inputs["image"], method=params.get("method", "log"),
+                   clip_limit=params.get("clip_limit", 0.003))
+    return AnalysisResult(operation_id="tone_map", entity_type="image", measurements=None, artifacts=(out,))
+
+
+def _kernel_local_contrast(inputs: dict, params: dict) -> AnalysisResult:
+    """Local contrast normalisation — the SAME `local_contrast_normalize` call. Enhance op."""
+    from pycat.toolbox.contrast_cascade_tools import local_contrast_normalize
+    out = local_contrast_normalize(inputs["image"], sigma=params.get("sigma", 15.0),
+                                   mode=params.get("mode", "divide"))
+    return AnalysisResult(operation_id="local_contrast", entity_type="image", measurements=None, artifacts=(out,))
+
+
+def _kernel_peak_edge(inputs: dict, params: dict) -> AnalysisResult:
+    """Peak-and-edge enhancement — the SAME `peak_and_edge_enhancement_func` call. Enhance op."""
+    from pycat.toolbox.image_processing.filters import peak_and_edge_enhancement_func
+    out = peak_and_edge_enhancement_func(inputs["image"], params["ball_radius"])
+    return AnalysisResult(operation_id="peak_edge", entity_type="image", measurements=None, artifacts=(out,))
+
+
 register_kernel("invert", _kernel_invert)
 register_kernel("rescale", _kernel_rescale)
 register_kernel("gabor", _kernel_gabor)
 register_kernel("felzenszwalb", _kernel_felzenszwalb)
 register_kernel("upscale", _kernel_upscale)
+register_kernel("ridge", _kernel_ridge)
+register_kernel("tone_map", _kernel_tone_map)
+register_kernel("local_contrast", _kernel_local_contrast)
+register_kernel("peak_edge", _kernel_peak_edge)

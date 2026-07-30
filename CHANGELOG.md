@@ -1,3 +1,10 @@
+## [1.6.453] - 2026-07-30
+### Added — **Execution kernel, increment B (cont.): four contrast/edge enhancers — ridge, tone-map, local-contrast, peak+edge (Method-Widget Spec 6).**
+Four more enhancer op families migrated: `ridge` (vesselness), `tone_map`, `local_contrast` (local contrast
+normalisation), and `peak_edge` (peak-and-edge enhancement). Each is a route-equivalence workflow proving
+`headless ≈ session ≈ kernel` bit-for-bit plus a kernel registration; batch is a documented gap. The matrix is
+now **twenty-one workflows**; the kernel covers **23 ops**. Full gate green.
+
 ## [1.6.452] - 2026-07-30
 ### Added — **Execution kernel, increment B (cont.): Felzenszwalb segmenter + interpolation upscaling (Method-Widget Spec 6).**
 Two more op families migrated: `felzenszwalb` (Felzenszwalb graph segmentation + region merging — a SECOND
