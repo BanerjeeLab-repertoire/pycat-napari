@@ -64,5 +64,6 @@ def test_a_measure_op_returns_its_table_in_measurements_not_artifacts():
 
 def test_migrated_ops_reports_the_kernel_coverage():
     migrated = OperationService.migrated_ops()
-    # families 1–4: an enhance op, two measure ops, and a segmenter
-    assert {"rolling_ball", "condensate_physics.compute_msd", "clean", "cellpose"} <= migrated
+    # families 1–6: enhance, measures, segmenter, and the three coloc coefficient ops
+    assert {"rolling_ball", "condensate_physics.compute_msd", "clean", "cellpose", "client_enrichment",
+            "coloc.manders_m1", "coloc.manders_m2", "colocalization"} <= migrated

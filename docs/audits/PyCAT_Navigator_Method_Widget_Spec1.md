@@ -343,6 +343,11 @@ but the reasoning and the runner-up.
 > all four migrated workflows' kernel routes now genuinely execute and are asserted `≈ headless`; unmigrated
 > workflows (coloc, time-series partition) declare `kernel` a documented gap. Migrated: `rolling_ball`,
 > `condensate_physics.compute_msd`, `clean`, `cellpose`.
+> **UPDATE (1.6.446): families 5 & 6 — matrix complete.** `client_enrichment` (per-frame partition, looped) and
+> colocalization (a composite: `coloc.manders_m1` + `coloc.manders_m2` + `colocalization`/Pearson). ZERO kernel
+> gaps remain — all six route-equivalence workflows prove `≈ kernel`. Eight ops migrated. The kernel now spans
+> the whole canonical matrix; further migration would author NEW route-equivalence workflows for ops not yet in
+> it.
 I agree with the audit here and so do you. `OperationService.execute(...) → AnalysisResult`, sitting
 **below** batch, Navigator, generated panels, manual panels, and headless. Batch handlers keep
 workflow/persistence concerns (paths, output dirs, naming) and stop being the de facto scientific API.

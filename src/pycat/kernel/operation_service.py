@@ -122,3 +122,59 @@ def _kernel_cellpose(inputs: dict, params: dict) -> AnalysisResult:
 
 
 register_kernel("cellpose", _kernel_cellpose)
+
+
+# ── Family 5: client partition / enrichment. A MEASURE op returning a one-row table (dense/dilute means, the ──
+# enrichment ratio, pixel counts). Route-equivalence proves it in Workflow 6 (per-frame, looped). ─────────────
+
+def _kernel_client_enrichment(inputs: dict, params: dict) -> AnalysisResult:
+    """Partition / enrichment coefficient of a dense phase against its dilute surround — the SAME
+    `client_enrichment` call the manual/session routes make. Measure op: the one-row metrics table (dense_mean,
+    dilute_mean, enrichment, pixel counts, background provenance) is the measurement."""
+    from pycat.toolbox.partition_enrichment_tools import client_enrichment
+    import pandas as pd
+    out = client_enrichment(inputs["image"], inputs["dense_mask"],
+                            cell_mask=inputs.get("cell_mask"),
+                            background=params.get("background", 0.0))
+    return AnalysisResult(operation_id="client_enrichment", entity_type="condensate",
+                          measurements=pd.DataFrame([out]), artifacts=())
+
+
+register_kernel("client_enrichment", _kernel_client_enrichment)
+
+
+# ── Family 6: colocalization coefficients. A composite WORKFLOW over three single-coefficient ops — each is ──
+# its own kernel (Manders M1, Manders M2, pixel-wise Pearson), and the coloc route calls all three. This is the ─
+# kernel handling a multi-op workflow: the workflow orchestrates, the kernel runs one op. Proven in Workflow 5. ─
+
+def _one_value(op_id: str, entity: str, value: float) -> AnalysisResult:
+    import pandas as pd
+    return AnalysisResult(operation_id=op_id, entity_type=entity,
+                          measurements=pd.DataFrame([{"value": float(value)}]), artifacts=())
+
+
+def _kernel_manders_m1(inputs: dict, params: dict) -> AnalysisResult:
+    """Manders M1 — fraction of channel-1 (in ``masked_image_1``) overlapping channel-2's mask, within the ROI.
+    Same `manders_m1_calculation` call as the manual/session routes."""
+    from pycat.toolbox.obj_based_coloc_analysis_tools import manders_m1_calculation
+    return _one_value("coloc.manders_m1", "coloc",
+                      manders_m1_calculation(inputs["masked_image_1"], inputs["mask_2"], inputs["roi"]))
+
+
+def _kernel_manders_m2(inputs: dict, params: dict) -> AnalysisResult:
+    """Manders M2 — the symmetric channel-2-over-channel-1 fraction. Same `manders_m2_calculation` call."""
+    from pycat.toolbox.obj_based_coloc_analysis_tools import manders_m2_calculation
+    return _one_value("coloc.manders_m2", "coloc",
+                      manders_m2_calculation(inputs["mask_1"], inputs["masked_image_2"], inputs["roi"]))
+
+
+def _kernel_pearson_coloc(inputs: dict, params: dict) -> AnalysisResult:
+    """Pixel-wise Pearson correlation within the ROI. Same `pearsons_correlation` call ([0] = the coefficient)."""
+    from pycat.toolbox.pixel_wise_corr_analysis_tools import pearsons_correlation
+    return _one_value("colocalization", "coloc",
+                      pearsons_correlation(inputs["ch1"], inputs["ch2"], inputs["roi"])[0])
+
+
+register_kernel("coloc.manders_m1", _kernel_manders_m1)
+register_kernel("coloc.manders_m2", _kernel_manders_m2)
+register_kernel("colocalization", _kernel_pearson_coloc)

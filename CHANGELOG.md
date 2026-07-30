@@ -1,3 +1,21 @@
+## [1.6.446] - 2026-07-30
+### Added — **Execution kernel, families 5 & 6: partition enrichment + colocalization — every canonical workflow now proves ≈ kernel (Method-Widget Spec 6).**
+Closes the last two `kernel` gaps in the route-equivalence matrix, so all six canonical workflows now assert the
+kernel computes identically to their other routes:
+
+- **Family 5 — `client_enrichment`** (partition/enrichment, a MEASURE op returning a one-row metrics table). A
+  per-frame series is a WORKFLOW over one op: the kernel runs the op, Workflow 6's `kernel` route loops it per
+  frame — same science as `headless`, so the time-series-partition row closes `≈ kernel`.
+- **Family 6 — colocalization** (a COMPOSITE of three single-coefficient ops: `coloc.manders_m1`,
+  `coloc.manders_m2`, pixel-wise `colocalization`/Pearson). Each is its own kernel; Workflow 5's `kernel` route
+  calls all three and assembles the same 3-row table — the kernel handling a multi-op workflow (the workflow
+  orchestrates, each kernel runs one op).
+
+With this, **zero kernel gaps remain** in the route-equivalence matrix: rolling-ball, puncta, VPT→MSD, cellpose,
+time-series partition, and colocalization all prove `headless ≈ (batch) ≈ session ≈ kernel`. Eight ops are now
+migrated to `OperationService.execute`. (Coloc's BATCH route stays a documented gap — it has no batch replay
+step — but its kernel route now runs.) Full gate green.
+
 ## [1.6.445] - 2026-07-30
 ### Fixed — **Route-equivalence now genuinely runs the `kernel` route; cellpose migrated (family 4) (Method-Widget Spec 6).**
 **Correction:** families 1–3 (1.6.442–444) added a `kernel` route to the route-equivalence workflows, but the

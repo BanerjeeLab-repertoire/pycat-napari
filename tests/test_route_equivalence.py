@@ -279,12 +279,26 @@ def _coloc_workflow():
                              {'coefficient': 'm2', 'value': float(m2), 'units': 'fraction'},
                              {'coefficient': 'pearson', 'value': float(pcc), 'units': 'dimensionless'}])
 
+    def kernel():
+        # Spec-6 kernel, family 6. Coloc is a composite of three single-coefficient ops; the kernel runs each,
+        # the route assembles the same 3-row table — closing ≈ kernel for a multi-op workflow.
+        from pycat.kernel.operation_service import OperationService
+        m1 = OperationService.execute('coloc.manders_m1',
+                                      {'masked_image_1': ch1 * mask1, 'mask_2': mask2, 'roi': roi})
+        m2 = OperationService.execute('coloc.manders_m2',
+                                      {'mask_1': mask1, 'masked_image_2': ch2 * mask2, 'roi': roi})
+        pcc = OperationService.execute('colocalization', {'ch1': ch1, 'ch2': ch2, 'roi': roi})
+        val = lambda r: float(r.measurements['value'].iloc[0])
+        return pd.DataFrame([{'coefficient': 'm1', 'value': val(m1), 'units': 'fraction'},
+                             {'coefficient': 'm2', 'value': val(m2), 'units': 'fraction'},
+                             {'coefficient': 'pearson', 'value': val(pcc), 'units': 'dimensionless'}])
+
     def session():
         return session_roundtrip_dataframe(headless(), 'coloc_df')
 
     return Workflow(
         'colocalization (two-channel)',
-        routes={'headless': headless, 'session': session},
+        routes={'headless': headless, 'session': session, 'kernel': kernel},
         # 1-ULP CSV decimal round-trip tolerance (see the puncta workflow).
         compare=compare_dataframes(['value'], rtol=1e-12, atol=1e-15),
         # Beyond the numbers: the schema, the dtype, the NaN policy, and the UNITS column must survive the
@@ -294,9 +308,7 @@ def _coloc_workflow():
             'batch': "this workflow's OBJECT-BASED m1/m2 coloc has no batch replay step — it is an interactive "
                      "two-channel analysis. (A navigator PIXEL-coloc handler `replay_pixel_coloc` was added "
                      "2026-07-28 for Pearson / Manders-overlap WITHIN a segmentation ROI, but that is a different "
-                     "computation than this route's thresholded m1/m2, so this route stays a gap.)",
-            'kernel': "object-based m1/m2 coloc is not migrated to the execution kernel yet (Spec 6 migrates per "
-                      "family); it still runs through its interactive/session route."})
+                     "computation than this route's thresholded m1/m2, so this route stays a gap.)"})
 
 
 # ── Workflow 6 — Time-series condensate partition (headless ≈ session; batch is a documented gap) ─
@@ -334,18 +346,29 @@ def _timeseries_condensate_workflow():
     def session():
         return session_roundtrip_dataframe(headless(), 'condensate_ts_df')
 
+    def kernel():
+        # Spec-6 kernel, family 5. A per-frame series is a WORKFLOW over one op (client_enrichment): the kernel
+        # runs the op, the route loops it — the same per-frame science as headless, so the row closes ≈ kernel.
+        from pycat.kernel.operation_service import OperationService
+        rows = []
+        for t in range(n_frames):
+            res = OperationService.execute('client_enrichment',
+                                           {'image': _frame(t), 'dense_mask': dense, 'cell_mask': cell},
+                                           {'background': 0.0})
+            rows.append({'frame': t, 'enrichment': float(res.measurements['enrichment'].iloc[0]),
+                         'units': 'dimensionless'})
+        return pd.DataFrame(rows)
+
     return Workflow(
         'time-series condensate partition',
-        routes={'headless': headless, 'session': session},
+        routes={'headless': headless, 'session': session, 'kernel': kernel},
         compare=compare_dataframes(['enrichment'], rtol=1e-12, atol=1e-15),
         compare_metadata=compare_frame_metadata(['frame', 'enrichment', 'units'], units_column='units'),
         documented_gaps={
             'batch': "a per-frame partition series over a time-series stack is not a per-image batch step "
                      "(the batch condensate replay is a single-frame step; the lazy stack is materialized "
                      "by the interactive/time-series path, not the batch recorder) — same class as the "
-                     "VPT/MSD skip-stub gap",
-            'kernel': "the per-frame partition series is not migrated to the execution kernel yet (Spec 6 "
-                      "migrates per family); it still runs through its interactive/session route."})
+                     "VPT/MSD skip-stub gap"})
 
 
 # ── The matrix ──────────────────────────────────────────────────────────────────────────────────
