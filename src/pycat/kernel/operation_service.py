@@ -318,3 +318,50 @@ register_kernel("ridge", _kernel_ridge)
 register_kernel("tone_map", _kernel_tone_map)
 register_kernel("local_contrast", _kernel_local_contrast)
 register_kernel("peak_edge", _kernel_peak_edge)
+
+
+# ── Family: mask / label transforms. The first ops that CONSUME a mask or a label image (not raw intensity) ──
+# and produce one — binary morphology and watershed splitting. Their route-equivalence rows key the input as
+# ``mask`` / ``labels`` rather than ``image``, proving the kernel handles the mask/label data role, not just the
+# intensity role. Pure and deterministic; each proven by its own new route-equivalence workflow. ───────────────
+
+def _kernel_binary_open(inputs: dict, params: dict) -> AnalysisResult:
+    """Binary opening (erode→dilate) — the SAME `custom_binary_opening` call the manual/session routes make.
+    Mask→mask op: the opened binary mask is the artifact."""
+    from pycat.toolbox.masks.morphology import custom_binary_opening
+    out = custom_binary_opening(inputs["mask"], iterations=params.get("iterations", 1))
+    return AnalysisResult(operation_id="binary_open", entity_type="mask", measurements=None, artifacts=(out,))
+
+
+def _kernel_binary_close(inputs: dict, params: dict) -> AnalysisResult:
+    """Binary closing (dilate→erode) — the SAME `custom_binary_closing` call. Mask→mask op."""
+    from pycat.toolbox.masks.morphology import custom_binary_closing
+    out = custom_binary_closing(inputs["mask"], iterations=params.get("iterations", 1))
+    return AnalysisResult(operation_id="binary_close", entity_type="mask", measurements=None, artifacts=(out,))
+
+
+def _kernel_binary_morph(inputs: dict, params: dict) -> AnalysisResult:
+    """General binary morphology (opening/closing/erosion/dilation with a chosen structuring element) — the SAME
+    `binary_morph_operation` call. Mask→mask op."""
+    from pycat.toolbox.masks.morphology import binary_morph_operation
+    out = binary_morph_operation(inputs["mask"], iterations=params.get("iterations", 1),
+                                 element_size=params.get("element_size", 3),
+                                 element_shape=params.get("element_shape", "Disk"),
+                                 mode=params.get("mode", "Opening"))
+    return AnalysisResult(operation_id="binary_morph", entity_type="mask", measurements=None, artifacts=(out,))
+
+
+def _kernel_split_watershed(inputs: dict, params: dict) -> AnalysisResult:
+    """Watershed splitting of touching objects — the SAME `split_touching_objects` call. Label→label op: the
+    re-split label image is the artifact. (A CONSUME-labels op, distinct from the segmenters that consume raw
+    intensity — it reworks an existing segmentation.)"""
+    from pycat.toolbox.masks.morphology import split_touching_objects
+    out = split_touching_objects(inputs["labels"], sigma=params.get("sigma", 3.5))
+    labels = out[0] if isinstance(out, (tuple, list)) else out
+    return AnalysisResult(operation_id="split_watershed", entity_type="mask", measurements=None, artifacts=(labels,))
+
+
+register_kernel("binary_open", _kernel_binary_open)
+register_kernel("binary_close", _kernel_binary_close)
+register_kernel("binary_morph", _kernel_binary_morph)
+register_kernel("split_watershed", _kernel_split_watershed)

@@ -1,3 +1,25 @@
+## [1.6.457] - 2026-07-30
+### Added — **Kernel mask/label family: the first ops that consume a mask/label, not raw intensity (Spec 6).**
+The execution kernel (`OperationService.execute`) migrated 23 ops across enhance / segment / measure — but every
+one consumed raw INTENSITY. This family adds the first ops whose input is a mask or a label image: binary opening,
+binary closing, general binary morphology (all mask→mask), and watershed label-splitting (label→label). It proves
+the kernel's input contract covers the mask/label data ROLE, not only the intensity role — the last untested shape
+of `(inputs, params) -> AnalysisResult`.
+
+- **Four new kernels** in `kernel/operation_service.py` (`binary_open`, `binary_close`, `binary_morph`,
+  `split_watershed`), each the SAME toolbox call (`custom_binary_opening` / `custom_binary_closing` /
+  `binary_morph_operation` / `split_touching_objects`) the manual and session routes make, keyed on `mask` /
+  `labels` inputs. 27 ops now migrated.
+- **Four new route-equivalence rows** (matrix now 25 workflows) via a new `_mask_only_workflow` factory — the
+  mask/label analogue of the filter factory, feeding the kernel a mask/label under its role key. Each asserts
+  `headless ≈ session ≈ kernel` bit-for-bit (batch is a declared gap — a standalone mask transform is not a
+  recorded per-image batch step); no divergence found.
+- **Kernel-contract test** pinning that each mask/label op consumes its role and returns a same-shape artifact
+  with no measurements, plus the coverage-set assertion extended to the new family.
+
+Full route-equivalence + kernel + budget gate green (44 passed). No SRC behavior change to existing ops — this is
+purely additive kernel coverage.
+
 ## [1.6.456] - 2026-07-30
 ### Added — **'Why this one' scores in the revision pop-out, and a pin-honoring fix (Method-Widget Spec 5).**
 The live-revision pop-out (1.6.455) now shows the planner's reasoning next to each candidate: the segmenter's

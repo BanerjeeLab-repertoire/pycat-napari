@@ -1,18 +1,22 @@
-"""**The cross-route equivalence matrix — twenty-one canonical workflows, asserted identical per route.**
+"""**The cross-route equivalence matrix — twenty-five canonical workflows, asserted identical per route.**
 
 Read `tests/route_equivalence.py` first: it explains why this exists (the same analysis must not yield
 different numbers depending on how it was launched) and what a route / a documented gap is.
 
-The matrix grew from three to six workflows (increment A) and then to **twenty-one** (increment B added pure
-image filters — Gaussian, DoG, bilateral, LoG, FFT-bandpass, invert, rescale, gabor, upscale — and two torch-free segmenters (local-threshold, Felzenszwalb)),
-chosen for distinct data shapes and failure modes — not the 15 the audit imagined at once, because
-three-per-increment that genuinely run will grow and fifteen written at once are abandoned. Adding another is
-one `Workflow(...)` entry.
+The matrix grew from three to six workflows (increment A), then to twenty-one (increment B added pure image
+filters — Gaussian, DoG, bilateral, LoG, FFT-bandpass, invert, rescale, gabor, upscale — and two torch-free
+segmenters (local-threshold, Felzenszwalb)), and then to **twenty-five** with the mask/label family (binary
+opening / closing / morphology and watershed label-splitting — the first ops that CONSUME a mask or a label
+image rather than raw intensity). Each was chosen for a distinct data shape and failure mode — not the 15 the
+audit imagined at once, because three-per-increment that genuinely run will grow and fifteen written at once are
+abandoned. Adding another is one `Workflow(...)` entry.
 
 A fourth route, **`kernel`** (the Spec-6 execution kernel, `OperationService.execute`), joins headless / batch /
 session: a workflow whose op is migrated to the kernel adds a `kernel` route asserted identical to the rest, and
 one not yet migrated declares `kernel` a documented gap — so an unmigrated op is a VISIBLE gap, never a silent
-absence. Every workflow above has a `kernel` route (23 ops migrated across the matrix).
+absence. Every workflow above has a `kernel` route (27 ops migrated across the matrix). The mask/label rows also
+prove the kernel's input contract covers the mask/label data ROLE (input keyed `mask` / `labels`), not only the
+intensity role the filters exercise.
 
 | workflow | headless | batch replay | session reload |
 |---|---|---|---|
@@ -564,6 +568,87 @@ _bandpass_workflow = _filter_only_workflow(
     'FFT bandpass', 'bandpass', 8, 'Bandpass Filtered', _bandpass_call, {'low_cutoff': 2.0, 'high_cutoff': 20.0})
 
 
+# ── Workflows 22–25 — mask / label transforms (the first ops that CONSUME a mask / label, not raw intensity) ──
+# Same equivalence, different data ROLE: the kernel is fed a mask (or a label image) keyed as `mask` / `labels`,
+# proving OperationService handles the mask/label input role, not only the intensity role the filters exercised.
+
+def _synthetic_mask(seed):
+    """A deterministic binary mask — the bright 20% of a seeded synthetic puncta image."""
+    from tests.fixtures_synthetic import synthetic_puncta_image
+    image, _labels = synthetic_puncta_image(shape=(128, 128), n_puncta=20, seed=seed)
+    a = np.asarray(image)
+    return a > np.percentile(a, 80)
+
+
+def _synthetic_labels(seed):
+    """A deterministic label image — the seeded synthetic puncta ground-truth labels."""
+    from tests.fixtures_synthetic import synthetic_puncta_image
+    _image, labels = synthetic_puncta_image(shape=(128, 128), n_puncta=20, seed=seed)
+    return np.asarray(labels).astype(np.int32)
+
+
+def _mask_only_workflow(name, op_id, seed, layer, make_input, call, input_key, kernel_params):
+    """Build a route-equivalence workflow for a pure mask/label transform. Mirror of `_filter_only_workflow`, but
+    the input is a mask/label (built by `make_input(seed)`) and the kernel is fed it under `input_key`
+    (`mask` or `labels`) — the point of this family: the kernel's input contract covers the mask/label role."""
+    def build():
+        arr = make_input(seed)
+
+        def headless():
+            out = call(arr)
+            out = out[0] if isinstance(out, (tuple, list)) else out
+            return np.asarray(out).astype(np.float32)
+
+        def session():
+            return session_roundtrip_image(headless(), layer).astype(np.float32)
+
+        def kernel():
+            from pycat.kernel.operation_service import OperationService
+            out = OperationService.execute(op_id, {input_key: arr}, dict(kernel_params)).artifacts[0]
+            return np.asarray(out).astype(np.float32)
+
+        return Workflow(
+            name, routes={'headless': headless, 'session': session, 'kernel': kernel},
+            compare=compare_arrays(rtol=0.0, atol=0.0),
+            documented_gaps={'batch': f"a standalone {name} has no batch replay step — a mask/label transform run "
+                                      "interactively/kernel, not a recorded per-image batch step"})
+    return build
+
+
+def _binary_open_call(m):
+    from pycat.toolbox.masks.morphology import custom_binary_opening
+    return custom_binary_opening(m, iterations=1)
+
+
+def _binary_close_call(m):
+    from pycat.toolbox.masks.morphology import custom_binary_closing
+    return custom_binary_closing(m, iterations=1)
+
+
+def _binary_morph_call(m):
+    from pycat.toolbox.masks.morphology import binary_morph_operation
+    return binary_morph_operation(m, iterations=1, element_size=3, element_shape='Disk', mode='Opening')
+
+
+def _split_watershed_call(labels):
+    from pycat.toolbox.masks.morphology import split_touching_objects
+    return split_touching_objects(labels, sigma=3.5)
+
+
+_binary_open_workflow = _mask_only_workflow(
+    'binary opening', 'binary_open', 19, 'Opened Mask', _synthetic_mask, _binary_open_call, 'mask',
+    {'iterations': 1})
+_binary_close_workflow = _mask_only_workflow(
+    'binary closing', 'binary_close', 20, 'Closed Mask', _synthetic_mask, _binary_close_call, 'mask',
+    {'iterations': 1})
+_binary_morph_workflow = _mask_only_workflow(
+    'binary morphology', 'binary_morph', 21, 'Morph Mask', _synthetic_mask, _binary_morph_call, 'mask',
+    {'iterations': 1, 'element_size': 3, 'element_shape': 'Disk', 'mode': 'Opening'})
+_split_watershed_workflow = _mask_only_workflow(
+    'watershed label splitting', 'split_watershed', 22, 'Split Labels', _synthetic_labels, _split_watershed_call,
+    'labels', {'sigma': 3.5})
+
+
 # ── The matrix ──────────────────────────────────────────────────────────────────────────────────
 
 _WORKFLOW_BUILDERS = {
@@ -588,6 +673,10 @@ _WORKFLOW_BUILDERS = {
     'tone_map': _tone_map_workflow,          # increment B
     'local_contrast': _local_contrast_workflow,   # increment B
     'peak_edge': _peak_edge_workflow,        # increment B
+    'binary_open': _binary_open_workflow,    # mask/label family
+    'binary_close': _binary_close_workflow,  # mask/label family
+    'binary_morph': _binary_morph_workflow,  # mask/label family
+    'split_watershed': _split_watershed_workflow,   # mask/label family (consumes labels)
 }
 
 

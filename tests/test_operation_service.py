@@ -70,3 +70,25 @@ def test_migrated_ops_reports_the_kernel_coverage():
             "gaussian", "dog", "bilateral", "log", "bandpass", "local_threshold",
             "invert", "rescale", "gabor", "felzenszwalb", "upscale",
             "ridge", "tone_map", "local_contrast", "peak_edge"} <= migrated
+    # the mask/label family — the first ops that consume a mask/label input, not raw intensity
+    assert {"binary_open", "binary_close", "binary_morph", "split_watershed"} <= migrated
+
+
+def test_mask_label_kernels_consume_the_mask_role_and_produce_an_artifact():
+    """The mask/label family's contract: fed a mask (or a label image) under the `mask`/`labels` role, each
+    returns an array artifact of the same shape and no measurements — proving the kernel's input contract covers
+    the mask/label data role, not only the intensity role the filters exercise."""
+    import numpy as np
+    rng = np.random.default_rng(0)
+    mask = rng.random((64, 64)) > 0.6
+    for op_id, inputs in [("binary_open", {"mask": mask}), ("binary_close", {"mask": mask}),
+                          ("binary_morph", {"mask": mask})]:
+        res = OperationService.execute(op_id, inputs, {})
+        assert res.measurements is None and len(res.artifacts) == 1
+        assert np.asarray(res.artifacts[0]).shape == mask.shape
+
+    labels = np.zeros((64, 64), dtype=np.int32)
+    labels[10:25, 10:25] = 1
+    labels[30:50, 30:50] = 2
+    split = OperationService.execute("split_watershed", {"labels": labels}, {})
+    assert split.measurements is None and np.asarray(split.artifacts[0]).shape == labels.shape
