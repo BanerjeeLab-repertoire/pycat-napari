@@ -1,3 +1,23 @@
+## [1.6.442] - 2026-07-30
+### Added — **The execution kernel: OperationService.execute → AnalysisResult, first family migrated (Method-Widget Spec 6, proof).**
+The convergence the audit and the roadmap call for: ONE place an operation's science runs, below batch /
+Navigator / generated panels / manual panels / headless — so the same step cannot compute differently depending
+on how it was launched. `pycat.kernel.OperationService.execute(op_id, inputs, params)` runs a registered
+operation and returns a typed `AnalysisResult` (measurements for a measure op; the produced array in `artifacts`
+for a create/enhance op). An op with no kernel yet raises a clear error — it still runs through its batch/panel
+route until migrated; nothing is silently rerouted.
+
+Migrated **per operation family, behind route-equivalence** — not a big-bang refactor. This lands the FIRST
+family, background removal (rolling-ball), and extends the cross-route matrix: Workflow 1 in
+`test_route_equivalence.py` now has a fourth route, `kernel`, asserted **bit-for-bit identical** to
+`headless ≈ batch ≈ session` (the same `rb_gaussian_bg_removal_with_edge_enhancement` call on the same raw
+image). The kernel is a THIN wrapper over the existing toolbox science, not a reimplementation.
+
+Tests: `tests/test_operation_service.py` (`base`, 4) pins the kernel contract (typed `AnalysisResult`; same
+science as the direct toolbox call; an unmigrated op raises rather than reroutes; `migrated_ops` reports
+coverage); the route-equivalence row proves the science agrees across all four routes. This is a proof-of-concept
+first family — subsequent families each register a kernel and close their own `≈ kernel` row. Full gate green.
+
 ## [1.6.441] - 2026-07-30
 ### Added — **The planner explains its DEPENDENCY choice too: "why this segmenter, not the others" (Method-Widget Spec 5 core, extended).**
 Extends the terminal explainer (1.6.440) to the dependency layer. `Planner.explain_provider_choice(goal, ctx)`

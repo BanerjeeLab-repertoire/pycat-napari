@@ -1,0 +1,47 @@
+"""**The execution kernel (Method-Widget Spec 6): OperationService.execute -> AnalysisResult.**
+
+`OperationService` is the one place an operation's science runs, below batch / Navigator / panels / headless.
+This pins its contract; the cross-route agreement (`kernel` computes bit-for-bit like manual/batch/session) is
+proven in `test_route_equivalence.py`'s Workflow 1, the row the first migrated family closes.
+"""
+import numpy as np
+import pytest
+
+from pycat.kernel.operation_service import OperationService
+from pycat.utils.result_models import AnalysisResult
+from pycat.utils.errors import ScientificAssumptionError
+
+pytestmark = pytest.mark.base
+
+
+def test_execute_returns_a_typed_AnalysisResult_for_a_migrated_op():
+    raw = np.random.default_rng(0).uniform(0, 1000, (48, 48)).astype(np.float64)
+    result = OperationService.execute("rolling_ball", {"image": raw}, {"ball_radius": 25})
+    assert isinstance(result, AnalysisResult)
+    assert result.operation_id == "rolling_ball" and result.entity_type == "image"
+    # an enhance op: no measurement table, the produced image is the artifact
+    assert result.measurements is None
+    assert len(result.artifacts) == 1 and np.asarray(result.artifacts[0]).shape == raw.shape
+
+
+def test_execute_runs_the_same_science_as_the_toolbox_call():
+    """The kernel is a THIN wrapper over the toolbox science — not a reimplementation — so its output equals a
+    direct call, bit for bit. (Route-equivalence proves the batch/session routes agree too.)"""
+    from pycat.toolbox.image_processing_tools import rb_gaussian_bg_removal_with_edge_enhancement
+    raw = np.random.default_rng(1).uniform(0, 1000, (40, 40)).astype(np.float64)
+    kernel_out = np.asarray(OperationService.execute("rolling_ball", {"image": raw},
+                                                     {"ball_radius": 20}).artifacts[0])
+    direct = np.asarray(rb_gaussian_bg_removal_with_edge_enhancement(raw, 20))
+    np.testing.assert_array_equal(kernel_out, direct)
+
+
+def test_an_unmigrated_op_raises_a_clear_error_never_silently_reroutes():
+    assert OperationService.has_kernel("rolling_ball") is True
+    assert OperationService.has_kernel("cellpose") is False          # not migrated yet
+    with pytest.raises(ScientificAssumptionError, match="No execution kernel registered"):
+        OperationService.execute("cellpose", {"image": np.zeros((8, 8))}, {})
+
+
+def test_migrated_ops_reports_the_kernel_coverage():
+    migrated = OperationService.migrated_ops()
+    assert "rolling_ball" in migrated                                # the first migrated family

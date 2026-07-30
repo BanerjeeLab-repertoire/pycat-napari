@@ -323,6 +323,13 @@ but the reasoning and the runner-up.
 **Depends on:** Spec 3 (content), Spec 4 (pop-out surface).
 
 ### Spec 6 — Converge on one execution kernel *(your batch point)*
+> **STATUS (1.6.442): STARTED — first family migrated, proof shipped, stopping for review.**
+> `pycat.kernel.OperationService.execute(op_id, inputs, params) -> AnalysisResult` is the kernel; the first
+> family, background removal (rolling-ball), is migrated and its route-equivalence row extended with a `kernel`
+> route asserted bit-identical to `headless ≈ batch ≈ session` (Workflow 1). An unmigrated op raises rather than
+> reroutes. `tests/test_operation_service.py` pins the contract. Next families each register a kernel and close
+> their own `≈ kernel` row (cellpose segmentation, cell_analysis, …), one per increment — reviewing this proof
+> before continuing the migration.
 I agree with the audit here and so do you. `OperationService.execute(...) → AnalysisResult`, sitting
 **below** batch, Navigator, generated panels, manual panels, and headless. Batch handlers keep
 workflow/persistence concerns (paths, output dirs, naming) and stop being the de facto scientific API.

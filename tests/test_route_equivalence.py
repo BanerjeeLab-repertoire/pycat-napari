@@ -114,10 +114,17 @@ def _rolling_ball_workflow():
         result = rb_gaussian_bg_removal_with_edge_enhancement(raw, _BALL_RADIUS).astype(np.float32)
         return session_roundtrip_image(result, 'Enhanced Background Removed').astype(np.float32)
 
+    def kernel():
+        # The Spec-6 execution kernel: OperationService.execute runs the SAME science as the routes above, so a
+        # migrated family closes its route-equivalence row. Background removal is the first migrated family.
+        from pycat.kernel.operation_service import OperationService
+        result = OperationService.execute('rolling_ball', {'image': raw}, {'ball_radius': _BALL_RADIUS})
+        return np.asarray(result.artifacts[0]).astype(np.float32)
+
     return Workflow(
         'rolling-ball background removal',
-        routes={'headless': headless, 'batch': batch, 'session': session},
-        # Exact: all three are the same deterministic float32 operation on the same raw input.
+        routes={'headless': headless, 'batch': batch, 'session': session, 'kernel': kernel},
+        # Exact: all four are the same deterministic float32 operation on the same raw input.
         compare=compare_arrays(rtol=0.0, atol=0.0))
 
 
