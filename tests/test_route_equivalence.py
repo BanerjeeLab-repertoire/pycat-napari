@@ -1,11 +1,12 @@
-"""**The cross-route equivalence matrix — six canonical workflows, asserted identical per route.**
+"""**The cross-route equivalence matrix — eight canonical workflows, asserted identical per route.**
 
 Read `tests/route_equivalence.py` first: it explains why this exists (the same analysis must not yield
 different numbers depending on how it was launched) and what a route / a documented gap is.
 
-The matrix grew from three to **six** workflows (increment A), chosen for distinct data shapes and failure
-modes — not the 15 the audit imagined at once, because three-per-increment that genuinely run will grow and
-fifteen written at once are abandoned. Adding another is one `Workflow(...)` entry.
+The matrix grew from three to six workflows (increment A) and then to **eight** (increment B added the pure
+image filters — Gaussian smoothing, DoG), chosen for distinct data shapes and failure modes — not the 15 the
+audit imagined at once, because three-per-increment that genuinely run will grow and fifteen written at once are
+abandoned. Adding another is one `Workflow(...)` entry.
 
 A fourth route, **`kernel`** (the Spec-6 execution kernel, `OperationService.execute`), joins headless / batch /
 session: a workflow whose op is migrated to the kernel adds a `kernel` route asserted identical to the rest, and
@@ -20,6 +21,8 @@ absence. Migrated so far: rolling-ball, MSD, clean-detect, cellpose.
 | **cellpose segmentation** (most parameter surface) | ✓ | ✓ | ✓ |
 | **colocalization** (two-channel; channel-assignment risk) | ✓ | gap: no coloc step | ✓ |
 | **time-series condensate partition** (per-frame stack) | ✓ | gap: not a per-image step | ✓ |
+| **gaussian smoothing** (increment B — a pure filter) | ✓ | gap: no batch step | ✓ |
+| **DoG blob enhancement** (increment B — a pure filter) | ✓ | gap: no batch step | ✓ |
 
 The batch **gaps are declared, not skipped silently** — and the harness fails if a gap closes or a route
 vanishes without the table being updated. They mark where the headless batch API stops: colocalization has
@@ -371,6 +374,64 @@ def _timeseries_condensate_workflow():
                      "VPT/MSD skip-stub gap"})
 
 
+# ── Workflow 7 — Gaussian smoothing (headless ≈ session ≈ kernel; batch is a gap) ────────────────
+# Increment B: a pure deterministic array→array filter, the simplest new op family for the kernel. A standalone
+# smoothing filter has no batch replay step (it is an interactive/kernel operation, not a recorded per-image
+# batch step), so batch is a documented gap.
+
+_GAUSSIAN_SIGMA = 2.0
+
+
+def _gaussian_workflow():
+    from pycat.toolbox.image_processing.filters import gaussian_smooth_2d
+
+    raw = _synthetic_image(seed=3).astype(np.float64)
+
+    def headless():
+        return gaussian_smooth_2d(raw, _GAUSSIAN_SIGMA).astype(np.float32)
+
+    def session():
+        return session_roundtrip_image(headless(), 'Gaussian Smoothed').astype(np.float32)
+
+    def kernel():
+        from pycat.kernel.operation_service import OperationService
+        out = OperationService.execute('gaussian', {'image': raw}, {'sigma': _GAUSSIAN_SIGMA}).artifacts[0]
+        return np.asarray(out).astype(np.float32)
+
+    return Workflow(
+        'gaussian smoothing',
+        routes={'headless': headless, 'session': session, 'kernel': kernel},
+        compare=compare_arrays(rtol=0.0, atol=0.0),
+        documented_gaps={'batch': "a standalone Gaussian smoothing filter has no batch replay step — it is an "
+                                  "interactive/kernel operation, not a recorded per-image batch step"})
+
+
+# ── Workflow 8 — Difference-of-Gaussians blob enhancement (headless ≈ session ≈ kernel; batch is a gap) ──
+
+def _dog_workflow():
+    from pycat.toolbox.image_processing.filters import dog_blob_enhance_2d
+
+    raw = _synthetic_image(seed=4).astype(np.float64)
+
+    def headless():
+        return dog_blob_enhance_2d(raw, sigma_lo=2.0, sigma_hi=3.2).astype(np.float32)
+
+    def session():
+        return session_roundtrip_image(headless(), 'DoG Enhanced').astype(np.float32)
+
+    def kernel():
+        from pycat.kernel.operation_service import OperationService
+        out = OperationService.execute('dog', {'image': raw}, {'sigma_lo': 2.0, 'sigma_hi': 3.2}).artifacts[0]
+        return np.asarray(out).astype(np.float32)
+
+    return Workflow(
+        'DoG blob enhancement',
+        routes={'headless': headless, 'session': session, 'kernel': kernel},
+        compare=compare_arrays(rtol=0.0, atol=0.0),
+        documented_gaps={'batch': "a standalone DoG enhancement filter has no batch replay step — an "
+                                  "interactive/kernel operation, not a recorded per-image batch step"})
+
+
 # ── The matrix ──────────────────────────────────────────────────────────────────────────────────
 
 _WORKFLOW_BUILDERS = {
@@ -380,6 +441,8 @@ _WORKFLOW_BUILDERS = {
     'cellpose': _cellpose_workflow,
     'colocalization': _coloc_workflow,
     'time_series_condensate': _timeseries_condensate_workflow,
+    'gaussian': _gaussian_workflow,          # increment B
+    'dog': _dog_workflow,                    # increment B
 }
 
 

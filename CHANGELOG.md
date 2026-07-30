@@ -1,3 +1,17 @@
+## [1.6.447] - 2026-07-30
+### Added — **Execution kernel, increment B: image-filter families (Gaussian, DoG) migrated with NEW route-equivalence workflows (Method-Widget Spec 6).**
+Increment A migrated the kernel across the existing route-equivalence matrix; increment B extends the matrix
+itself. Two pure image-filter op families — `gaussian` (Gaussian smoothing) and `dog` (difference-of-Gaussians
+blob enhancement) — each get a NEW route-equivalence workflow (Workflows 7 & 8) proving
+`headless ≈ session ≈ kernel` bit-for-bit on a deterministic array→array filter, plus their kernel registrations.
+Both are enhance ops (the filtered image is the `artifacts` payload); batch is a documented gap for each (a
+standalone filter has no batch replay step — it is an interactive/kernel operation, not a recorded per-image
+step).
+
+The matrix is now **eight workflows**. Migrated ops: `rolling_ball`, `condensate_physics.compute_msd`, `clean`,
+`cellpose`, `client_enrichment`, the three coloc coefficients, plus `gaussian` and `dog`. Each new op family is
+one `Workflow(...)` entry + one kernel — the pattern the spec prescribes for growing coverage. Full gate green.
+
 ## [1.6.446] - 2026-07-30
 ### Added — **Execution kernel, families 5 & 6: partition enrichment + colocalization — every canonical workflow now proves ≈ kernel (Method-Widget Spec 6).**
 Closes the last two `kernel` gaps in the route-equivalence matrix, so all six canonical workflows now assert the

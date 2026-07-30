@@ -178,3 +178,27 @@ def _kernel_pearson_coloc(inputs: dict, params: dict) -> AnalysisResult:
 register_kernel("coloc.manders_m1", _kernel_manders_m1)
 register_kernel("coloc.manders_m2", _kernel_manders_m2)
 register_kernel("colocalization", _kernel_pearson_coloc)
+
+
+# ── Increment B — image filters (pure array→array enhance ops). Deterministic; each proven by its own new ──
+# route-equivalence workflow. ────────────────────────────────────────────────────────────────────────────────
+
+def _kernel_gaussian(inputs: dict, params: dict) -> AnalysisResult:
+    """Gaussian smoothing — the SAME `gaussian_smooth_2d` call the manual/session routes make. Enhance op: the
+    smoothed image is the artifact."""
+    from pycat.toolbox.image_processing.filters import gaussian_smooth_2d
+    out = gaussian_smooth_2d(inputs["image"], params["sigma"])
+    return AnalysisResult(operation_id="gaussian", entity_type="image", measurements=None, artifacts=(out,))
+
+
+def _kernel_dog(inputs: dict, params: dict) -> AnalysisResult:
+    """Difference-of-Gaussians blob enhancement — the SAME `dog_blob_enhance_2d` call. Enhance op: the enhanced
+    image is the artifact."""
+    from pycat.toolbox.image_processing.filters import dog_blob_enhance_2d
+    out = dog_blob_enhance_2d(inputs["image"],
+                              sigma_lo=params.get("sigma_lo", 2.0), sigma_hi=params.get("sigma_hi", 3.2))
+    return AnalysisResult(operation_id="dog", entity_type="image", measurements=None, artifacts=(out,))
+
+
+register_kernel("gaussian", _kernel_gaussian)
+register_kernel("dog", _kernel_dog)
