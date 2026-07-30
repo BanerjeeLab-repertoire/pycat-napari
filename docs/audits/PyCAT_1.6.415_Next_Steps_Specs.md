@@ -396,9 +396,13 @@ deciding whether it needs a fix — don't fix blind. In priority order:
    over the bbox, so its boundary ring is contaminated too — GLCM is the clear case. The pre-existing
    `test_glcm_features_with_mask` missed it (rectangular mask → bbox == mask). Encoded in
    `tests/test_feature_analysis.py`: a characterization pinning the contamination + a strict-`xfail` FAILING
-   GOLDEN-MASTER asserting ≈0 contrast for a uniform object. FIX (deferred to its own change — it alters every
-   GLCM value and must match skimage's offset convention in the all-True-mask limit): restrict the co-occurrence
-   to both-in-mask pixel pairs.
+   GOLDEN-MASTER asserting ≈0 contrast for a uniform object. **FIX SHIPPED (1.6.435).** `_masked_graycomatrix`
+   restricts the co-occurrence to object–object pixel pairs (vectorised bincount per distance/angle); it is
+   byte-identical to skimage's `graycomatrix(symmetric, normed)` when the mask is the whole bbox (guarded), so
+   every existing GLCM number (no ROI / rectangular ROI) is preserved and only non-rectangular objects change —
+   correctly. A uniform object now gives contrast 0.0 (was ~11919). The golden-master flipped from strict-`xfail`
+   to passing; a skimage-equivalence regression guard was added. (LBP's milder boundary contamination is
+   documented but left as-is — no failing golden-master was written for it.)
 4. **Size-distribution detection-limit truncation** — check the MLE size distribution handles the
    left-truncation at the detection limit. **VERIFIED — it does NOT (test-only golden-master; fix deferred).**
    `fit_size_distribution_mle`'s whole-sample fits (lognormal via closed-form log-moments; gamma/weibull/

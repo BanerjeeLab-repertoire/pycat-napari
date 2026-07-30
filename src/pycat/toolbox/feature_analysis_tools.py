@@ -47,6 +47,41 @@ from pycat.toolbox.image_processing_tools import apply_rescale_intensity
 
 # Image feature functions 
 
+def _masked_graycomatrix(image_8bit, mask, distances, angles, levels=256):
+    """A gray-level co-occurrence matrix restricted to pairs where BOTH pixels are inside ``mask`` (N6-3 fix).
+
+    ``skimage.feature.graycomatrix`` has no mask parameter, so texture used to be computed over the ROI BOUNDING
+    BOX — pulling background pixels and the object/background edge into the matrix, so a uniform object reported a
+    large contrast that was entirely edge. This counts only object–object co-occurrences. It is byte-identical to
+    ``graycomatrix(..., symmetric=True, normed=True)`` when ``mask`` is all-True (pinned in the tests), so the
+    un-masked path is unchanged and only non-rectangular objects change — correctly. Vectorised (one ``bincount``
+    per distance/angle), so it stays fast on real objects."""
+    H, W = image_8bit.shape
+    img = image_8bit.astype(np.int64)
+    glcm = np.zeros((levels, levels, len(distances), len(angles)), dtype=np.float64)
+    for di, d in enumerate(distances):
+        for ai, theta in enumerate(angles):
+            dr = int(round(np.sin(theta) * d))
+            dc = int(round(np.cos(theta) * d))
+            # Reference region where both the pixel and its (dr, dc) partner stay in bounds. An offset larger
+            # than the crop leaves an empty region → 0 counts (exactly what skimage does at the border).
+            r_lo, r_hi = max(0, -dr), min(H, H - dr)
+            c_lo, c_hi = max(0, -dc), min(W, W - dc)
+            if r_hi <= r_lo or c_hi <= c_lo:
+                continue
+            ref = (slice(r_lo, r_hi), slice(c_lo, c_hi))
+            par = (slice(r_lo + dr, r_hi + dr), slice(c_lo + dc, c_hi + dc))
+            pair = mask[ref] & mask[par]                           # both pixels inside the object
+            a, b = img[ref][pair], img[par][pair]
+            if a.size:
+                counts = np.bincount(a * levels + b, minlength=levels * levels).reshape(levels, levels)
+                glcm[:, :, di, ai] = counts
+    glcm = glcm + glcm.transpose(1, 0, 2, 3)                        # symmetric, like skimage
+    totals = glcm.sum(axis=(0, 1), keepdims=True)
+    totals[totals == 0] = 1
+    return glcm / totals                                           # normed, like skimage
+
+
 def calculate_glcm_features(image, object_size, roi_mask=None, min_object_size=3):
     """
     Calculates Gray Level Co-occurrence Matrix (GLCM) features for an image using specified object size parameters
@@ -87,16 +122,17 @@ def calculate_glcm_features(image, object_size, roi_mask=None, min_object_size=3
     scaled_img = apply_rescale_intensity(img)
     image_8bit = dtype_conversion_func(scaled_img, output_bit_depth='uint8')
 
-    # Apply the mask to the image
-    masked_image = crop_bounding_box(image_8bit, roi_mask)[0]
+    # Crop to the ROI bounding box, keeping the mask so the co-occurrence can be restricted to the OBJECT (N6-3).
+    cropped_image, cropped_mask, _ = crop_bounding_box(image_8bit, roi_mask)
 
     # Setup distances and angles for GLCM calculations
     max_object_size = 2 * object_size + 1
     distances = np.arange(min_object_size, max_object_size + 1)
     angles = np.array([0, np.pi/8, np.pi/4, 3*np.pi/8, np.pi/2, 5*np.pi/8, 3*np.pi/4, 7*np.pi/8])
 
-    # Compute GLCM and its properties
-    glcm = sk.feature.graycomatrix(masked_image, distances, angles, symmetric=True, normed=True)
+    # Compute GLCM over OBJECT–OBJECT pixel pairs only (not the bounding box, whose background + object/background
+    # edge otherwise contaminate the texture — a uniform object used to report a large, spurious contrast).
+    glcm = _masked_graycomatrix(cropped_image, cropped_mask, distances, angles)
     properties = ['contrast', 'dissimilarity', 'homogeneity', 'ASM', 'energy', 'correlation']
     features_values = {prop: sk.feature.graycoprops(glcm, prop).mean(axis=(0, 1)) for prop in properties}
 

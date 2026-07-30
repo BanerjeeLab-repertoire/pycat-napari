@@ -1,3 +1,21 @@
+## [1.6.435] - 2026-07-29
+### Fixed — **GLCM texture is computed over the object mask, not the ROI bounding box (N6-3 fix).**
+N6-3 confirmed `calculate_glcm_features` ran `graycomatrix` over the ROI *bounding box* with no mask restriction,
+so background pixels and the object/background edge entered the co-occurrence matrix — a uniform object (true
+texture 0) reported contrast ≈ 11919, entirely edge. The fix adds `_masked_graycomatrix`, which counts only
+object–object pixel pairs (the co-occurrence offset per distance/angle, restricted to pairs where BOTH pixels are
+inside the mask; symmetric + normed like skimage; vectorised with a bincount per distance/angle so it stays fast
+on real objects). A uniform object now gives contrast **0.0**.
+
+Crucially it is **byte-identical to `skimage.feature.graycomatrix(symmetric, normed)` when the mask is the whole
+bounding box** — so every existing GLCM number (no ROI, or a rectangular ROI) is preserved; only non-rectangular
+objects change, which is exactly the contaminated case. That equivalence is pinned by a new regression guard, and
+the pre-existing `test_glcm_features_basic`/`test_glcm_features_with_mask` stay green. The N6-3 strict-`xfail`
+golden-master is promoted to passing. (LBP's milder boundary contamination — codes computed over the bbox, then
+histogrammed within the mask — is documented but left as-is; no failing golden-master was written for it.)
+
+Full gate green.
+
 ## [1.6.434] - 2026-07-29
 ### Added — **Navigator → generated method panel: the Qt panel + dock action (Method-Widget Spec 1.2/1.3/1.4).**
 The "Build method" outcome the navigator was missing: an actual dockable PyCAT analysis panel, generated from the
