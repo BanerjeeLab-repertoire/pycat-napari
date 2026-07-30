@@ -251,6 +251,13 @@ the existing harness as `manual ≈ generated`.
 Each is written thoroughly when you green-light it. Scoped here so the order is deliberate.
 
 ### Spec 2 — Persist the generated method; Custom Methods in the analysis tree
+> **STATUS (1.6.437): persistence core SHIPPED.** `GuidedTemplate` already stored the answers + step/section list
+> + reviewed parameters; this added the two Spec-2 pieces on top, headlessly verified: `schema_version`
+> (`_SCHEMA_VERSION = 1`, written into every entry, backward-compatible read of pre-versioning saves) and
+> `duplicate_template` (keep-the-original copy, refuses overwrite/missing/blank) — completing the Custom Methods
+> CRUD (delete/rename existed). **STILL OPEN: the Custom Methods submenu** — a dynamically-populated
+> `menu_manager` submenu that lists saved methods and rebuilds each into a `GeneratedMethodUI`. That is GUI-bound
+> and needs the central_manager→context recompile path wired; it is the next step.
 The saved artifact: plan + intent/answers + reviewed parameters + section list + `schema_version`.
 Extends the existing `GuidedTemplate` machinery (`navigator/templates.py` already has
 `save_template` / `list_templates` / `load_template`) rather than inventing a second store. Adds a

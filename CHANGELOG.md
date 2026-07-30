@@ -1,3 +1,24 @@
+## [1.6.437] - 2026-07-29
+### Added — **Generated-method persistence: schema versioning + duplicate (Method-Widget Spec 2 core).**
+Spec 2 persists a generated method so it survives sessions and reappears as a Custom Method. The store already
+existed (`navigator/templates.py` — `GuidedTemplate` saves the answers, the section/step list, and the reviewed
+parameters via `save_template`/`load_template`/`list_templates`/`delete_template`/`rename_template`); this adds
+the two pieces Spec 2 requires on top of it, both headlessly verified:
+
+- **Schema versioning** — `GuidedTemplate` now carries `schema_version` (current `_SCHEMA_VERSION = 1`), written
+  into every serialized entry, so a future field change can migrate old saves rather than silently mis-read them.
+  Backward-compatible: an entry written before versioning (no key) reads as the current schema (the fields are
+  unchanged — only the marker was added), not as corrupt.
+- **Duplicate** — `duplicate_template(name, new_name)` copies a saved method while KEEPING the original (unlike
+  rename), refusing to overwrite an existing name, copy a missing source, or take a blank name — completing the
+  Custom Methods CRUD set (delete/rename already existed).
+
+Tests (`tests/navigator/test_navigator_templates.py`, `base`, +4): schema_version round-trips; a pre-versioning
+entry still loads; duplicate keeps the original and makes an independent copy carrying the same answers +
+parameters; and duplicate refuses to overwrite / copy-nothing / take a blank name. The **Custom Methods submenu**
+(the GUI layer — a dynamically-populated `menu_manager` submenu that rebuilds a saved method into a generated
+panel) builds on this and is the next, GUI-bound step. Full gate green.
+
 ## [1.6.436] - 2026-07-29
 ### Added — **SpIDA flags the low-density regime where the histogram truncation biases N (N6-1 guardrail).**
 N6-1 confirmed `build_intensity_histogram` drops every pixel at/below the noise floor (`p = p[p > 0]`), which at
