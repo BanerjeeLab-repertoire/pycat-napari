@@ -140,13 +140,28 @@ def test_spida_low_density_bias_tracks_the_dropped_zero_fraction():
 
 
 @pytest.mark.base
-@pytest.mark.xfail(reason="N6-1 fix spec: build_intensity_histogram's `p = p[p > 0]` truncates the k=0 population "
-                          "and biases low-density N (~+56% at N=2). Keeping the low tail recovers it on noisy "
-                          "synthetics (D≈truth). Remove this xfail when the truncation is fixed.", strict=True)
+def test_spida_flags_the_low_density_regime_where_truncation_biases_it():
+    """N6-1 GUARDRAIL (shipped): fit_spida_histogram flags the low-density regime so a biased low-N result is
+    reported LOWER-CONFIDENCE, not silently trusted. The fit itself is unchanged — this is an honesty flag, not a
+    correction, because a naive correction was verified to over-shoot (see the golden-master below)."""
+    spida = pytest.importorskip("pycat.toolbox.spida_tools")
+    low = spida.fit_spida_histogram(*spida.build_intensity_histogram(_spida_pixels(n_true=2.0), n_bins=256))
+    high = spida.fit_spida_histogram(*spida.build_intensity_histogram(_spida_pixels(n_true=8.0), n_bins=256))
+    assert low["low_density_regime"] is True        # fitted N ~3, truncation biases it -> flagged
+    assert high["low_density_regime"] is False       # fitted N ~8, negligible truncation -> not flagged
+
+
+@pytest.mark.base
+@pytest.mark.xfail(reason="N6-1 fix spec (recovery, still open): build_intensity_histogram's `p = p[p > 0]` "
+                          "truncates the k=0 population and biases low-density N (~+56% at N=2). VERIFIED that the "
+                          "naive fix (keep the zeros) OVER-corrects to ~0.6 under the doubly-Poisson model, so a "
+                          "clean recovery needs a truncation-aware histogram model, not a data cut. Until then the "
+                          "regime is FLAGGED (test above), not silently trusted. Remove this xfail when a "
+                          "truncation-aware fit recovers N.", strict=True)
 def test_spida_recovers_low_density_N_once_the_truncation_is_fixed():
-    """FAILING GOLDEN-MASTER: at a true density of 2, SpIDA should recover N ≈ 2. It currently returns ~3.1
-    (+56%) because the zero-molecule pixels are truncated before the fit. This is the acceptance test the fix
-    must satisfy — it flips from xfail to pass the moment the low tail is retained."""
+    """FAILING GOLDEN-MASTER (recovery): at a true density of 2, SpIDA should recover N ≈ 2. It currently returns
+    ~3.1 (+56%) because the zero-molecule pixels are truncated before the fit. This is the acceptance test a
+    truncation-aware fix must satisfy — it flips from xfail to pass once the low-density estimate is unbiased."""
     spida = pytest.importorskip("pycat.toolbox.spida_tools")
     x, y = spida.build_intensity_histogram(_spida_pixels(n_true=2.0), n_bins=256)
     fit = spida.fit_spida_histogram(x, y)

@@ -378,6 +378,14 @@ deciding whether it needs a fix — don't fix blind. In priority order:
    for the fix. FIX DIRECTION (evidence-backed, deferred to its own real-data-validated change — changing a core
    fit's histogram for all users must not be done blind): keep the low tail instead of `p[p>0]` — on noisy
    synthetics that recovers low-N D≈truth and leaves the high-N regime bit-identical.
+   **UPDATE (1.6.436): GUARDRAIL SHIPPED; recovery still deferred (correctly).** Attempting the naive fix under
+   the repo's doubly-Poisson model REFUTED it: keeping the zeros over-corrects a true N=2 to ~0.6 (worse, opposite
+   direction) — so no simple data cut recovers truth; a truncation-aware histogram model is needed (and MATLAB-ref
+   validation). Rather than ship a wrong "fix", `fit_spida_histogram` now returns `low_density_regime`
+   (fitted N < `_SPIDA_LOW_DENSITY_N` = 4) and `run_spida_analysis` prints a LOW-DENSITY note, so a biased low-N
+   result is reported lower-confidence instead of silently trusted — the anti-black-box move. The recovery
+   golden-master stays strict-`xfail` (its reason now records the refuted naive fix); a new test pins that the
+   flag fires at N=2 and not at N=8. The fit math is unchanged (high-N byte-identical).
 2. **Partition-coefficient clipping** — check whether `partition_coefficient_field` clips or floors in a
    way that distorts K_p at low dilute-phase intensity. **VERIFIED — recovers truth; CLOSED with a guard
    (test-only).** For a well-posed (uniform) dilute phase, Kp = dense/bulk is recovered EXACTLY across the whole

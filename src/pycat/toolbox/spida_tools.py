@@ -67,6 +67,11 @@ except Exception:  # pragma: no cover
 _THRESMIN = 6.0
 _THRESMAX = 7.0
 
+# N6-1: below this fitted density the histogram low-intensity truncation biases SpIDA appreciably (verified: the
+# bias tracks the fraction of zero-molecule pixels dropped, ~negligible by N=5 and severe by N=2). Results below
+# it are flagged low-confidence by `fit_spida_histogram`.
+_SPIDA_LOW_DENSITY_N = 4.0
+
 
 def _poisson_curve(amp, mea, div, x):
     """Port of ``poisson.m``: exp(-mea) * mea^(x/div) / Gamma(x/div + 1),
@@ -401,13 +406,21 @@ def fit_spida_histogram(x, y):
     ss_res = np.sum((y - y_fit_aligned) ** 2)
     ss_tot = np.sum((y - np.mean(y)) ** 2)
     r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
+    N = popt[1]
     return {
         'success': True,
         'amp': popt[0] * amp,
-        'N': popt[1],
+        'N': N,
         'epsilon': popt[2],
         'y_fit': y_fit,
         'r_squared': r2,
+        # N6-1 guardrail: below this density the histogram's low-intensity truncation
+        # (build_intensity_histogram drops every pixel at/below the noise floor) biases the fit — a large
+        # fraction of pixels see ZERO molecules (P(k=0)=e^-N), and removing them inflates N and deflates the
+        # spread. Verified: at a true N=2 the fit reads ~3.1 (+56%), and a naive "keep the zeros" change over-
+        # corrects to ~0.6, so this is flagged, NOT silently corrected — a proper fix needs a truncation-aware
+        # histogram model (see the N6-1 spec). The flag lets callers report a low-density N as lower-confidence.
+        'low_density_regime': bool(N < _SPIDA_LOW_DENSITY_N),
     }
 
 
@@ -500,6 +513,10 @@ def run_spida_analysis(image_layer, roi_shapes_layer, n_bins, white_noise,
     if r2 < 0.9:
         lines.append("NOTE: R^2 is low — the single-population model may not fit "
                      "this ROI well (mixed oligomers or heterogeneity).")
+    if res.get('low_density_regime'):
+        lines.append(f"NOTE: LOW DENSITY (N = {N:.1f}). Below ~{_SPIDA_LOW_DENSITY_N:.0f} particles/beam the "
+                     "histogram's low-intensity truncation biases the fit (it drops the many zero-molecule "
+                     "pixels), so this N is a LOWER-CONFIDENCE estimate — likely an over-estimate.")
     if modality_issues:
         lines.append("NOTE: modality warnings were raised above — if this is not "
                      "confocal/optically-sectioned data, the numbers are not "

@@ -1,3 +1,19 @@
+## [1.6.436] - 2026-07-29
+### Added — **SpIDA flags the low-density regime where the histogram truncation biases N (N6-1 guardrail).**
+N6-1 confirmed `build_intensity_histogram` drops every pixel at/below the noise floor (`p = p[p > 0]`), which at
+low density removes the many zero-molecule pixels and inflates the fitted N (~+56% at a true N=2). Attempting the
+naive fix REFUTED it: under the repo's doubly-Poisson model, keeping the zeros over-corrects a true N=2 to ~0.6 —
+worse, in the opposite direction — so no simple data cut recovers truth; a truncation-aware histogram model is
+needed. Rather than ship a wrong "fix", this adds the honest guardrail: `fit_spida_histogram` now returns
+`low_density_regime` (true when the fitted N is below `_SPIDA_LOW_DENSITY_N` = 4, where the truncation bias is
+appreciable), and `run_spida_analysis` prints a LOW-DENSITY note flagging the N as a lower-confidence, likely
+over-estimated value. The fit math is UNCHANGED — high-density results are byte-identical; this only stops a
+biased low-density N from being reported as if trustworthy (the anti-black-box move).
+
+Tests (`tests/test_group_a_moments.py`): a new test pins that the flag fires at N=2 and not at N=8; the mechanism
+characterization stays green; the recovery golden-master stays a strict-`xfail`, its reason now recording that the
+naive fix was verified to over-shoot (so a proper truncation-aware fit is still the open spec). Full gate green.
+
 ## [1.6.435] - 2026-07-29
 ### Fixed — **GLCM texture is computed over the object mask, not the ROI bounding box (N6-3 fix).**
 N6-3 confirmed `calculate_glcm_features` ran `graycomatrix` over the ROI *bounding box* with no mask restriction,
