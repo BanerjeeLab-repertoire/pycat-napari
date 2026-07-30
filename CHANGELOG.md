@@ -1,3 +1,14 @@
+## [1.6.448] - 2026-07-30
+### Added — **Execution kernel, increment B (cont.): three more filter families — bilateral, LoG, FFT-bandpass (Method-Widget Spec 6).**
+Continues increment B with three more pure array→array filter op families: `bilateral` (edge-preserving),
+`log` (Laplacian-of-Gaussian), and `bandpass` (FFT bandpass). Each gets a route-equivalence workflow proving
+`headless ≈ session ≈ kernel` bit-for-bit and a kernel registration; the near-identical filter rows are built by
+a small `_filter_only_workflow` factory to keep the fixtures DRY. Batch is a documented gap for each (a standalone
+filter is not a recorded per-image batch step).
+
+The route-equivalence matrix is now **eleven workflows**; the kernel covers **13 ops** — the six increment-A
+families plus five image filters (`gaussian`, `dog`, `bilateral`, `log`, `bandpass`). Full gate green.
+
 ## [1.6.447] - 2026-07-30
 ### Added — **Execution kernel, increment B: image-filter families (Gaussian, DoG) migrated with NEW route-equivalence workflows (Method-Widget Spec 6).**
 Increment A migrated the kernel across the existing route-equivalence matrix; increment B extends the matrix

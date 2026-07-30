@@ -1,10 +1,10 @@
-"""**The cross-route equivalence matrix — eight canonical workflows, asserted identical per route.**
+"""**The cross-route equivalence matrix — eleven canonical workflows, asserted identical per route.**
 
 Read `tests/route_equivalence.py` first: it explains why this exists (the same analysis must not yield
 different numbers depending on how it was launched) and what a route / a documented gap is.
 
-The matrix grew from three to six workflows (increment A) and then to **eight** (increment B added the pure
-image filters — Gaussian smoothing, DoG), chosen for distinct data shapes and failure modes — not the 15 the
+The matrix grew from three to six workflows (increment A) and then to **eleven** (increment B added the pure
+image filters — Gaussian, DoG, bilateral, LoG, FFT-bandpass), chosen for distinct data shapes and failure modes — not the 15 the
 audit imagined at once, because three-per-increment that genuinely run will grow and fifteen written at once are
 abandoned. Adding another is one `Workflow(...)` entry.
 
@@ -23,6 +23,7 @@ absence. Migrated so far: rolling-ball, MSD, clean-detect, cellpose.
 | **time-series condensate partition** (per-frame stack) | ✓ | gap: not a per-image step | ✓ |
 | **gaussian smoothing** (increment B — a pure filter) | ✓ | gap: no batch step | ✓ |
 | **DoG blob enhancement** (increment B — a pure filter) | ✓ | gap: no batch step | ✓ |
+| **bilateral / LoG / FFT-bandpass filters** (increment B) | ✓ | gap: no batch step | ✓ |
 
 The batch **gaps are declared, not skipped silently** — and the harness fails if a gap closes or a route
 vanishes without the table being updated. They mark where the headless batch API stops: colocalization has
@@ -432,6 +433,58 @@ def _dog_workflow():
                                   "interactive/kernel operation, not a recorded per-image batch step"})
 
 
+# ── Workflows 9–11 — more increment-B filters (bilateral, LoG, FFT bandpass) ──────────────────────
+# Same shape as Gaussian/DoG: a deterministic array→array filter proven headless ≈ session ≈ kernel, batch a gap.
+
+def _filter_only_workflow(name, op_id, seed, layer, call, kernel_params):
+    """Build a route-equivalence workflow for a pure array→array filter. `call(raw)` is the direct toolbox call
+    (the headless route); `kernel_params` drives the same op through OperationService.execute. Reduces the
+    boilerplate of the near-identical filter rows to one factory."""
+    def build():
+        raw = _synthetic_image(seed=seed).astype(np.float64)
+
+        def headless():
+            return np.asarray(call(raw)).astype(np.float32)
+
+        def session():
+            return session_roundtrip_image(headless(), layer).astype(np.float32)
+
+        def kernel():
+            from pycat.kernel.operation_service import OperationService
+            out = OperationService.execute(op_id, {'image': raw}, dict(kernel_params)).artifacts[0]
+            return np.asarray(out).astype(np.float32)
+
+        return Workflow(
+            name, routes={'headless': headless, 'session': session, 'kernel': kernel},
+            compare=compare_arrays(rtol=0.0, atol=0.0),
+            documented_gaps={'batch': f"a standalone {name} has no batch replay step — an interactive/kernel "
+                                      "operation, not a recorded per-image batch step"})
+    return build
+
+
+def _bilateral_call(raw):
+    from pycat.toolbox.image_processing.filters import apply_bilateral_filter
+    return apply_bilateral_filter(raw, 3)
+
+
+def _log_call(raw):
+    from pycat.toolbox.image_processing.filters import apply_laplace_of_gauss_filter
+    return apply_laplace_of_gauss_filter(raw, sigma=3)
+
+
+def _bandpass_call(raw):
+    from pycat.toolbox.fft_bandpass_tools import fft_bandpass
+    return fft_bandpass(raw, 2.0, 20.0)
+
+
+_bilateral_workflow = _filter_only_workflow(
+    'bilateral filter', 'bilateral', 6, 'Bilateral Filtered', _bilateral_call, {'radius': 3})
+_log_workflow = _filter_only_workflow(
+    'LoG filter', 'log', 7, 'LoG Filtered', _log_call, {'sigma': 3})
+_bandpass_workflow = _filter_only_workflow(
+    'FFT bandpass', 'bandpass', 8, 'Bandpass Filtered', _bandpass_call, {'low_cutoff': 2.0, 'high_cutoff': 20.0})
+
+
 # ── The matrix ──────────────────────────────────────────────────────────────────────────────────
 
 _WORKFLOW_BUILDERS = {
@@ -443,6 +496,9 @@ _WORKFLOW_BUILDERS = {
     'time_series_condensate': _timeseries_condensate_workflow,
     'gaussian': _gaussian_workflow,          # increment B
     'dog': _dog_workflow,                    # increment B
+    'bilateral': _bilateral_workflow,        # increment B
+    'log': _log_workflow,                    # increment B
+    'bandpass': _bandpass_workflow,          # increment B
 }
 
 

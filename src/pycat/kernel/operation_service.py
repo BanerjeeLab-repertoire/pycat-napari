@@ -200,5 +200,29 @@ def _kernel_dog(inputs: dict, params: dict) -> AnalysisResult:
     return AnalysisResult(operation_id="dog", entity_type="image", measurements=None, artifacts=(out,))
 
 
+def _kernel_bilateral(inputs: dict, params: dict) -> AnalysisResult:
+    """Edge-preserving bilateral filter — the SAME `apply_bilateral_filter` call. Enhance op."""
+    from pycat.toolbox.image_processing.filters import apply_bilateral_filter
+    out = apply_bilateral_filter(inputs["image"], params["radius"])
+    return AnalysisResult(operation_id="bilateral", entity_type="image", measurements=None, artifacts=(out,))
+
+
+def _kernel_log(inputs: dict, params: dict) -> AnalysisResult:
+    """Laplacian-of-Gaussian filter — the SAME `apply_laplace_of_gauss_filter` call. Enhance op."""
+    from pycat.toolbox.image_processing.filters import apply_laplace_of_gauss_filter
+    out = apply_laplace_of_gauss_filter(inputs["image"], sigma=params.get("sigma", 3))
+    return AnalysisResult(operation_id="log", entity_type="image", measurements=None, artifacts=(out,))
+
+
+def _kernel_bandpass(inputs: dict, params: dict) -> AnalysisResult:
+    """FFT bandpass filter — the SAME `fft_bandpass` call. Enhance op."""
+    from pycat.toolbox.fft_bandpass_tools import fft_bandpass
+    out = fft_bandpass(inputs["image"], params["low_cutoff"], params["high_cutoff"])
+    return AnalysisResult(operation_id="bandpass", entity_type="image", measurements=None, artifacts=(out,))
+
+
 register_kernel("gaussian", _kernel_gaussian)
 register_kernel("dog", _kernel_dog)
+register_kernel("bilateral", _kernel_bilateral)
+register_kernel("log", _kernel_log)
+register_kernel("bandpass", _kernel_bandpass)
