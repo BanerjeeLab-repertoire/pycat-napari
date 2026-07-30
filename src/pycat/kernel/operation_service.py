@@ -69,3 +69,23 @@ def _kernel_background_removal(inputs: dict, params: dict) -> AnalysisResult:
 
 
 register_kernel("rolling_ball", _kernel_background_removal)
+
+
+# ── Family 2: MSD transport analysis. A MEASURE op — the result is a measurements TABLE, so this exercises ──
+# AnalysisResult.measurements (family 1 used only artifacts). Route-equivalence proves it in Workflow 3. ───────
+
+def _kernel_compute_msd(inputs: dict, params: dict) -> AnalysisResult:
+    """Ensemble MSD from linked trajectories — the SAME `compute_msd` call the manual/session routes make. Measure
+    op: the ensemble-MSD-per-lag table is the measurement. Pixel size / frame interval come from `params` (the
+    scale gate lives in the batch handler / caller, not the pure science)."""
+    from pycat.toolbox.condensate_physics_tools import compute_msd
+    tracks = inputs["tracks"]
+    msd = compute_msd(tracks,
+                      frame_interval_s=params.get("frame_interval_s", 1.0),
+                      min_track_length=params.get("min_track_length", 200),
+                      max_lag=params.get("max_lag"))
+    return AnalysisResult(operation_id="condensate_physics.compute_msd", entity_type="track",
+                          measurements=msd, artifacts=())
+
+
+register_kernel("condensate_physics.compute_msd", _kernel_compute_msd)

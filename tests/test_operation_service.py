@@ -42,6 +42,26 @@ def test_an_unmigrated_op_raises_a_clear_error_never_silently_reroutes():
         OperationService.execute("cellpose", {"image": np.zeros((8, 8))}, {})
 
 
+def test_a_measure_op_returns_its_table_in_measurements_not_artifacts():
+    """Family 2 (compute_msd) exercises the OTHER AnalysisResult path: a MEASURE op's result is the measurements
+    TABLE (a DataFrame), not an artifact array."""
+    import pandas as pd
+    rng = np.random.default_rng(0)
+    step = np.sqrt(2 * 0.05 * 0.1)
+    rows = []
+    for tid in range(8):
+        pos = np.zeros(2)
+        for f in range(40):
+            rows.append({"track_id": tid, "frame": f, "y_um": pos[0], "x_um": pos[1]})
+            pos = pos + rng.normal(0, step, 2)
+    tracks = pd.DataFrame(rows)
+    result = OperationService.execute("condensate_physics.compute_msd", {"tracks": tracks},
+                                      {"frame_interval_s": 0.1, "min_track_length": 20})
+    assert isinstance(result, AnalysisResult) and result.entity_type == "track"
+    assert result.measurements is not None and "msd_um2" in result.measurements.columns
+    assert result.artifacts == ()
+
+
 def test_migrated_ops_reports_the_kernel_coverage():
     migrated = OperationService.migrated_ops()
-    assert "rolling_ball" in migrated                                # the first migrated family
+    assert {"rolling_ball", "condensate_physics.compute_msd"} <= migrated   # families 1 and 2

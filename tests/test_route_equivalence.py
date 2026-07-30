@@ -172,9 +172,17 @@ def _vpt_workflow():
     def session():
         return session_roundtrip_dataframe(headless(), 'msd_df')
 
+    def kernel():
+        # Spec-6 kernel, family 2 (a MEASURE op → the measurements TABLE). Same compute_msd science as the routes
+        # above, so the row closes ≈ kernel too.
+        from pycat.kernel.operation_service import OperationService
+        result = OperationService.execute('condensate_physics.compute_msd', {'tracks': tracks},
+                                          {'frame_interval_s': dt_s, 'min_track_length': 5})
+        return result.measurements
+
     return (Workflow(
         'VPT tracks -> MSD -> viscosity',
-        routes={'headless': headless, 'session': session},
+        routes={'headless': headless, 'session': session, 'kernel': kernel},
         # 1-ULP CSV decimal round-trip tolerance — see the puncta workflow for the justification.
         compare=compare_dataframes(columns, rtol=1e-12, atol=1e-15),
         documented_gaps={

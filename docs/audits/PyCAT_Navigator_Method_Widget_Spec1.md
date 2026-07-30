@@ -330,6 +330,9 @@ but the reasoning and the runner-up.
 > reroutes. `tests/test_operation_service.py` pins the contract. Next families each register a kernel and close
 > their own `≈ kernel` row (cellpose segmentation, cell_analysis, …), one per increment — reviewing this proof
 > before continuing the migration.
+> **UPDATE (1.6.443): family 2 migrated** — `condensate_physics.compute_msd` (a MEASURE op → the measurements
+> TABLE path of AnalysisResult; family 1 used only artifacts). Workflow 3's `≈ kernel` row closes. Migrated so
+> far: `rolling_ball`, `condensate_physics.compute_msd`.
 I agree with the audit here and so do you. `OperationService.execute(...) → AnalysisResult`, sitting
 **below** batch, Navigator, generated panels, manual panels, and headless. Batch handlers keep
 workflow/persistence concerns (paths, output dirs, naming) and stop being the de facto scientific API.

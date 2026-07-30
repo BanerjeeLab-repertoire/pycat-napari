@@ -1,3 +1,16 @@
+## [1.6.443] - 2026-07-30
+### Added — **Execution kernel, family 2: MSD transport analysis migrated (Method-Widget Spec 6, the measurements path).**
+Continues the per-family kernel migration. Family 2 is `condensate_physics.compute_msd` — a MEASURE op, so it
+exercises the other `AnalysisResult` path: the result is the measurements TABLE (ensemble MSD per lag), where
+family 1 (background removal) produced only an artifact array. `OperationService.execute(
+"condensate_physics.compute_msd", {"tracks": …}, {frame_interval_s, min_track_length, …})` returns
+`AnalysisResult(entity_type="track", measurements=<DataFrame>)`, a thin wrapper over the same `compute_msd`
+science the manual/session routes run.
+
+Route-equivalence: Workflow 3 (VPT → MSD) gains a `kernel` route asserted to agree with `headless ≈ session` on
+the MSD table — its `≈ kernel` row now closes. Tests (`tests/test_operation_service.py`, +1): a measure op returns
+its table in `measurements` (not `artifacts`), and `migrated_ops` now reports both families. Full gate green.
+
 ## [1.6.442] - 2026-07-30
 ### Added — **The execution kernel: OperationService.execute → AnalysisResult, first family migrated (Method-Widget Spec 6, proof).**
 The convergence the audit and the roadmap call for: ONE place an operation's science runs, below batch /
