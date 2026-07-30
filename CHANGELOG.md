@@ -1,3 +1,23 @@
+## [1.6.438] - 2026-07-29
+### Added — **Custom Methods submenu — saved methods rebuild into a generated panel (Method-Widget Spec 2, complete).**
+Completes Spec 2: the persisted methods (1.6.437) now surface in the analysis tree and rebuild on demand. Two
+parts:
+
+- **`plan_from_saved_method(template, central_manager)`** (`navigator/session.py`, headlessly tested) — the
+  rebuild step: recompiles a saved method's ANSWERS against the CURRENT data's context (`context_from_session`)
+  into a fresh plan, so every quality gate re-evaluates on the live data (verdicts were never stored). Pure — no
+  Qt — so the menu's core logic is verified apart from the widget it feeds; a test drives it with a fake
+  central_manager and confirms a saved viscosity method recompiles to a runnable plan end to end.
+- **The Custom Methods submenu** (`ui/custom_methods_menu.py` + a one-line hook in `menu_manager`) — the analysis
+  tree's first DYNAMICALLY populated submenu: it lists the saved methods (repopulated on `aboutToShow`, so
+  saving/deleting is reflected without a restart) and, on selection, recompiles via `plan_from_saved_method` and
+  docks a `GeneratedMethodUI`. Deliberately kept OUT of `menu_manager` (a complexity-ratchet concentration point)
+  so the feature does not grow that god-file — the hook is a single line, and a 2-line comment there was tightened
+  to hold the file at its 1105-line ceiling.
+
+The submenu is GUI-bound (Qt menu wiring) and shares the generated panel's Spec 1.6 manual acceptance; its rebuild
+logic (`plan_from_saved_method`) is fully headlessly tested. Full gate green.
+
 ## [1.6.437] - 2026-07-29
 ### Added — **Generated-method persistence: schema versioning + duplicate (Method-Widget Spec 2 core).**
 Spec 2 persists a generated method so it survives sessions and reappears as a Custom Method. The store already

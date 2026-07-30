@@ -171,3 +171,30 @@ def test_duplicate_refuses_to_overwrite_or_copy_a_missing_source(tmp_path):
     assert duplicate_template('a', '   ', store=store) is None      # blank name -> refuse
     # nothing was mutated
     assert [t.name for t in list_templates(store=_store(tmp_path))] == ['a', 'b']
+
+
+# ── Method-Widget Spec 2: rebuild a saved method into a plan against live data ───────────────────────────
+
+def test_plan_from_saved_method_recompiles_the_answers_against_live_data(tmp_path):
+    """The Custom Methods rebuild step (Spec 2), headless: a saved method recompiles from its ANSWERS (not
+    re-asked) against the CURRENT data's context via context_from_session, producing a real plan — end to end,
+    no Qt. A fake central_manager supplies the metadata. (Re-gating on BAD data → blocked is covered by
+    test_applying_to_a_different_dataset_re_evaluates_the_gates.)"""
+    from types import SimpleNamespace
+    from pycat.navigator.session import plan_from_saved_method
+    from pycat.navigator.execution import is_runnable, execution_order
+
+    store = _store(tmp_path)
+    intent = AnalysisIntent(target='bead', observables=['viscosity'])
+    save_template(template_from_plan('visc', intent, _plan(_reg(), 'viscosity', pixel_size=0.1)), store=store)
+    saved = load_template('visc', store=store)
+
+    cm = SimpleNamespace(active_data_class=SimpleNamespace(
+        data_repository={'file_metadata': {'common': {'n_timepoints': 200,
+                                                      'dimension_order': 'TYX', 'pixel_size_um': 0.1}}}))
+    plan = plan_from_saved_method(saved, cm, registry=_reg())
+    # the saved ANSWERS drive it (recompiled, not re-asked), against the live metadata
+    assert plan.intent.target == 'bead' and 'viscosity' in plan.intent.observables
+    steps = [s.name for s in execution_order(plan)]
+    assert 'vpt.microrheology' in steps                    # a real viscosity plan, not empty
+    assert is_runnable(plan)                                # calibrated live data → runnable end to end

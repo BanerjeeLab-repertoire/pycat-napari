@@ -868,6 +868,7 @@ class MenuManager:
             'Comparative Figures (batch consolidated table)': (lambda: __import__('pycat.ui.comparative_figures_ui', fromlist=['f']).open_comparative_figures_dialog(self.central_manager, self.viewer), {}),
         }
         self._add_actions_to_menu(analysis_methods_dict, self.analysis_methods_menu)
+        __import__('pycat.ui.custom_methods_menu', fromlist=['f']).install_custom_methods_submenu(self)  # Spec 2
 
     # Add specific toolbox functions as actions to the toolbox menu.
     def _add_toolbox_to_menu(self):
@@ -1098,8 +1099,7 @@ class MenuManager:
             # — measured from a time-projection with no linking pass. Was locked
             # inside VPT as estimate_linking_distance_um.
             'Motion Scale Estimator (linking distance)': (self.central_manager.toolbox_functions_ui._add_motion_scale_estimator, {'separate_widget': True}),
-            # Video export works on any time-series stack, not just the
-            # time-series condensate pipeline it was previously locked inside.
+            # Video export works on ANY time-series stack, not just the condensate pipeline it was locked inside.
             'Export Time-Series Video': (self.central_manager.toolbox_functions_ui._add_export_timeseries_video, {'separate_widget': True}),
         }
         self._add_actions_to_menu(data_visualization_actions, data_visualization_submenu)

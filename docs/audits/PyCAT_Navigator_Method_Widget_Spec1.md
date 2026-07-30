@@ -255,9 +255,14 @@ Each is written thoroughly when you green-light it. Scoped here so the order is 
 > + reviewed parameters; this added the two Spec-2 pieces on top, headlessly verified: `schema_version`
 > (`_SCHEMA_VERSION = 1`, written into every entry, backward-compatible read of pre-versioning saves) and
 > `duplicate_template` (keep-the-original copy, refuses overwrite/missing/blank) — completing the Custom Methods
-> CRUD (delete/rename existed). **STILL OPEN: the Custom Methods submenu** — a dynamically-populated
-> `menu_manager` submenu that lists saved methods and rebuilds each into a `GeneratedMethodUI`. That is GUI-bound
-> and needs the central_manager→context recompile path wired; it is the next step.
+> CRUD (delete/rename existed).
+> **UPDATE (1.6.438): Spec 2 COMPLETE.** `plan_from_saved_method` (session.py, headlessly tested) recompiles a
+> saved method against live data via `context_from_session`; the Custom Methods submenu
+> (`ui/custom_methods_menu.py` + a one-line `menu_manager` hook, kept out of that concentration point) lists saved
+> methods dynamically (`aboutToShow`) and rebuilds each into a `GeneratedMethodUI`. The submenu shares the panel's
+> 1.6 manual acceptance; its rebuild logic is fully tested. Remaining Method-Widget roadmap: Spec 3 (guidance
+> content — needs the scientist's authoring), Spec 4 (embedded pop-out guidance), Spec 5 (comparative chooser),
+> Spec 6 (execution kernel).
 The saved artifact: plan + intent/answers + reviewed parameters + section list + `schema_version`.
 Extends the existing `GuidedTemplate` machinery (`navigator/templates.py` already has
 `save_template` / `list_templates` / `load_template`) rather than inventing a second store. Adds a

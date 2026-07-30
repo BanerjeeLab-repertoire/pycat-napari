@@ -145,6 +145,22 @@ def context_from_session(central_manager, ctx: Optional[AnalysisContext] = None)
     return ctx
 
 
+def plan_from_saved_method(template, central_manager, *, registry=None, ctx=None):
+    """Recompile a saved guided method (a :class:`~pycat.navigator.templates.GuidedTemplate`) into a fresh plan
+    against the CURRENT data's context — the rebuild step the Custom Methods menu (Spec 2) runs before handing the
+    plan to ``GeneratedMethodUI``. The saved ANSWERS are re-run through the planner and every quality gate
+    re-evaluates on the live data (a method runnable on one dataset may be blocked on another; verdicts were never
+    stored — see templates.py). Pure/headless: given a ``central_manager`` whose ``active_data_class`` carries the
+    metadata, it returns a ``Plan`` with no Qt involved, so the menu's rebuild logic is testable apart from the
+    widget it feeds."""
+    from .templates import intent_from_template
+    from .op_catalog import build_operation_registry
+    from .planner import Planner
+    reg = registry if registry is not None else build_operation_registry()
+    context = context_from_session(central_manager, ctx)
+    return Planner(reg).compile(intent_from_template(template), context)
+
+
 def data_observations(central_manager):
     """"**What we can tell from your data**" — human-readable observations derived from the loaded image's
     metadata, each with its EVIDENCE, for the navigator to show as suggestions rather than silent decisions
