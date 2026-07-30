@@ -1,3 +1,11 @@
+## [1.6.451] - 2026-07-30
+### Added — **Execution kernel, increment B (cont.): three more enhancer families — invert, rescale, gabor (Method-Widget Spec 6).**
+Three more pure image→image enhancer op families migrated to the kernel: `invert` (intensity inversion),
+`rescale` (intensity rescaling), and `gabor` (Gabor texture filter). Each is a route-equivalence workflow proving
+`headless ≈ session ≈ kernel` bit-for-bit (via the `_filter_only_workflow` factory) plus a kernel registration;
+batch is a documented gap for each. The route-equivalence matrix is now **fifteen workflows**, and the kernel
+covers **17 ops**.
+
 ## [1.6.450] - 2026-07-30
 ### Fixed — **SpIDA recovers low-density N — the N6-1 truncation bias is fixed (the last xfail closed).**
 N6-1's deferred recovery, resolved. `build_intensity_histogram` used to drop every pixel at/below the noise floor

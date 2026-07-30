@@ -232,9 +232,33 @@ def _kernel_local_threshold(inputs: dict, params: dict) -> AnalysisResult:
     return AnalysisResult(operation_id="local_threshold", entity_type="mask", measurements=None, artifacts=(mask,))
 
 
+def _kernel_invert(inputs: dict, params: dict) -> AnalysisResult:
+    """Intensity inversion — the SAME `invert_image` call. Enhance op."""
+    from pycat.toolbox.image_processing._base import invert_image
+    return AnalysisResult(operation_id="invert", entity_type="image", measurements=None,
+                          artifacts=(invert_image(inputs["image"]),))
+
+
+def _kernel_rescale(inputs: dict, params: dict) -> AnalysisResult:
+    """Intensity rescaling — the SAME `apply_rescale_intensity` call. Enhance op."""
+    from pycat.toolbox.image_processing._base import apply_rescale_intensity
+    out = apply_rescale_intensity(inputs["image"], out_min=params.get("out_min"), out_max=params.get("out_max"))
+    return AnalysisResult(operation_id="rescale", entity_type="image", measurements=None, artifacts=(out,))
+
+
+def _kernel_gabor(inputs: dict, params: dict) -> AnalysisResult:
+    """Gabor texture filter — the SAME `gabor_filter_func` call. Enhance op."""
+    from pycat.toolbox.image_processing.filters import gabor_filter_func
+    return AnalysisResult(operation_id="gabor", entity_type="image", measurements=None,
+                          artifacts=(gabor_filter_func(inputs["image"]),))
+
+
 register_kernel("gaussian", _kernel_gaussian)
 register_kernel("dog", _kernel_dog)
 register_kernel("bilateral", _kernel_bilateral)
 register_kernel("log", _kernel_log)
 register_kernel("bandpass", _kernel_bandpass)
 register_kernel("local_threshold", _kernel_local_threshold)
+register_kernel("invert", _kernel_invert)
+register_kernel("rescale", _kernel_rescale)
+register_kernel("gabor", _kernel_gabor)
