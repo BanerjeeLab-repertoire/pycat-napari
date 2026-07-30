@@ -56,6 +56,32 @@ def authored_op_ids() -> frozenset:
     return frozenset(_guidance().keys())
 
 
+def section_guidance(op_id: str, *, alternatives=None) -> dict:
+    """Assemble the pop-out content for one generated-panel section (Method-Widget Spec 4): the op's OWN authored
+    guidance plus the same for each alternative it could be swapped for — so the pop-out shows this operation and
+    its rivals side by side with their tradeoffs, in place. Pure over the guidance store; the Qt pop-out only
+    renders this dict, so the decision of WHAT to show is testable apart from the widget.
+
+    ``alternatives`` — the candidate op-ids to compare against (the caller passes the planner's considered
+    candidates, e.g. from :meth:`Planner.explain_segmentation_choice`, so the pop-out lists exactly what the
+    planner weighed). When ``None``, falls back to the op's own authored ``alternatives`` field. An unauthored op
+    (or alternative) comes back with ``documented=False`` and ``guidance=None`` — the pop-out shows
+    'not documented yet', never a fabricated stand-in.
+
+    Returns ``{"op_id", "documented", "guidance", "alternatives": [{"op_id", "documented", "guidance"}, ...]}``."""
+    own = guidance_for(op_id)
+    alts = list(alternatives) if alternatives is not None else list((own or {}).get("alternatives", []) or [])
+    seen = set()
+    alt_entries = []
+    for a in alts:
+        if a == op_id or a in seen:
+            continue
+        seen.add(a)
+        g = guidance_for(a)
+        alt_entries.append({"op_id": a, "documented": g is not None, "guidance": g})
+    return {"op_id": op_id, "documented": own is not None, "guidance": own, "alternatives": alt_entries}
+
+
 # ── authoring vehicle: a fill-in workbook, and its ingest back to JSON ────────────────────────────────
 
 def _catalog_rows():

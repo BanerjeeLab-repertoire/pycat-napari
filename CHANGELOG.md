@@ -1,3 +1,24 @@
+## [1.6.454] - 2026-07-30
+### Added — **Pop-out guidance on generated-panel sections (Method-Widget Spec 4).**
+Each section of a generated method panel now carries a **❔** affordance on its header; clicking it pops out the
+op's authored guidance IN PLACE — when to use it, its advantages and limitations, when it does NOT apply, its
+references — and the same for the alternatives it could be swapped for, side by side. This is the step that turns
+the Navigator from a wizard you exit into the panel's editing surface.
+
+Split, as before, into a headlessly-verified core and a thin GUI shell:
+- **`navigator.guidance.section_guidance(op_id, alternatives=…)`** (tested, `base`) assembles WHAT the pop-out
+  shows: the op's own guidance plus each alternative's, each with a `documented` flag. The caller passes the
+  candidate alternatives (e.g. the planner's considered ops from Spec 5's `explain_segmentation_choice`), so the
+  pop-out mirrors the real decision; with none, it falls back to the op's authored `alternatives` field. An
+  unauthored op or alternative comes back `documented=False` — never a fabricated stand-in.
+- **`ui/guidance_popout.py`** (`GuidancePopout` + `guidance_popout_html`) renders that dict as rich text; an
+  unauthored op shows an honest "not documented yet — author it in the guidance workbook". `GeneratedMethodUI`
+  adds the ❔ link before each section, opening the pop-out for that op.
+
+The content store still ships empty, so today every pop-out reads "not documented yet" — the surface lights up
+op by op as the guidance is authored (Spec 3). GUI-bound: the pop-out rendering and the ❔ affordance need a
+manual napari acceptance run; the assembly logic is tested. Full gate green.
+
 ## [1.6.453] - 2026-07-30
 ### Added — **Execution kernel, increment B (cont.): four contrast/edge enhancers — ridge, tone-map, local-contrast, peak+edge (Method-Widget Spec 6).**
 Four more enhancer op families migrated: `ridge` (vesselness), `tone_map`, `local_contrast` (local contrast

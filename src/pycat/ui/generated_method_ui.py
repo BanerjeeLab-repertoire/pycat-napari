@@ -64,6 +64,22 @@ class GeneratedMethodUI(AnalysisMethodsUI):
                             "border-radius: 4px; padding: 4px; margin: 2px;")
         self.method_layout.addWidget(label)
 
+    def _add_guidance_affordance(self, op_id):
+        """A small `?`-style link before each section (Spec 4): clicking it pops out the op's when-to-use /
+        advantages / limitations / alternatives in place. Best-effort — a guidance link must never block or crash
+        the section it decorates."""
+        from PyQt5.QtWidgets import QToolButton
+        from pycat.ui.guidance_popout import open_guidance_popout
+        btn = QToolButton()
+        btn.setText("❔  " + op_id.split(".")[-1].replace("_", " "))   # ❔
+        btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setToolTip(f"When to use {op_id}, its tradeoffs, and alternatives")
+        btn.setStyleSheet("QToolButton { color: #0d7d78; border: none; font-size: 11px; padding: 2px 0; }"
+                          "QToolButton:hover { text-decoration: underline; }")
+        btn.clicked.connect(lambda _=False, o=op_id: open_guidance_popout(self, o))
+        self.method_layout.addWidget(btn)
+
     def setup_ui(self):
         self._seed_reviewed_parameters()
 
@@ -71,8 +87,11 @@ class GeneratedMethodUI(AnalysisMethodsUI):
         self._add_workflow_header(self.method_layout, include_pixel_gate=True)
 
         # One section per planned step, in the executor's order. A mapped step's builder is called into the
-        # layout; an unmapped step (or a builder that raises) renders the placeholder instead of vanishing.
+        # layout; an unmapped step (or a builder that raises) renders the placeholder instead of vanishing. Each
+        # section gets a guidance affordance (Spec 4): a `?` that pops out the op's when-to-use / limitations /
+        # alternatives in place.
         for section in resolve_plan_sections(self._plan):
+            self._add_guidance_affordance(section.op_id)
             builder = None if section.gap else builder_for(self.central_manager, section.op_id)
             if builder is None:
                 self._add_placeholder(section.op_id)

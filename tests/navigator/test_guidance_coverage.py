@@ -19,7 +19,8 @@ from pathlib import Path
 import pytest
 
 from pycat.navigator.guidance import (
-    guidance_for, authored_op_ids, GUIDANCE_FIELDS, GUIDANCE_TEXT_FIELDS, GUIDANCE_LIST_FIELDS)
+    guidance_for, authored_op_ids, section_guidance,
+    GUIDANCE_FIELDS, GUIDANCE_TEXT_FIELDS, GUIDANCE_LIST_FIELDS)
 
 pytestmark = pytest.mark.base
 
@@ -103,3 +104,46 @@ def test_the_authoring_workbook_round_trips(tmp_path):
     assert result["cellpose"]["alternatives"] == ["local_threshold", "felzenszwalb"]   # split per line
     # a row left blank is not a guidance entry
     assert "bandpass" not in result
+
+
+# ── Method-Widget Spec 4: the pop-out content assembler ──────────────────────────────────────────────────
+
+@pytest.mark.base
+def test_section_guidance_refuses_to_guess_on_the_empty_store():
+    """With no content authored, the pop-out for any op reports it's not documented — never a fabricated entry.
+    (The store ships empty; this is the state until the scientist authors it.)"""
+    popout = section_guidance("cellpose")
+    assert popout["op_id"] == "cellpose"
+    assert popout["documented"] is False and popout["guidance"] is None
+
+
+@pytest.mark.base
+def test_section_guidance_assembles_the_op_and_its_alternatives(monkeypatch):
+    """The pop-out shows the section's op AND each alternative it could be swapped for, each with its own
+    authored guidance (or a 'not documented' marker) — the side-by-side tradeoff view. The alternative list is
+    what the CALLER passes (the planner's considered candidates), so the pop-out mirrors the real decision."""
+    import pycat.navigator.guidance as G
+    store = {
+        "cellpose": {"when_to_use": "cell bodies with a learned model",
+                     "advantages": ["robust to touching cells"], "limitations": ["needs a GPU to be fast"]},
+        "local_threshold": {"when_to_use": "high-contrast puncta", "advantages": ["fast, no model"]},
+    }
+    monkeypatch.setattr(G, "_guidance", lambda: store)
+
+    popout = G.section_guidance("cellpose", alternatives=["local_threshold", "watershed", "cellpose"])
+    assert popout["documented"] is True
+    assert popout["guidance"]["when_to_use"].startswith("cell bodies")
+    alts = {a["op_id"]: a for a in popout["alternatives"]}
+    assert set(alts) == {"local_threshold", "watershed"}        # self is dropped; both alternatives kept
+    assert alts["local_threshold"]["documented"] is True and alts["local_threshold"]["guidance"]["advantages"]
+    assert alts["watershed"]["documented"] is False and alts["watershed"]["guidance"] is None   # unauthored
+
+
+@pytest.mark.base
+def test_section_guidance_falls_back_to_the_authored_alternatives_field(monkeypatch):
+    """When the caller passes no alternatives, the pop-out uses the op's OWN authored `alternatives` field."""
+    import pycat.navigator.guidance as G
+    store = {"cellpose": {"when_to_use": "x", "alternatives": ["stardist", "watershed"]}}
+    monkeypatch.setattr(G, "_guidance", lambda: store)
+    popout = G.section_guidance("cellpose")
+    assert [a["op_id"] for a in popout["alternatives"]] == ["stardist", "watershed"]

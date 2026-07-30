@@ -299,6 +299,13 @@ workbook, define the schema, and wire the reader; the content is the deliverable
 **Depends on:** nothing technical. Can start in parallel with Spec 1. **Gates Specs 4–5.**
 
 ### Spec 4 — The embedded navigator: pop-out guidance and live revision
+> **STATUS (1.6.454): pop-out guidance SHIPPED; live revision still open.** `navigator.guidance.section_guidance`
+> (tested) assembles the pop-out content (the op's guidance + each alternative's, `documented` flags,
+> caller-supplied candidates from Spec 5); `ui/guidance_popout.py` (`GuidancePopout` / `guidance_popout_html`)
+> renders it; `GeneratedMethodUI` adds a ❔ affordance before each section that opens it. Reads "not documented
+> yet" until Spec 3 content is authored; GUI rendering needs a manual napari acceptance. **STILL OPEN:** live
+> revision — choosing a different tool in the pop-out rebuilding the panel from the amended plan (that is the
+> larger half of Spec 4 and depends on a plan-edit path).
 The core of your vision. Each section in a generated panel gets an affordance (a `?`/`⚙` on the section
 header) that pops out the relevant slice of the guide tree *in place*: for a segmentation step, the
 available segmenters with advantages/limitations; for enhancement, every image operation with its
