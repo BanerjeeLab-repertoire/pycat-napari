@@ -1,4 +1,4 @@
-"""**The cross-route equivalence matrix — three canonical workflows, asserted identical per route.**
+"""**The cross-route equivalence matrix — six canonical workflows, asserted identical per route.**
 
 Read `tests/route_equivalence.py` first: it explains why this exists (the same analysis must not yield
 different numbers depending on how it was launched) and what a route / a documented gap is.
@@ -6,6 +6,11 @@ different numbers depending on how it was launched) and what a route / a documen
 The matrix grew from three to **six** workflows (increment A), chosen for distinct data shapes and failure
 modes — not the 15 the audit imagined at once, because three-per-increment that genuinely run will grow and
 fifteen written at once are abandoned. Adding another is one `Workflow(...)` entry.
+
+A fourth route, **`kernel`** (the Spec-6 execution kernel, `OperationService.execute`), joins headless / batch /
+session: a workflow whose op is migrated to the kernel adds a `kernel` route asserted identical to the rest, and
+one not yet migrated declares `kernel` a documented gap — so an unmigrated op is a VISIBLE gap, never a silent
+absence. Migrated so far: rolling-ball, MSD, clean-detect, cellpose.
 
 | workflow | headless | batch replay | session reload |
 |---|---|---|---|
@@ -231,10 +236,18 @@ def _cellpose_workflow():
     def session():
         return session_roundtrip_image(headless(), 'Cell Mask').astype(np.float32)
 
+    def kernel():
+        # Spec-6 kernel, family 4 (a CREATE op → the label mask artifact). Same normalised image, same
+        # cellpose_segmentation science as the routes above — so this row closes ≈ kernel too.
+        from pycat.kernel.operation_service import OperationService
+        result = OperationService.execute('cellpose', {'image': _normalize_to_float(raw)},
+                                          {'cell_diameter': _CELL_DIAMETER, 'postprocess': False})
+        return np.asarray(result.artifacts[0]).astype(np.float32)
+
     return Workflow(
         'cellpose segmentation',
-        routes={'headless': headless, 'batch': batch, 'session': session},
-        # Exact: all three feed the same deterministic normalised image to the same cellpose call.
+        routes={'headless': headless, 'batch': batch, 'session': session, 'kernel': kernel},
+        # Exact: all four feed the same deterministic normalised image to the same cellpose call.
         compare=compare_arrays(rtol=0.0, atol=0.0))
 
 
@@ -281,7 +294,9 @@ def _coloc_workflow():
             'batch': "this workflow's OBJECT-BASED m1/m2 coloc has no batch replay step — it is an interactive "
                      "two-channel analysis. (A navigator PIXEL-coloc handler `replay_pixel_coloc` was added "
                      "2026-07-28 for Pearson / Manders-overlap WITHIN a segmentation ROI, but that is a different "
-                     "computation than this route's thresholded m1/m2, so this route stays a gap.)"})
+                     "computation than this route's thresholded m1/m2, so this route stays a gap.)",
+            'kernel': "object-based m1/m2 coloc is not migrated to the execution kernel yet (Spec 6 migrates per "
+                      "family); it still runs through its interactive/session route."})
 
 
 # ── Workflow 6 — Time-series condensate partition (headless ≈ session; batch is a documented gap) ─
@@ -328,7 +343,9 @@ def _timeseries_condensate_workflow():
             'batch': "a per-frame partition series over a time-series stack is not a per-image batch step "
                      "(the batch condensate replay is a single-frame step; the lazy stack is materialized "
                      "by the interactive/time-series path, not the batch recorder) — same class as the "
-                     "VPT/MSD skip-stub gap"})
+                     "VPT/MSD skip-stub gap",
+            'kernel': "the per-frame partition series is not migrated to the execution kernel yet (Spec 6 "
+                      "migrates per family); it still runs through its interactive/session route."})
 
 
 # ── The matrix ──────────────────────────────────────────────────────────────────────────────────
@@ -358,7 +375,7 @@ def test_cellpose_genuinely_runs_all_three_routes():
     from tests.route_equivalence import Unavailable
     results = run_all_routes(_cellpose_workflow())
     ran = {r for r, v in results.items() if not isinstance(v, Unavailable)}
-    assert ran == {'headless', 'batch', 'session'}, f"cellpose only ran {sorted(ran)}"
+    assert ran == {'headless', 'batch', 'session', 'kernel'}, f"cellpose only ran {sorted(ran)}"
 
 
 def test_the_metadata_comparator_would_catch_a_units_or_nan_divergence():
@@ -383,7 +400,7 @@ def test_rolling_ball_runs_all_three_routes_not_just_headless():
     results = run_all_routes(_rolling_ball_workflow())
     from tests.route_equivalence import Unavailable
     ran = {r for r, v in results.items() if not isinstance(v, Unavailable)}
-    assert ran == {'headless', 'batch', 'session'}, f"rolling-ball only ran {sorted(ran)}"
+    assert ran == {'headless', 'batch', 'session', 'kernel'}, f"rolling-ball only ran {sorted(ran)}"
 
 
 def test_the_VPT_chain_recovers_the_KNOWN_viscosity_end_to_end():

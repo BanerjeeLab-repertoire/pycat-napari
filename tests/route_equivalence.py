@@ -28,8 +28,10 @@ is exact equality.
 import numpy as np
 import pandas as pd
 
-# The routes, in the order results are reported. Not every workflow drives every route.
-ROUTE_ORDER = ('headless', 'batch', 'session')
+# The routes, in the order results are reported. Not every workflow drives every route. `kernel` is the Spec-6
+# execution kernel (OperationService.execute); a workflow whose op is migrated adds a `kernel` route, one that is
+# not yet migrated declares `kernel` a documented gap — so an unmigrated op is a VISIBLE gap, not a silent absence.
+ROUTE_ORDER = ('headless', 'batch', 'session', 'kernel')
 
 
 class Unavailable:

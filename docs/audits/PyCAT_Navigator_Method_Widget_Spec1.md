@@ -338,6 +338,11 @@ but the reasoning and the runner-up.
 > `condensate_physics.compute_msd`, `clean`. Cellpose (Workflow 4) is torch-gated — next when the torch lane is
 > in play. The kernel pattern is fully demonstrated across the route-equivalence matrix; remaining families are
 > mechanical registrations.
+> **UPDATE (1.6.445): family 4 (cellpose) migrated + harness fix.** Discovered the harness only iterated
+> `(headless, batch, session)`, so the `kernel` routes weren't actually run — added `kernel` to `ROUTE_ORDER`, so
+> all four migrated workflows' kernel routes now genuinely execute and are asserted `≈ headless`; unmigrated
+> workflows (coloc, time-series partition) declare `kernel` a documented gap. Migrated: `rolling_ball`,
+> `condensate_physics.compute_msd`, `clean`, `cellpose`.
 I agree with the audit here and so do you. `OperationService.execute(...) → AnalysisResult`, sitting
 **below** batch, Navigator, generated panels, manual panels, and headless. Batch handlers keep
 workflow/persistence concerns (paths, output dirs, naming) and stop being the de facto scientific API.

@@ -105,3 +105,20 @@ def _kernel_clean_detect(inputs: dict, params: dict) -> AnalysisResult:
 
 
 register_kernel("clean", _kernel_clean_detect)
+
+
+# ── Family 4: Cellpose cell segmentation. A CREATE op — the produced label mask is the artifact. The flagship ──
+# segmenter and the biggest parameter surface. Route-equivalence proves it in Workflow 4 (torch-gated). ────────
+
+def _kernel_cellpose(inputs: dict, params: dict) -> AnalysisResult:
+    """Cellpose segmentation — the SAME `cellpose_segmentation` call the manual/batch/session routes make, on the
+    image the caller has already normalised (normalisation is a preprocessing concern the caller owns, exactly as
+    the other routes do). Create op: the label mask is the artifact."""
+    from pycat.toolbox.segmentation_tools import cellpose_segmentation
+    masks = cellpose_segmentation(inputs["image"], params["cell_diameter"],
+                                  postprocess=params.get("postprocess", False))
+    masks = masks[0] if isinstance(masks, (tuple, list)) else masks
+    return AnalysisResult(operation_id="cellpose", entity_type="cell", measurements=None, artifacts=(masks,))
+
+
+register_kernel("cellpose", _kernel_cellpose)

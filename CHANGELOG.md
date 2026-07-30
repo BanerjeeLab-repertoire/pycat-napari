@@ -1,3 +1,20 @@
+## [1.6.445] - 2026-07-30
+### Fixed — **Route-equivalence now genuinely runs the `kernel` route; cellpose migrated (family 4) (Method-Widget Spec 6).**
+**Correction:** families 1–3 (1.6.442–444) added a `kernel` route to the route-equivalence workflows, but the
+harness's `run_all_routes` only iterated `ROUTE_ORDER = (headless, batch, session)` — so those `kernel` routes
+were in the workflow dicts but **never actually run or compared**. The kernel's science was still verified
+(`test_operation_service.py` asserts the kernel output equals a direct toolbox call bit-for-bit), but the
+"`≈ kernel` row closes" claim was not yet backed by the matrix. This adds `kernel` to `ROUTE_ORDER`, so the
+harness now genuinely executes each migrated workflow's kernel route and asserts it agrees with `headless`, and a
+workflow whose op is NOT migrated declares `kernel` a documented gap (coloc, time-series partition) — an
+unmigrated op is a visible gap, never a silent absence. The `runs_all_routes` count tests now expect `kernel`.
+
+**Family 4:** `cellpose` cell segmentation is migrated (a CREATE op → the label mask in `artifacts`).
+`OperationService.execute("cellpose", {"image": <normalised>}, {"cell_diameter", "postprocess"})` runs the same
+`cellpose_segmentation` science as the manual/batch/session routes; Workflow 4 now proves `headless ≈ batch ≈
+session ≈ kernel` (torch-gated). Migrated ops: `rolling_ball`, `condensate_physics.compute_msd`, `clean`,
+`cellpose` — the four canonical workflows that have a kernel route, all genuinely compared. Full gate green.
+
 ## [1.6.444] - 2026-07-30
 ### Added — **Execution kernel, family 3: clean spot detection migrated — all torch-free canonical workflows now prove ≈ kernel (Method-Widget Spec 6).**
 Family 3 is `clean` (`clean_detect`) — clean-mask spot detection with per-object measurement, another MEASURE op.

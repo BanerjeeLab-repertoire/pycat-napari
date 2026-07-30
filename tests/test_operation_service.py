@@ -37,9 +37,9 @@ def test_execute_runs_the_same_science_as_the_toolbox_call():
 
 def test_an_unmigrated_op_raises_a_clear_error_never_silently_reroutes():
     assert OperationService.has_kernel("rolling_ball") is True
-    assert OperationService.has_kernel("cellpose") is False          # not migrated yet
+    assert OperationService.has_kernel("no_such_op") is False        # not migrated
     with pytest.raises(ScientificAssumptionError, match="No execution kernel registered"):
-        OperationService.execute("cellpose", {"image": np.zeros((8, 8))}, {})
+        OperationService.execute("no_such_op", {"image": np.zeros((8, 8))}, {})
 
 
 def test_a_measure_op_returns_its_table_in_measurements_not_artifacts():
@@ -64,5 +64,5 @@ def test_a_measure_op_returns_its_table_in_measurements_not_artifacts():
 
 def test_migrated_ops_reports_the_kernel_coverage():
     migrated = OperationService.migrated_ops()
-    # families 1–3: an enhance op + two measure ops
-    assert {"rolling_ball", "condensate_physics.compute_msd", "clean"} <= migrated
+    # families 1–4: an enhance op, two measure ops, and a segmenter
+    assert {"rolling_ball", "condensate_physics.compute_msd", "clean", "cellpose"} <= migrated
