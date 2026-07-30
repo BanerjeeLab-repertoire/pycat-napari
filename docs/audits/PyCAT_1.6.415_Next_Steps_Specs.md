@@ -386,6 +386,12 @@ deciding whether it needs a fix — don't fix blind. In priority order:
    result is reported lower-confidence instead of silently trusted — the anti-black-box move. The recovery
    golden-master stays strict-`xfail` (its reason now records the refuted naive fix); a new test pins that the
    flag fires at N=2 and not at N=8. The fit math is unchanged (high-N byte-identical).
+   **FIX SHIPPED (1.6.450): recovery closed, the last xfail resolved.** The truncation-aware fix keeps the k=0
+   population (`p >= 0`, not `p > 0`) so the moments are full-population and unbiased, and anchors the reported
+   density on the moment estimate where the least-squares fit collapses onto the zero bin (which is what made the
+   naive keep-zeros over-correct to ~0.6). SpIDA now recovers true N = 2 ≈ 2.0, leaves N = 8 unchanged (~7.8), and
+   keeps the pedestal sensitivity (a 200-count offset still inflates 8 → ~31). The `low_density_regime` flag is
+   repurposed from "biased over-estimate" to "inherently higher-variance — confirm against a monomer control."
 2. **Partition-coefficient clipping** — check whether `partition_coefficient_field` clips or floors in a
    way that distorts K_p at low dilute-phase intensity. **VERIFIED — recovers truth; CLOSED with a guard
    (test-only).** For a well-posed (uniform) dilute phase, Kp = dense/bulk is recovered EXACTLY across the whole

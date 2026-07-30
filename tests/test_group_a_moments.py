@@ -112,60 +112,50 @@ def test_the_pedestal_destroys_spida_and_is_now_caught(pedestal, min_error):
     )
 
 
-# ── N6-1: low-density tail-truncation bias (verify-then-fix) ────────────────────────────────────────────
-# `build_intensity_histogram` drops every pixel at/below the noise floor (`p = p[p > 0]`). At LOW density a large
-# fraction of pixels see zero molecules (P(k=0) = e^-N), so that cut removes a real, information-bearing part of
-# the distribution and biases N upward. The bias scales with the dropped-zero fraction; the valid regime (N >= 5,
-# where e^-N is negligible) is unaffected — which is why the baseline test above, at N=8, passes.
+# ── N6-1: low-density truncation bias — VERIFIED, then FIXED ────────────────────────────────────────────
+# `build_intensity_histogram` used to drop every pixel at/below the noise floor (`p = p[p > 0]`). At LOW density a
+# large fraction of pixels see zero molecules (P(k=0) = e^-N), so that cut removed a real, information-bearing
+# part of the distribution and biased N upward (~+56% at true N=2). THE FIX: keep the k=0 population so the
+# moments are full-population, and report the (unbiased) moment estimate where the least-squares fit collapses
+# onto the zero bin. A naive "keep the zeros and re-fit" was verified to OVER-correct (~0.6), which is why the fix
+# anchors on the moment estimate rather than the curve fit. Recovery is now pinned across the density range.
 
 @pytest.mark.base
-def test_spida_low_density_bias_tracks_the_dropped_zero_fraction():
-    """CHARACTERISATION (the mechanism, pinned): the low-density N over-estimate is caused by the p>0 truncation
-    and scales with the fraction of zero-molecule pixels dropped. Guards the ROOT CAUSE, so a fix that keeps the
-    low tail can be measured against it, and pins that the valid regime (N=5) is NOT to be regressed by that fix."""
+def test_spida_recovers_the_density_across_the_range_after_the_truncation_fix():
+    """The fix RECOVERS N across the range, not just at one point: from the deep low-density regime (where the old
+    truncation bit hardest) up through the regime where it never bit, the fitted N tracks the truth. Guards
+    against both the old over-estimate returning and a future change over-correcting."""
     spida = pytest.importorskip("pycat.toolbox.spida_tools")
 
-    def frac_dropped_and_ratio(n_true):
-        px = _spida_pixels(n_true=n_true)
-        frac0 = float(np.mean(px <= 0))                 # pixels the p>0 cut removes
-        x, y = spida.build_intensity_histogram(px, n_bins=256)
-        fit = spida.fit_spida_histogram(x, y)
-        return frac0, fit["N"] / n_true
+    def ratio(n_true):
+        x, y = spida.build_intensity_histogram(_spida_pixels(n_true=n_true), n_bins=256)
+        return spida.fit_spida_histogram(x, y)["N"] / n_true
 
-    f2, ratio2 = frac_dropped_and_ratio(2.0)            # ~14% of pixels dropped
-    f5, ratio5 = frac_dropped_and_ratio(5.0)            # <1% dropped
-    assert f2 > 0.10 and f5 < 0.02                      # the truncation bites at N=2, not at N=5
-    assert ratio2 > 1.4                                 # > 40% over-estimate at true N=2 (the real bias)
-    assert 0.9 < ratio5 < 1.1                           # N=5 is within the valid regime — a fix must keep it so
+    for n_true in (2.0, 3.0, 5.0, 8.0):
+        assert 0.7 < ratio(n_true) < 1.3, f"SpIDA N off at true N={n_true}: ratio {ratio(n_true):.2f}"
+    # and specifically the case the old truncation broke — a true 2 is no longer read as ~3
+    assert abs(ratio(2.0) - 1.0) < 0.25
 
 
 @pytest.mark.base
-def test_spida_flags_the_low_density_regime_where_truncation_biases_it():
-    """N6-1 GUARDRAIL (shipped): fit_spida_histogram flags the low-density regime so a biased low-N result is
-    reported LOWER-CONFIDENCE, not silently trusted. The fit itself is unchanged — this is an honesty flag, not a
-    correction, because a naive correction was verified to over-shoot (see the golden-master below)."""
-    spida = pytest.importorskip("pycat.toolbox.spida_tools")
-    low = spida.fit_spida_histogram(*spida.build_intensity_histogram(_spida_pixels(n_true=2.0), n_bins=256))
-    high = spida.fit_spida_histogram(*spida.build_intensity_histogram(_spida_pixels(n_true=8.0), n_bins=256))
-    assert low["low_density_regime"] is True        # fitted N ~3, truncation biases it -> flagged
-    assert high["low_density_regime"] is False       # fitted N ~8, negligible truncation -> not flagged
-
-
-@pytest.mark.base
-@pytest.mark.xfail(reason="N6-1 fix spec (recovery, still open): build_intensity_histogram's `p = p[p > 0]` "
-                          "truncates the k=0 population and biases low-density N (~+56% at N=2). VERIFIED that the "
-                          "naive fix (keep the zeros) OVER-corrects to ~0.6 under the doubly-Poisson model, so a "
-                          "clean recovery needs a truncation-aware histogram model, not a data cut. Until then the "
-                          "regime is FLAGGED (test above), not silently trusted. Remove this xfail when a "
-                          "truncation-aware fit recovers N.", strict=True)
-def test_spida_recovers_low_density_N_once_the_truncation_is_fixed():
-    """FAILING GOLDEN-MASTER (recovery): at a true density of 2, SpIDA should recover N ≈ 2. It currently returns
-    ~3.1 (+56%) because the zero-molecule pixels are truncated before the fit. This is the acceptance test a
-    truncation-aware fix must satisfy — it flips from xfail to pass once the low-density estimate is unbiased."""
+def test_spida_recovers_low_density_N_now_the_truncation_is_fixed():
+    """The N6-1 acceptance test (was a strict-xfail failing golden-master): at a true density of 2, SpIDA recovers
+    N ≈ 2 — where the old `p > 0` truncation read ~3.1 (+56%)."""
     spida = pytest.importorskip("pycat.toolbox.spida_tools")
     x, y = spida.build_intensity_histogram(_spida_pixels(n_true=2.0), n_bins=256)
     fit = spida.fit_spida_histogram(x, y)
     assert fit["N"] == pytest.approx(2.0, rel=0.3)
+
+
+@pytest.mark.base
+def test_spida_still_flags_the_low_density_regime_as_higher_variance():
+    """The `low_density_regime` flag survives the fix but changes meaning: a low fitted N is no longer BIASED (it
+    is recovered), but it is still the regime with the fewest samples per molecule count, so it is flagged as
+    inherently higher-variance — a caution, not a distrust."""
+    spida = pytest.importorskip("pycat.toolbox.spida_tools")
+    low = spida.fit_spida_histogram(*spida.build_intensity_histogram(_spida_pixels(n_true=2.0), n_bins=256))
+    high = spida.fit_spida_histogram(*spida.build_intensity_histogram(_spida_pixels(n_true=8.0), n_bins=256))
+    assert low["low_density_regime"] is True and high["low_density_regime"] is False
 
 
 @pytest.mark.base

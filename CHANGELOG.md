@@ -1,3 +1,27 @@
+## [1.6.450] - 2026-07-30
+### Fixed — **SpIDA recovers low-density N — the N6-1 truncation bias is fixed (the last xfail closed).**
+N6-1's deferred recovery, resolved. `build_intensity_histogram` used to drop every pixel at/below the noise floor
+(`p = p[p > 0]`), discarding the zero-molecule (k=0) population — a large fraction at low density (P(k=0)=e⁻ᴺ) —
+which biased the fitted density upward (~+56% at a true N=2). The fix has two parts, both grounded in SpIDA being
+a distribution-MOMENT analysis:
+
+- **Keep the k=0 population** (`p >= 0`, dropping only genuinely sub-floor negatives), so the histogram and the
+  moments read from it reflect the FULL pixel population and are unbiased at every density.
+- **Anchor on the moment estimate where the least-squares fit collapses.** The curve fit can over-fit the sharp
+  zero-intensity bin at low density and *under*-estimate N (a naive "keep the zeros and re-fit" was verified to
+  over-correct to ~0.6); so when the fit falls below half the moment anchor, `fit_spida_histogram` reports the
+  moment estimate instead. The fit still governs the peak-brightness shape where it is well-behaved.
+
+Result: SpIDA now recovers N across the range — true N = 2 reads ≈ 2.0 (was ~3.1), true N = 8 unchanged (~7.8) —
+and the pedestal sensitivity that guards against a camera offset is preserved (a 200-count pedestal still inflates
+a true 8 to ~31). The `low_density_regime` flag (1.6.436) survives but changes meaning: a low N is no longer
+biased, only inherently higher-variance (fewer samples per molecule count), so it is flagged as a caution to
+confirm against a monomeric control, not a number to distrust.
+
+Tests (`tests/test_group_a_moments.py`): the N6-1 strict-`xfail` golden-master is promoted to passing; a new
+recovery guard pins N tracking the truth across densities 2→8; the flag test is updated to the new (variance, not
+bias) meaning; the N=8 baseline and pedestal tests stay green. **Zero xfails remain in the suite.** Full gate green.
+
 ## [1.6.449] - 2026-07-30
 ### Added — **Execution kernel, increment B: a torch-free segmenter (local threshold) — all op archetypes now proven (Method-Widget Spec 6).**
 Rounds out increment B by diversifying beyond filters: `local_threshold` (Niblack/Sauvola local thresholding) is
