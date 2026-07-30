@@ -309,6 +309,13 @@ you exit and becomes the panel's permanent editing surface.
 **Depends on:** Specs 1, 2, 3.
 
 ### Spec 5 — Comparative step chooser ("why this and not that")
+> **STATUS (1.6.440): the reasoning CORE shipped (headless).** `Planner.explain_terminal_choice(intent, ctx)`
+> surfaces, per observable, the terminal candidates + their scores (in_vitro bonus, target specificity,
+> preference) + the winner — the planner's own reasoning, reused from `_pick_terminal` so it cannot drift (guard
+> test). It shows e.g. `vpt.microrheology` beating the higher-preference generic biophysics fit on bead
+> specificity. Tests in `tests/navigator/test_navigator_selection_explain.py`. STILL OPEN: the GUI pop-out that
+> renders this side-by-side (needs the Spec 4 surface), and enriching it with Spec 3's authored guidance once
+> that content exists. This delivers the data; the presentation is the remaining GUI-bound part.
 The narrower, higher-value slice of Spec 4: at a decision point, show the alternatives **side by side
 with the planner's reason for its selection**, scored against the actual data context (dimensionality,
 modality, calibration, SNR). This is the anti-black-box payoff — the user sees not just what was chosen

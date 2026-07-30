@@ -1,3 +1,22 @@
+## [1.6.440] - 2026-07-29
+### Added — **The planner explains its terminal choice: "why this op, not that" (Method-Widget Spec 5 core).**
+The anti-black-box payoff, from the planner's OWN logic (no authored content needed): `Planner.explain_terminal_choice(intent, ctx)`
+returns, per requested observable, the terminal ops the planner CONSIDERED — each with its selection scores
+(`in_vitro` context bonus, target specificity, preference) and whether it was chosen — ordered winner-first. So a
+scientist can see not just *what* was selected but *why*, and what the runner-up was. On a bead/viscosity intent
+it shows `vpt.microrheology` chosen over the generic `condensate_physics.fit_anomalous_diffusion` **despite the
+generic's higher preference**, because it is specialised to the bead target — the scores make that legible.
+
+Built by extracting `_pick_terminal`'s scoring (the `in_vitro` context bonus + target specificity) into shared
+methods (`_terminal_ctx_bonus`, `_terminal_specificity`) that BOTH the picker and the explainer call, and taking
+the winner straight from `_pick_terminal` — so the explanation **cannot drift** from the actual pick. The
+extraction is behaviour-preserving: all navigator + route-equivalence tests pass unchanged.
+
+Tests (`tests/navigator/test_navigator_selection_explain.py`, `base`, 4): the explanation names the considered
+terminals and the winner (winner-first); it exposes WHY the winner won (specificity 1 vs 0 where preference alone
+would have picked the generic); the explained `chosen` matches the compiled plan exactly (the no-drift guard);
+and an observable with no terminal is simply absent, never a fabricated entry. Full gate green.
+
 ## [1.6.439] - 2026-07-29
 ### Added — **Operation-guidance infrastructure: schema + reader + coverage ratchet + authoring workbook (Method-Widget Spec 3, infra only).**
 Spec 3 lets the Navigator not just choose an op but *explain* one — when to use it, its advantages, limitations,
