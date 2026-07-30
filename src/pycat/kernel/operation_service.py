@@ -221,8 +221,20 @@ def _kernel_bandpass(inputs: dict, params: dict) -> AnalysisResult:
     return AnalysisResult(operation_id="bandpass", entity_type="image", measurements=None, artifacts=(out,))
 
 
+def _kernel_local_threshold(inputs: dict, params: dict) -> AnalysisResult:
+    """Local (Niblack/Sauvola) thresholding — a TORCH-FREE segmenter, the SAME `local_thresholding_func` call the
+    manual/session routes make. Create op: the binary mask is the artifact. (Proves the segmentation kernel path
+    in the core gate, where the torch-gated cellpose family cannot run.)"""
+    from pycat.toolbox.segmentation.local_thresholding import local_thresholding_func
+    out = local_thresholding_func(inputs["image"], params["window_size"],
+                                  k_val=params.get("k_val", -0.5), mode=params.get("mode", "AND"))
+    mask = out[0] if isinstance(out, (tuple, list)) else out
+    return AnalysisResult(operation_id="local_threshold", entity_type="mask", measurements=None, artifacts=(mask,))
+
+
 register_kernel("gaussian", _kernel_gaussian)
 register_kernel("dog", _kernel_dog)
 register_kernel("bilateral", _kernel_bilateral)
 register_kernel("log", _kernel_log)
 register_kernel("bandpass", _kernel_bandpass)
+register_kernel("local_threshold", _kernel_local_threshold)

@@ -1,3 +1,15 @@
+## [1.6.449] - 2026-07-30
+### Added — **Execution kernel, increment B: a torch-free segmenter (local threshold) — all op archetypes now proven (Method-Widget Spec 6).**
+Rounds out increment B by diversifying beyond filters: `local_threshold` (Niblack/Sauvola local thresholding) is
+a TORCH-FREE segmenter, so its route-equivalence workflow proves the segmentation kernel path in the CORE gate —
+where the torch-gated cellpose family cannot run. Its binary mask round-trips exactly as float32 0/1.
+
+With this the kernel spans **every operation archetype**: enhance (background removal + 5 filters), measure (MSD,
+clean-detect, partition enrichment, the three coloc coefficients), segmentation both torch-gated (cellpose) and
+torch-free (local threshold), and the composite (coloc) and looped (time-series) workflow shapes. 12 route-
+equivalence workflows, **14 ops migrated** to `OperationService.execute`, every one asserted `≈ kernel`. Full
+gate green.
+
 ## [1.6.448] - 2026-07-30
 ### Added — **Execution kernel, increment B (cont.): three more filter families — bilateral, LoG, FFT-bandpass (Method-Widget Spec 6).**
 Continues increment B with three more pure array→array filter op families: `bilateral` (edge-preserving),

@@ -1,17 +1,18 @@
-"""**The cross-route equivalence matrix — eleven canonical workflows, asserted identical per route.**
+"""**The cross-route equivalence matrix — twelve canonical workflows, asserted identical per route.**
 
 Read `tests/route_equivalence.py` first: it explains why this exists (the same analysis must not yield
 different numbers depending on how it was launched) and what a route / a documented gap is.
 
-The matrix grew from three to six workflows (increment A) and then to **eleven** (increment B added the pure
-image filters — Gaussian, DoG, bilateral, LoG, FFT-bandpass), chosen for distinct data shapes and failure modes — not the 15 the
-audit imagined at once, because three-per-increment that genuinely run will grow and fifteen written at once are
-abandoned. Adding another is one `Workflow(...)` entry.
+The matrix grew from three to six workflows (increment A) and then to **twelve** (increment B added five pure
+image filters — Gaussian, DoG, bilateral, LoG, FFT-bandpass — and a torch-free local-threshold segmenter),
+chosen for distinct data shapes and failure modes — not the 15 the audit imagined at once, because
+three-per-increment that genuinely run will grow and fifteen written at once are abandoned. Adding another is
+one `Workflow(...)` entry.
 
 A fourth route, **`kernel`** (the Spec-6 execution kernel, `OperationService.execute`), joins headless / batch /
 session: a workflow whose op is migrated to the kernel adds a `kernel` route asserted identical to the rest, and
 one not yet migrated declares `kernel` a documented gap — so an unmigrated op is a VISIBLE gap, never a silent
-absence. Migrated so far: rolling-ball, MSD, clean-detect, cellpose.
+absence. Every workflow above has a `kernel` route (14 ops migrated across the matrix).
 
 | workflow | headless | batch replay | session reload |
 |---|---|---|---|
@@ -24,6 +25,7 @@ absence. Migrated so far: rolling-ball, MSD, clean-detect, cellpose.
 | **gaussian smoothing** (increment B — a pure filter) | ✓ | gap: no batch step | ✓ |
 | **DoG blob enhancement** (increment B — a pure filter) | ✓ | gap: no batch step | ✓ |
 | **bilateral / LoG / FFT-bandpass filters** (increment B) | ✓ | gap: no batch step | ✓ |
+| **local-threshold segmentation** (increment B — torch-free segmenter) | ✓ | gap: no batch step | ✓ |
 
 The batch **gaps are declared, not skipped silently** — and the harness fails if a gap closes or a route
 vanishes without the table being updated. They mark where the headless batch API stops: colocalization has
@@ -477,8 +479,19 @@ def _bandpass_call(raw):
     return fft_bandpass(raw, 2.0, 20.0)
 
 
+def _local_threshold_call(raw):
+    from pycat.toolbox.segmentation.local_thresholding import local_thresholding_func
+    out = local_thresholding_func(raw, 15)
+    return out[0] if isinstance(out, (tuple, list)) else out
+
+
 _bilateral_workflow = _filter_only_workflow(
     'bilateral filter', 'bilateral', 6, 'Bilateral Filtered', _bilateral_call, {'radius': 3})
+# A TORCH-FREE segmenter (local Niblack/Sauvola threshold) — proves the segmentation kernel path in the core
+# gate, where torch-gated cellpose cannot run. Its bool mask round-trips exactly as float32 0/1.
+_local_threshold_workflow = _filter_only_workflow(
+    'local-threshold segmentation', 'local_threshold', 9, 'Local Threshold Mask',
+    _local_threshold_call, {'window_size': 15})
 _log_workflow = _filter_only_workflow(
     'LoG filter', 'log', 7, 'LoG Filtered', _log_call, {'sigma': 3})
 _bandpass_workflow = _filter_only_workflow(
@@ -499,6 +512,7 @@ _WORKFLOW_BUILDERS = {
     'bilateral': _bilateral_workflow,        # increment B
     'log': _log_workflow,                    # increment B
     'bandpass': _bandpass_workflow,          # increment B
+    'local_threshold': _local_threshold_workflow,   # increment B — a torch-free segmenter
 }
 
 
