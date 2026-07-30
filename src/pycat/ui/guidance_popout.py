@@ -57,15 +57,29 @@ def _alt_note_html(alt: dict) -> str:
     return _esc(g.get("when_to_use")) if alt["documented"] else "<i style='color:#b9770e'>not documented yet</i>"
 
 
-def guidance_popout_html(op_id: str, *, alternatives=None) -> str:
+def _score_note_html(scores, op_id: str) -> str:
+    """The 'why this one' annotation for an op (Spec 5): its context match + preference, and a ✓ if it is the
+    planner's current pick. Empty when the op has no reasoning (not a scored role) — never a fabricated score."""
+    s = (scores or {}).get(op_id)
+    if not s:
+        return ""
+    cs = s.get("context_score", 0)
+    ctx = f"context {'+' if cs > 0 else ''}{cs}"
+    mark = " ✓ chosen" if s.get("chosen") else ""
+    return (f"<span style='color:#6b6b6b;font-size:11px'> · {ctx} · pref "
+            f"{float(s.get('preference', 0)):.2f}{mark}</span>")
+
+
+def guidance_popout_html(op_id: str, *, alternatives=None, scores=None) -> str:
     """The full pop-out body (op + its alternatives), as static rich text. Retained for headless inspection and as
     the no-revise fallback rendering; the live dialog builds interactive alternative rows instead."""
     popout = section_guidance(op_id, alternatives=alternatives)
-    html = [_op_guidance_html(op_id)]
+    html = [_op_guidance_html(op_id), _score_note_html(scores, op_id)]
     if popout["alternatives"]:
         html.append("<hr><p style='margin-bottom:4px'><b>Alternatives</b> — other ops for this step:</p>")
         for alt in popout["alternatives"]:
-            html.append(f"<p style='margin:2px 0'><code>{_esc(alt['op_id'])}</code> — {_alt_note_html(alt)}</p>")
+            html.append(f"<p style='margin:2px 0'><code>{_esc(alt['op_id'])}</code>"
+                        f"{_score_note_html(scores, alt['op_id'])} — {_alt_note_html(alt)}</p>")
     return "".join(html)
 
 
@@ -75,16 +89,17 @@ class GuidancePopout(QDialog):
     ``on_revise(alt_op_id)`` — the panel then rebuilds from the amended plan and this dialog closes. Without it the
     alternatives render as static text (guidance-only mode)."""
 
-    def __init__(self, op_id: str, *, alternatives=None, on_revise=None, parent=None):
+    def __init__(self, op_id: str, *, alternatives=None, on_revise=None, scores=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle(f"Guidance — {op_id}")
         self.setMinimumWidth(440)
         self._on_revise = on_revise
+        self._scores = scores
         layout = QVBoxLayout(self)
 
         holder = QWidget()
         hl = QVBoxLayout(holder)
-        hl.addWidget(self._rich(_op_guidance_html(op_id)))
+        hl.addWidget(self._rich(_op_guidance_html(op_id) + _score_note_html(scores, op_id)))
 
         popout = section_guidance(op_id, alternatives=alternatives)
         if popout["alternatives"]:
@@ -117,7 +132,8 @@ class GuidancePopout(QDialog):
         row = QFrame()
         row.setFrameShape(QFrame.StyledPanel)
         rl = QHBoxLayout(row)
-        rl.addWidget(self._rich(f"<code>{_esc(alt['op_id'])}</code> — {_alt_note_html(alt)}"), 1)
+        rl.addWidget(self._rich(f"<code>{_esc(alt['op_id'])}</code>"
+                                f"{_score_note_html(self._scores, alt['op_id'])} — {_alt_note_html(alt)}"), 1)
         if self._on_revise is not None:
             use = QPushButton("Use this instead")
             use.setCursor(Qt.PointingHandCursor)
@@ -136,12 +152,12 @@ class GuidancePopout(QDialog):
         self.accept()
 
 
-def open_guidance_popout(parent, op_id: str, *, alternatives=None, on_revise=None):
+def open_guidance_popout(parent, op_id: str, *, alternatives=None, on_revise=None, scores=None):
     """Construct and show the guidance pop-out for ``op_id`` (non-modal). Pass ``on_revise`` to enable the
-    'Use this instead' swap buttons. Returns the dialog, or ``None`` on failure — a guidance pop-out must never
-    take down the panel it decorates."""
+    'Use this instead' swap buttons and ``scores`` for the Spec 5 'why this one' annotations. Returns the dialog,
+    or ``None`` on failure — a guidance pop-out must never take down the panel it decorates."""
     try:
-        dlg = GuidancePopout(op_id, alternatives=alternatives, on_revise=on_revise, parent=parent)
+        dlg = GuidancePopout(op_id, alternatives=alternatives, on_revise=on_revise, scores=scores, parent=parent)
         dlg.show()
         return dlg
     except Exception as exc:  # broad-ok: ui_cleanup — a guidance pop-out failure must not disturb the panel

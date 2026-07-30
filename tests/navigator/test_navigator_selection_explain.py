@@ -128,3 +128,18 @@ def test_segmentation_choice_is_none_without_a_target():
     pl = _planner()
     assert pl.explain_segmentation_choice(AnalysisIntent(target=None, observables=["count"]),
                                           AnalysisContext()) is None
+
+
+def test_provider_explanation_honors_a_pin_so_it_tracks_a_live_revision():
+    """Regression: the explainer keys its pin lookup on the goal's ``.kind`` (a Capability has no
+    ``.representation`` — the old code read that and always got ``None``, silently ignoring pins). Without the fix
+    the explanation would keep naming the default segmenter after a live revision pinned a different one, so the
+    'why this one' annotations would contradict the panel the user is looking at."""
+    pl = _planner()
+    intent = AnalysisIntent(target="cell", observables=["count"])
+    ctx = _fluor_ctx()
+    assert pl.explain_segmentation_choice(intent, ctx, pins={})["chosen"] == "cellpose"
+    # pin watershed the way revise_plan does — the explanation must now follow the pin
+    pinned = pl.explain_segmentation_choice(intent, ctx, pins={"instance_labels": "watershed"})
+    assert pinned["chosen"] == "watershed"
+    assert pinned["candidates"][0]["name"] == "watershed" and pinned["candidates"][0]["chosen"] is True

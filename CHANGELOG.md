@@ -1,3 +1,28 @@
+## [1.6.456] - 2026-07-30
+### Added — **'Why this one' scores in the revision pop-out, and a pin-honoring fix (Method-Widget Spec 5).**
+The live-revision pop-out (1.6.455) now shows the planner's reasoning next to each candidate: the segmenter's
+context match and preference, with a ✓ on the current pick. The chooser stops being "here are the alternatives"
+and becomes "here is why cellpose is the default, and what you'd trade by choosing watershed" — the anti-black-box
+payoff, delivered at the exact moment the scientist is deciding whether to override the default.
+
+- **`navigator.session.segmentation_scores(session)`** (tested, `base`) maps each segmenter candidate to its
+  `context_score` (+1 a context-confirmed specialist / 0 general / −1 unconfirmed specialist / −2 context-violated),
+  its `preference`, and whether it is currently chosen. It reuses the Spec 5 explainer, so the scores can't drift
+  from the actual pick, and it honors the session's pins, so after a revision the pinned op is the one marked ✓.
+- **`ui/guidance_popout.py`** renders a `· context 0 · pref 0.67 ✓ chosen` annotation on the op heading and each
+  alternative row; **`GeneratedMethodUI`** computes the scores per pop-out open against the current pins. An op
+  with no reasoning (not a scored role) gets no annotation — never a fabricated score.
+
+**Fix — the explainer silently ignored pins.** `Planner.explain_provider_choice` keyed its pin lookup on
+`goal.representation`, but a `Capability` has no such attribute (it is `.kind`), so `kind_hint` was always `None`
+and the pinned choice was never consulted. Left unfixed, the 'why this one' annotations would keep naming the
+*default* segmenter after a live revision pinned a different one — the reasoning contradicting the panel in front
+of the user. Now keyed on `.kind`; a regression test pins that a pinned segmenter becomes the explained `chosen`.
+
+Three new headless tests (scores justify the default + follow the pin; empty without a target; the pin-honoring
+regression). Full navigator gate green. GUI-bound: the annotations need a manual napari acceptance run; the
+scoring + pin logic is tested.
+
 ## [1.6.455] - 2026-07-30
 ### Added — **Live plan revision from the guidance pop-out (Method-Widget Spec 4, the larger half).**
 The pop-out that showed a section's alternatives (1.6.454) can now ACT on them: each alternative carries a

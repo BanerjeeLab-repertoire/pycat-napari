@@ -201,6 +201,23 @@ def alternatives_for_op(session, op_id):
             if c.name != op_id and _input_kinds(c) == want_inputs]
 
 
+def segmentation_scores(session):
+    """The Spec 5 'why this one' scores for the target's segmenter, keyed by op-id — what a pop-out annotates each
+    candidate with so the default is JUSTIFIED, not just asserted: the context match (+1 a specialist confirmed
+    for this context / 0 general-purpose / -1 an unconfirmed specialist / -2 context-violated) and the provider
+    preference, plus which op is currently chosen. Honors the session's pins, so after a live revision the pinned
+    op is the one marked chosen. ``{}`` when the intent has no target/segmenter — the pop-out then shows
+    alternatives without scores rather than inventing them."""
+    try:
+        rep = session.planner.explain_segmentation_choice(session.intent, session.ctx, pins=dict(session.pins))
+    except Exception:      # broad-ok: optional_probe — reasoning is decoration; its absence must not block the pop-out
+        rep = None
+    if not rep:
+        return {}
+    return {c["name"]: {"context_score": c["context_score"], "preference": c["preference"], "chosen": c["chosen"]}
+            for c in rep["candidates"]}
+
+
 def revise_plan(session, current_op_id, new_op_id):
     """Live-revise a plan (Method-Widget Spec 4 — the editing surface): swap ``current_op_id`` for ``new_op_id``
     at its role and recompile, so the planner re-satisfies the new op's requirements and PRESERVES the rest of

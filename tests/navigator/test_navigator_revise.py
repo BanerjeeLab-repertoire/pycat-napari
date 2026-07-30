@@ -8,7 +8,7 @@ and that an undeterminable role recompiles unchanged rather than guessing.
 import pytest
 
 from pycat.navigator.session import (
-    NavigatorSession, revise_plan, provided_representation, alternatives_for_op,
+    NavigatorSession, revise_plan, provided_representation, alternatives_for_op, segmentation_scores,
 )
 from pycat.navigator.execution import execution_order
 from pycat.navigator.contracts import AnalysisIntent
@@ -68,6 +68,29 @@ def test_revision_persists_and_can_be_revised_again():
     # revise again to a third segmenter
     after = [x.name for x in execution_order(revise_plan(s, "watershed", "subcellular_segment"))]
     assert "subcellular_segment" in after and "watershed" not in after
+
+
+def test_segmentation_scores_justify_the_default_and_follow_the_pin():
+    s = _cell_session()
+    scores = segmentation_scores(s)
+    # the default segmenter is marked chosen; with no context confirmed the context scores tie at 0, so the pick
+    # is justified by PREFERENCE — cellpose is the preferred cell segmenter and outranks its peers there
+    assert scores["cellpose"]["chosen"] is True
+    assert scores["watershed"]["chosen"] is False
+    assert scores["cellpose"]["preference"] == max(v["preference"] for v in scores.values())
+    assert scores["cellpose"]["preference"] > scores["watershed"]["preference"]
+
+    # after a revision pins watershed, the reasoning must follow the pin — the whole point of the kind_hint fix:
+    # a Capability's pin key is its .kind, so explain_segmentation_choice now honors the segmenter pin
+    revise_plan(s, "cellpose", "watershed")
+    after = segmentation_scores(s)
+    assert after["watershed"]["chosen"] is True
+    assert after["cellpose"]["chosen"] is False
+
+
+def test_segmentation_scores_empty_without_a_target():
+    s = NavigatorSession()  # no intent target
+    assert segmentation_scores(s) == {}
 
 
 def test_an_undeterminable_role_recompiles_unchanged_never_guesses():

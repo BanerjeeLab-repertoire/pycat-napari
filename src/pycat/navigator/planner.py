@@ -353,7 +353,7 @@ class Planner:
         providers = self.registry.providers_of(goal)
         if not providers:
             return None
-        kind_hint = getattr(getattr(goal, "representation", None), "value", None)
+        kind_hint = getattr(goal, "kind", None)   # a Capability's representation-kind IS its pin key
         chosen = self._pick(providers, ctx, pins, kind_hint=kind_hint)
         return {
             "goal": str(goal),

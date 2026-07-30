@@ -95,6 +95,19 @@ class GeneratedMethodUI(AnalysisMethodsUI):
             debug_log(f"generated method: could not compute alternatives for {op_id!r}", exc)
             return []
 
+    def _selection_scores(self):
+        """The Spec 5 'why this one' scores for the segmenter section, keyed by op-id (empty when revision is off
+        or the plan has no segmenter). Computed once per pop-out open, against the session's current pins."""
+        session = self._ensure_session()
+        if session is None:
+            return {}
+        try:
+            from pycat.navigator.session import segmentation_scores
+            return segmentation_scores(session)
+        except Exception as exc:  # broad-ok: optional_probe — reasoning is decoration, never fatal
+            debug_log("generated method: could not compute selection scores", exc)
+            return {}
+
     def _revise_to(self, current_op_id, new_op_id):
         """Swap ``current_op_id`` for ``new_op_id`` and rebuild the panel from the amended plan (Spec 4). The
         recompiled panel is docked first, then this one's dock removed, so the surface never blinks empty. The
@@ -137,7 +150,8 @@ class GeneratedMethodUI(AnalysisMethodsUI):
         btn.setStyleSheet("QToolButton { color: #0d7d78; border: none; font-size: 11px; padding: 2px 0; }"
                           "QToolButton:hover { text-decoration: underline; }")
         btn.clicked.connect(lambda _=False, o=op_id, a=alts, r=on_revise:
-                            open_guidance_popout(self, o, alternatives=a, on_revise=r))
+                            open_guidance_popout(self, o, alternatives=a, on_revise=r,
+                                                 scores=self._selection_scores()))
         self.method_layout.addWidget(btn)
 
     def setup_ui(self):
