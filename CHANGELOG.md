@@ -1,3 +1,16 @@
+## [1.6.444] - 2026-07-30
+### Added — **Execution kernel, family 3: clean spot detection migrated — all torch-free canonical workflows now prove ≈ kernel (Method-Widget Spec 6).**
+Family 3 is `clean` (`clean_detect`) — clean-mask spot detection with per-object measurement, another MEASURE op.
+`OperationService.execute("clean", {"image": …}, {psf_sigma, psf_size})` returns
+`AnalysisResult(entity_type="puncta", measurements=<DataFrame>)`, the same `clean_detect` science the manual and
+session routes run. Workflow 2 (puncta) gains a `kernel` route and closes its `≈ kernel` row.
+
+With this, **all three torch-free canonical route-equivalence workflows** — background removal (Workflow 1), puncta
+detection (Workflow 2), and VPT→MSD (Workflow 3) — now assert `headless ≈ (batch) ≈ session ≈ kernel`, so the
+migrated science is proven identical across every route including the new kernel. Migrated ops: `rolling_ball`,
+`condensate_physics.compute_msd`, `clean`. (Cellpose/Workflow 4 is torch-gated; its kernel migration waits on the
+torch lane.) Full gate green.
+
 ## [1.6.443] - 2026-07-30
 ### Added — **Execution kernel, family 2: MSD transport analysis migrated (Method-Widget Spec 6, the measurements path).**
 Continues the per-family kernel migration. Family 2 is `condensate_physics.compute_msd` — a MEASURE op, so it

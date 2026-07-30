@@ -89,3 +89,19 @@ def _kernel_compute_msd(inputs: dict, params: dict) -> AnalysisResult:
 
 
 register_kernel("condensate_physics.compute_msd", _kernel_compute_msd)
+
+
+# ── Family 3: clean spot detection + measurement. Another MEASURE op (per-object table). Closes the last ──
+# torch-free route-equivalence row (Workflow 2, puncta). ──────────────────────────────────────────────────────
+
+def _kernel_clean_detect(inputs: dict, params: dict) -> AnalysisResult:
+    """Clean-mask spot detection with per-object measurement — the SAME `clean_detect` call the manual/session
+    routes make. Measure op: the per-punctum detection+measurement table is the measurement."""
+    from pycat.toolbox.clean_spot_detection_tools import clean_detect
+    df = clean_detect(inputs["image"],
+                      psf_sigma=params.get("psf_sigma", 2.5),
+                      psf_size=params.get("psf_size", 11))
+    return AnalysisResult(operation_id="clean", entity_type="puncta", measurements=df, artifacts=())
+
+
+register_kernel("clean", _kernel_clean_detect)

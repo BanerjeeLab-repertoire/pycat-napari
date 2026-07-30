@@ -142,9 +142,14 @@ def _puncta_workflow():
     def session():
         return session_roundtrip_dataframe(headless(), 'puncta_df')
 
+    def kernel():
+        # Spec-6 kernel, family 3 (a MEASURE op → per-object table). Same clean_detect science as the routes above.
+        from pycat.kernel.operation_service import OperationService
+        return OperationService.execute('clean', {'image': image}, {'psf_sigma': 2.5, 'psf_size': 11}).measurements
+
     return Workflow(
         'puncta detection + measurement',
-        routes={'headless': headless, 'session': session},
+        routes={'headless': headless, 'session': session, 'kernel': kernel},
         # A session round-trip is a DECIMAL (CSV) serialization, so a float64 can come back differing
         # in its last bit (~1 ULP, ~2e-16). That is the text format's precision, NOT a route computing
         # a different number — so the tolerance is 1 ULP-scale (rtol 1e-12, atol 1e-15), far below any

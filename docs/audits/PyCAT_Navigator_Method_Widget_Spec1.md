@@ -333,6 +333,11 @@ but the reasoning and the runner-up.
 > **UPDATE (1.6.443): family 2 migrated** — `condensate_physics.compute_msd` (a MEASURE op → the measurements
 > TABLE path of AnalysisResult; family 1 used only artifacts). Workflow 3's `≈ kernel` row closes. Migrated so
 > far: `rolling_ball`, `condensate_physics.compute_msd`.
+> **UPDATE (1.6.444): family 3 migrated** — `clean` (clean_detect, puncta measurement). ALL THREE torch-free
+> canonical workflows (1 background removal, 2 puncta, 3 MSD) now prove `≈ kernel`. Migrated: `rolling_ball`,
+> `condensate_physics.compute_msd`, `clean`. Cellpose (Workflow 4) is torch-gated — next when the torch lane is
+> in play. The kernel pattern is fully demonstrated across the route-equivalence matrix; remaining families are
+> mechanical registrations.
 I agree with the audit here and so do you. `OperationService.execute(...) → AnalysisResult`, sitting
 **below** batch, Navigator, generated panels, manual panels, and headless. Batch handlers keep
 workflow/persistence concerns (paths, output dirs, naming) and stop being the de facto scientific API.
