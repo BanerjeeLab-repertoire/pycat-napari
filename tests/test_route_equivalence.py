@@ -1,10 +1,10 @@
-"""**The cross-route equivalence matrix — fifteen canonical workflows, asserted identical per route.**
+"""**The cross-route equivalence matrix — seventeen canonical workflows, asserted identical per route.**
 
 Read `tests/route_equivalence.py` first: it explains why this exists (the same analysis must not yield
 different numbers depending on how it was launched) and what a route / a documented gap is.
 
-The matrix grew from three to six workflows (increment A) and then to **fifteen** (increment B added pure
-image filters — Gaussian, DoG, bilateral, LoG, FFT-bandpass, invert, rescale, gabor — and a torch-free local-threshold segmenter),
+The matrix grew from three to six workflows (increment A) and then to **seventeen** (increment B added pure
+image filters — Gaussian, DoG, bilateral, LoG, FFT-bandpass, invert, rescale, gabor, upscale — and two torch-free segmenters (local-threshold, Felzenszwalb)),
 chosen for distinct data shapes and failure modes — not the 15 the audit imagined at once, because
 three-per-increment that genuinely run will grow and fifteen written at once are abandoned. Adding another is
 one `Workflow(...)` entry.
@@ -12,7 +12,7 @@ one `Workflow(...)` entry.
 A fourth route, **`kernel`** (the Spec-6 execution kernel, `OperationService.execute`), joins headless / batch /
 session: a workflow whose op is migrated to the kernel adds a `kernel` route asserted identical to the rest, and
 one not yet migrated declares `kernel` a documented gap — so an unmigrated op is a VISIBLE gap, never a silent
-absence. Every workflow above has a `kernel` route (17 ops migrated across the matrix).
+absence. Every workflow above has a `kernel` route (19 ops migrated across the matrix).
 
 | workflow | headless | batch replay | session reload |
 |---|---|---|---|
@@ -26,7 +26,8 @@ absence. Every workflow above has a `kernel` route (17 ops migrated across the m
 | **DoG blob enhancement** (increment B — a pure filter) | ✓ | gap: no batch step | ✓ |
 | **bilateral / LoG / FFT-bandpass filters** (increment B) | ✓ | gap: no batch step | ✓ |
 | **local-threshold segmentation** (increment B — torch-free segmenter) | ✓ | gap: no batch step | ✓ |
-| **invert / rescale / gabor** (increment B — more enhancers) | ✓ | gap: no batch step | ✓ |
+| **invert / rescale / gabor / upscale** (increment B — enhancers) | ✓ | gap: no batch step | ✓ |
+| **Felzenszwalb segmentation** (increment B — torch-free segmenter) | ✓ | gap: no batch step | ✓ |
 
 The batch **gaps are declared, not skipped silently** — and the harness fails if a gap closes or a route
 vanishes without the table being updated. They mark where the headless batch API stops: colocalization has
@@ -510,9 +511,24 @@ def _gabor_call(raw):
     return gabor_filter_func(raw)
 
 
+def _fz_call(raw):
+    from pycat.toolbox.segmentation.fz import felzenszwalb_segmentation_and_merging
+    out = felzenszwalb_segmentation_and_merging(raw)
+    return out[0] if isinstance(out, (tuple, list)) else out
+
+
+def _upscale_call(raw):
+    from pycat.toolbox.image_processing._base import upscale_image_interp
+    return upscale_image_interp(raw, raw.shape[0], raw.shape[1], 2)
+
+
 _invert_workflow = _filter_only_workflow('intensity inversion', 'invert', 10, 'Inverted', _invert_call, {})
 _rescale_workflow = _filter_only_workflow('intensity rescale', 'rescale', 11, 'Rescaled', _rescale_call, {})
 _gabor_workflow = _filter_only_workflow('gabor filter', 'gabor', 12, 'Gabor Filtered', _gabor_call, {})
+# A second torch-free segmenter (Felzenszwalb graph merge) and an interpolation upscaler.
+_fz_workflow = _filter_only_workflow('felzenszwalb segmentation', 'felzenszwalb', 13, 'FZ Labels', _fz_call, {})
+_upscale_workflow = _filter_only_workflow('interpolation upscaling', 'upscale', 14, 'Upscaled', _upscale_call,
+                                          {'upscale_factor': 2})
 _log_workflow = _filter_only_workflow(
     'LoG filter', 'log', 7, 'LoG Filtered', _log_call, {'sigma': 3})
 _bandpass_workflow = _filter_only_workflow(
@@ -537,6 +553,8 @@ _WORKFLOW_BUILDERS = {
     'invert': _invert_workflow,              # increment B
     'rescale': _rescale_workflow,            # increment B
     'gabor': _gabor_workflow,                # increment B
+    'felzenszwalb': _fz_workflow,            # increment B — a second torch-free segmenter
+    'upscale': _upscale_workflow,            # increment B
 }
 
 

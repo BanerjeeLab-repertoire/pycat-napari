@@ -1,3 +1,11 @@
+## [1.6.452] - 2026-07-30
+### Added — **Execution kernel, increment B (cont.): Felzenszwalb segmenter + interpolation upscaling (Method-Widget Spec 6).**
+Two more op families migrated: `felzenszwalb` (Felzenszwalb graph segmentation + region merging — a SECOND
+torch-free segmenter) and `upscale` (interpolation upscaling; the kernel reads the original dims from the image,
+not from a scientific parameter). Each is a route-equivalence workflow proving `headless ≈ session ≈ kernel`
+bit-for-bit plus a kernel registration; batch is a documented gap. The matrix is now **seventeen workflows**; the
+kernel covers **19 ops**. Full gate green.
+
 ## [1.6.451] - 2026-07-30
 ### Added — **Execution kernel, increment B (cont.): three more enhancer families — invert, rescale, gabor (Method-Widget Spec 6).**
 Three more pure image→image enhancer op families migrated to the kernel: `invert` (intensity inversion),

@@ -259,6 +259,28 @@ register_kernel("bilateral", _kernel_bilateral)
 register_kernel("log", _kernel_log)
 register_kernel("bandpass", _kernel_bandpass)
 register_kernel("local_threshold", _kernel_local_threshold)
+def _kernel_felzenszwalb(inputs: dict, params: dict) -> AnalysisResult:
+    """Felzenszwalb graph segmentation + region merging — a TORCH-FREE segmenter, the SAME
+    `felzenszwalb_segmentation_and_merging` call. Create op: the label image is the artifact."""
+    from pycat.toolbox.segmentation.fz import felzenszwalb_segmentation_and_merging
+    out = felzenszwalb_segmentation_and_merging(
+        inputs["image"], scale=params.get("scale", 7.0), sigma=params.get("sigma", 0.5),
+        min_size=params.get("min_size", 2), merge_tol=params.get("merge_tol", 0.05))
+    labels = out[0] if isinstance(out, (tuple, list)) else out
+    return AnalysisResult(operation_id="felzenszwalb", entity_type="mask", measurements=None, artifacts=(labels,))
+
+
+def _kernel_upscale(inputs: dict, params: dict) -> AnalysisResult:
+    """Interpolation upscaling — the SAME `upscale_image_interp` call. The original dims are read from the image
+    itself (they are not a scientific parameter). Enhance op: the upscaled image is the artifact."""
+    from pycat.toolbox.image_processing._base import upscale_image_interp
+    img = inputs["image"]
+    out = upscale_image_interp(img, img.shape[0], img.shape[1], params.get("upscale_factor", 2))
+    return AnalysisResult(operation_id="upscale", entity_type="image", measurements=None, artifacts=(out,))
+
+
 register_kernel("invert", _kernel_invert)
 register_kernel("rescale", _kernel_rescale)
 register_kernel("gabor", _kernel_gabor)
+register_kernel("felzenszwalb", _kernel_felzenszwalb)
+register_kernel("upscale", _kernel_upscale)

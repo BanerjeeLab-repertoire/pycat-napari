@@ -68,4 +68,4 @@ def test_migrated_ops_reports_the_kernel_coverage():
     assert {"rolling_ball", "condensate_physics.compute_msd", "clean", "cellpose", "client_enrichment",
             "coloc.manders_m1", "coloc.manders_m2", "colocalization",
             "gaussian", "dog", "bilateral", "log", "bandpass", "local_threshold",
-            "invert", "rescale", "gabor"} <= migrated
+            "invert", "rescale", "gabor", "felzenszwalb", "upscale"} <= migrated
