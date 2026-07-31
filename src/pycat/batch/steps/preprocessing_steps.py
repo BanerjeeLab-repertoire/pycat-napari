@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from pycat.file_io.image_reader import open_image
 from pycat.batch.steps._common import (
-    _get_data, _derive_split_companion_path, _source_path_for_recorded_channel, _load_image, _resolve_channel_for_layer, _save_array, _raw_counts, _normalize_to_float, _resolve_image_layer, _ivf_droplet_mask_and_image)
+    _get_data, _derive_split_companion_path, _source_path_for_recorded_channel, _load_image, _resolve_channel_for_layer, _save_array, _raw_counts, _normalize_to_float, _resolve_image_layer, _ivf_droplet_mask_and_image, _active_layer_channel_role)
 
 
 def replay_preprocessing(state: dict, image_path: Path, params: dict, output_dir: Path):
@@ -37,10 +37,12 @@ def replay_preprocessing(state: dict, image_path: Path, params: dict, output_dir
     suppress_foreground = bool(params.get('suppress_foreground', True))
     suppression_params = params.get('foreground_suppression_params', None)
 
-    # Which layer was active when preprocessing was clicked?
+    # Which layer was active when preprocessing was clicked? Keyword match for generic-
+    # named configs, or a channels_by_name match for split-file / sample-identity-named
+    # ones (e.g. "Upscaled In_Cell [1]") — see _active_layer_channel_role.
     active_name = str(params.get('active_layer')
                       or params.get('active_image_layer') or '').lower()
-    on_fluor = 'fluorescence' in active_name  # default (incl. "segmentation") -> seg
+    on_fluor, _fluor_key = _active_layer_channel_role(state, active_name)
 
     def _proc(arr):
         # run_pre_process_image (the interactive path) caps ball_radius/window_size
@@ -95,6 +97,14 @@ def replay_preprocessing(state: dict, image_path: Path, params: dict, output_dir
     if on_fluor:
         fluor = state.get('fluorescence_image', state['image'])
         state['preprocessed_fluorescence'] = _proc(fluor)
+        # Named channel (resolved via channels_by_name, not the generic 'fluorescence'
+        # keyword): record the PROCESSED result in its own dict, separate from the raw
+        # one channels_by_name holds. A later step recorded on the RAW name (e.g.
+        # cell_analysis's "Upscaled In_Cell [1]", no processing keyword) still needs the
+        # untouched raw array — overwriting channels_by_name in place would break that.
+        if _fluor_key is not None:
+            state.setdefault('channels_processed_by_name', {})[_fluor_key] = (
+                state['preprocessed_fluorescence'])
         # Segmentation channel was NOT the active layer -> leave it unprocessed.
         state.setdefault('preprocessed', np.asarray(state['image']).copy())
         _save_array(state['preprocessed_fluorescence'],
@@ -165,13 +175,16 @@ def replay_upscaling(state: dict, image_path: Path, params: dict, output_dir: Pa
             fluor_up = upscale_image_interp(fluor, fr, fc, upscale_factor=upscale_factor)
             state['fluorescence_image'] = np.clip(fluor_up, 0, None).astype(np.float32)
 
-    # Update channels_by_name too if populated
-    for name, arr in state.get('channels_by_name', {}).items():
-        if arr is not None and arr is not image:
-            cr, cc = arr.shape[-2], arr.shape[-1]
-            if cr < 2048 and cc < 2048:
-                arr_up = upscale_image_interp(arr, cr, cc, upscale_factor=upscale_factor)
-                state['channels_by_name'][name] = np.clip(arr_up, 0, None).astype(np.float32)
+    # Update channels_by_name (raw) and channels_processed_by_name (if a named
+    # channel's preprocessing/background-removal already ran BEFORE upscaling —
+    # an unusual order, but one the recorded config is free to produce) too.
+    for channels_key in ('channels_by_name', 'channels_processed_by_name'):
+        for name, arr in state.get(channels_key, {}).items():
+            if arr is not None and arr is not image:
+                cr, cc = arr.shape[-2], arr.shape[-1]
+                if cr < 2048 and cc < 2048:
+                    arr_up = upscale_image_interp(arr, cr, cc, upscale_factor=upscale_factor)
+                    state[channels_key][name] = np.clip(arr_up, 0, None).astype(np.float32)
 
     _save_array(upscaled, output_dir / f"{image_path.stem}_upscaled.tiff")
     selected = params.get('selected_layers', params.get('active_layer', '?'))

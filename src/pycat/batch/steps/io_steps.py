@@ -30,6 +30,11 @@ def _replay_split_file_companion(state: dict, image_path: Path, params: dict) ->
     calls_so_far = state.get('_open_image_calls', 0)
     state['_open_image_calls'] = calls_so_far + 1
     if calls_so_far < 1:
+        # The primary's OWN recorded name — a split-file recording never has a
+        # "Segmentation Image" keyword to match on, so _resolve_image_layer /
+        # _active_layer_channel_role need this to recognise a step recorded
+        # against e.g. "Upscaled In_Cell" as the primary channel.
+        state['_primary_channel_name'] = params.get('_active_layer_at_record')
         return False                       # first call: load the primary below
     recorded_stem = Path(params.get('file_path', '') or '').stem
     layer_name = params.get('_active_layer_at_record') or recorded_stem or 'companion'
@@ -43,6 +48,20 @@ def _replay_split_file_companion(state: dict, image_path: Path, params: dict) ->
               f"loaded ({_e}) — this layer will be unavailable to later steps.")
         return True
     state.setdefault('channels_by_name', {})[layer_name] = companion_image
+    # ── This companion is also the FLUORESCENCE role, if no other channel claimed it ──
+    #
+    # A split-file recording never sets a channel_assignment, so `replay_open_image`'s
+    # normal seg/fluor split (lines below) never ran — `state['fluorescence_image']` is
+    # still just an ALIAS of the primary image object from the first `open_image` call.
+    # Left that way, every later step that reads `state['fluorescence_image']` (the
+    # preprocessing/background-removal fallback, and `_resolve_image_layer`'s own
+    # fallback for an unmatched name) silently gets the PRIMARY/segmentation channel
+    # instead of this companion — the recorded pipeline's condensate-marker channel
+    # never actually reaches any step that resolves it that way. Only claim the role
+    # once (the first companion establishes it); a 3rd+ companion is a named extra
+    # channel, not a second "the" fluorescence channel.
+    if state.get('fluorescence_image') is state.get('image'):
+        state['fluorescence_image'] = companion_image
     print(f"[PyCAT Batch]   Loaded companion file {companion_path.name} "
           f"as layer '{layer_name}'  shape={companion_image.shape}")
     return True
@@ -141,6 +160,12 @@ def replay_open_image(state: dict, image_path: Path, params: dict, output_dir: P
                 extra_image, _ = _load_image(extra_path, channel=ch_num if extra_path == image_path else 0)
                 loaded_channel_cache[ch_num] = extra_image
             state['channels_by_name'][layer_name] = loaded_channel_cache[ch_num]
+            # The primary channel's OWN recorded name — see _replay_split_file_companion's
+            # matching comment; _resolve_image_layer / _active_layer_channel_role check
+            # this by name rather than array identity (upscaling leaves this entry's
+            # identity stale).
+            if ch_num == seg_channel:
+                state['_primary_channel_name'] = layer_name
 
         n_channels = len(channel_assignment)
         print(f"[PyCAT Batch]   Loaded {image_path.name}  shape={image.shape}  "

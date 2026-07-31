@@ -129,7 +129,7 @@ from pycat.batch.steps.invitro_steps import (replay_ivf_preprocess, replay_ivf_f
 from pycat.batch.steps.vpt_steps import replay_vpt_microrheology
 from pycat.batch.steps.analysis_steps import (replay_condensate_analysis, replay_measure_line, replay_cell_analysis, replay_sacf_analysis, replay_condensate_segmentation, replay_pixel_coloc, replay_spatial_metrology, replay_dynamic_spatial, replay_msd_analysis)
 
-from pycat.batch.steps._common import _get_data, _save_array, _raw_counts, _normalize_to_float  # for replay_background_removal (kept here: a source-level test pins it)
+from pycat.batch.steps._common import _get_data, _save_array, _raw_counts, _normalize_to_float, _active_layer_channel_role  # for replay_background_removal (kept here: a source-level test pins it)
 
 # replay_background_removal stays in this file: test_batch_matches_the_recording reads its SOURCE here
 # (a white-box scale-logic check), so moving it would break a test the spec forbids editing.
@@ -156,10 +156,9 @@ def replay_background_removal(state: dict, image_path: Path, params: dict, outpu
                                 _get_data(data_instance, 'ball_radius', 50))))
     sp = params.get('foreground_suppression_params', None) or {}
 
-    # Which layer was active when background removal was clicked?
-    active_name = str(params.get('active_layer')
+    active_name = str(params.get('active_layer')  # see _active_layer_channel_role
                       or params.get('active_image_layer') or '').lower()
-    on_fluor = 'fluorescence' in active_name  # default (incl. "segmentation") -> seg
+    on_fluor, _fluor_key = _active_layer_channel_role(state, active_name)
 
     def _enhance(img):
         # ── The "already enhanced" HEURISTIC IS SCALE-DEPENDENT, and batch changed the scale ──
@@ -199,6 +198,8 @@ def replay_background_removal(state: dict, image_path: Path, params: dict, outpu
         fluor_proc = state.get('preprocessed_fluorescence',
                                state.get('fluorescence_image', state['image']))
         state['preprocessed_fluorescence'] = _enhance(fluor_proc)
+        if _fluor_key is not None:   # PROCESSED store, not raw — see replay_preprocessing
+            state.setdefault('channels_processed_by_name', {})[_fluor_key] = state['preprocessed_fluorescence']
         _save_array(state['preprocessed_fluorescence'],
                     output_dir / f"{image_path.stem}_bg_removed.tiff")
         print("[PyCAT Batch]   Background removal done (active layer: fluorescence).")

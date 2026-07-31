@@ -192,6 +192,29 @@ def _empty_config() -> Dict:
     }
 
 
+class _NumpyJSONEncoder(json.JSONEncoder):
+    """Recorded step params come straight from analysis code — cell_diameter,
+    ball_radius, and similar values are routinely computed as np.float32/
+    np.float64 (or occasionally np.integer/np.bool_/np.ndarray), and plain
+    ``json.dump`` has no idea what those are: ``TypeError: Object of type
+    float32 is not JSON serializable``, on save, after the whole pipeline had
+    already run. Converting at THIS one boundary (rather than hunting down
+    every recording call site that might hand `record()` a numpy value) means
+    no future step type can reintroduce the crash."""
+
+    def default(self, o):
+        import numpy as np
+        if isinstance(o, np.integer):
+            return int(o)
+        if isinstance(o, np.floating):
+            return float(o)
+        if isinstance(o, np.bool_):
+            return bool(o)
+        if isinstance(o, np.ndarray):
+            return o.tolist()
+        return super().default(o)
+
+
 def _batch_pycat_version() -> str:
     """The installed ``pycat-napari`` version, for per-row provenance in the consolidated table.
     Returns ``''`` (blank, not a guess) if it cannot be resolved."""
@@ -874,7 +897,7 @@ class BatchProcessor:
         """Save the current session config to a JSON file."""
         self.config["saved"] = datetime.now().isoformat(timespec="seconds")
         with open(path, "w") as f:
-            json.dump(self.config, f, indent=2)
+            json.dump(self.config, f, indent=2, cls=_NumpyJSONEncoder)
         self._dirty = False
         print(f"[PyCAT Batch] Config saved → {path}")
 
