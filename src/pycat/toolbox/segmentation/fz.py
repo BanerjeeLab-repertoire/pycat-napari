@@ -207,6 +207,81 @@ def run_fz_segmentation_and_merging(scale_input, sigma_input, min_size_input, me
     add_image_with_default_colormap(segmented_img, viewer, name=f"Felzenszwalb Segmented {active_layer.name}")
 
 
+def _bridge_fragmented_rims(segmented_mask, rim_close_radius=5, rim_close_min_result_area=150):
+    """Reconnect a large condensate's rim when upstream processing fragmented it into arcs —
+    without also gluing together several separate, nearby small puncta.
+
+    ── Why this exists ──────────────────────────────────────────────────────────────────────
+
+    The upstream ball_radius-scale enhancement (white top-hat / Gaussian background division)
+    is a band-pass operation: it suppresses the flat, uniform interior of a condensate that is
+    large relative to ball_radius, leaving only its curved rim. Local (Niblack/Sauvola)
+    thresholding on that rim-only signal often breaks it into disconnected fragments rather
+    than one continuous ring — a "necklace" of small puncta instead of one solid object.
+    ``binary_fill_holes`` only closes a hole already fully enclosed by a continuous ring, so a
+    morphological closing runs first to bridge the gaps into a loop the fill can recover.
+
+    ``rim_close_radius`` is intentionally NOT scaled with ``ball_radius`` — the fragmentation
+    gap size comes from small, fixed-scale upstream operations (disk(1) erosion/dilation, Gabor
+    filtering), not from the condensate's own size. Scaling it with ball_radius (an earlier
+    version did) applies a huge closing to the whole image at realistic ball_radius values and
+    erroneously fuses distinct, well-separated objects everywhere, not just large condensates.
+
+    ── Why size and area-ratio alone are not enough ────────────────────────────────────────
+
+    A dense cluster of several genuinely separate small puncta can ALSO close+fill into one
+    result >= ``rim_close_min_result_area``, joining few enough pieces (<=8) with little enough
+    added area (<=2x) to pass both of those checks — reported by Meet Raval: a "Total Puncta
+    Mask" showing several clearly separate spots (in the enhanced image) joined into one
+    connected blob (a thin curved "hook", not a filled disc).
+
+    The missing discriminator: a genuinely fragmented RING has a HOLLOW INTERIOR, so
+    reconnecting and filling it recovers a large enclosed area — that recovery is the entire
+    point of this function. Several separate puncta bridged by thin closing connectors enclose
+    essentially nothing; ``binary_fill_holes`` finds no real hole to fill. So a THIRD, required
+    condition: the fill must have actually recovered a substantial enclosed area. This can only
+    make the gate STRICTER than the size/ratio checks alone — it never accepts a region they
+    would have rejected, only rejects one that has no real hole to justify the merge.
+
+    Verified synthetically: a fragmented ring of one large condensate (5 arc pieces, a real
+    hollow interior) keeps passing; 5 separate small puncta bridged by the same closing radius
+    (no enclosed hole) correctly flip from accepted to rejected.
+
+    Returns the mask with only the qualifying bridged regions applied; everywhere else reverts
+    to the pre-closing (unbridged) pixels.
+    """
+    close_radius = max(1, int(rim_close_radius))
+    closed = ndi.binary_closing(segmented_mask, structure=sk.morphology.disk(close_radius))
+    filled_closed = ndi.binary_fill_holes(closed)
+
+    pre_close_labeled = sk.measure.label(segmented_mask)
+    lbl_closed = sk.measure.label(filled_closed)
+    accept = np.zeros_like(filled_closed, dtype=bool)
+    for closed_label in range(1, lbl_closed.max() + 1):
+        region_mask = lbl_closed == closed_label
+        region_area = int(region_mask.sum())
+        if region_area < rim_close_min_result_area:
+            continue
+        contributing_labels = np.unique(pre_close_labeled[region_mask])
+        contributing_labels = contributing_labels[contributing_labels != 0]
+        if contributing_labels.size == 0:
+            continue
+        pre_close_area = int(np.isin(pre_close_labeled, contributing_labels).sum())
+        if contributing_labels.size == 1:
+            # Filling a single pre-existing component's own hollow interior merges nothing —
+            # always safe.
+            accept |= region_mask
+            continue
+        if contributing_labels.size > 8 or region_area > 2.0 * pre_close_area:
+            continue
+        # Pixels ADDED specifically by fill-holes (not by closing itself) inside this region —
+        # the "recovered interior" signature of a genuine fragmented ring.
+        hole_fill_area = int((filled_closed & ~closed)[region_mask].sum())
+        if hole_fill_area >= max(20, 0.10 * pre_close_area):
+            accept |= region_mask
+    return np.where(accept, filled_closed, segmented_mask)
+
+
 @tags_layer('felzenszwalb_binary', role='mask', inputs=('image',),
             summary='Felzenszwalb segmentation, binarised')
 def fz_segmentation_and_binarization(image, mask, ball_radius, rim_close_radius=5,
@@ -317,84 +392,10 @@ def fz_segmentation_and_binarization(image, mask, ball_radius, rim_close_radius=
         # local_thresholding_func's result alone is used in that case.
         pass
 
-    # ── Large-condensate rim bridging ───────────────────────────────────
-    # The upstream ball_radius-scale enhancement (white top-hat / Gaussian
-    # background division) is a band-pass operation: it suppresses the flat,
-    # uniform interior of condensates that are large relative to ball_radius,
-    # leaving only their curved rim. Local (Niblack/Sauvola) thresholding on
-    # that rim-only signal often breaks it into a scatter of disconnected
-    # fragments rather than one continuous ring -- a "necklace" of small
-    # puncta instead of one solid object. The binary_fill_holes call below
-    # only closes a hole that's already fully enclosed by a continuous ring;
-    # it can't do anything for a ring that's broken into pieces. A
-    # morphological closing first bridges those gaps into a continuous loop
-    # so the fill (and the external-contour fill downstream) can recover the
-    # object's full extent.
-    #
-    # IMPORTANT: rim_close_radius is intentionally NOT scaled with
-    # ball_radius. The fragmentation gap size comes from small, fixed-scale
-    # operations upstream (disk(1) erosion/dilation, Gabor filtering), not
-    # from the condensate's own size. An earlier version of this fix set
-    # close_radius = ball_radius, which at realistic ball_radius values
-    # (e.g. 75) applies a ~150px-wide closing to the whole image and
-    # erroneously fuses distinct, well-separated puncta/condensates
-    # anywhere in the mask -- corrupting segmentation broadly, not just for
-    # large condensates. Keeping this small and fixed avoids that.
-    close_radius = max(1, int(rim_close_radius))
-    closed = ndi.binary_closing(segmented_mask, structure=sk.morphology.disk(close_radius))
-    filled_closed = ndi.binary_fill_holes(closed)
-
-    # Only ACCEPT the closing/fill result where it produces a sufficiently
-    # large object. For an isolated small punctum (or several genuinely
-    # distinct, closely-spaced small puncta), the closing can subtly deform
-    # or -- at larger rim_close_radius values -- bridge them into elongated
-    # "worm" shapes instead of the clean, compact round dots local
-    # thresholding originally found. Gating by the RESULTING component size
-    # (rather than by rim_close_radius alone) means small puncta always keep
-    # their original, un-closed shape, regardless of how large
-    # rim_close_radius needs to be tuned to bridge a real large-condensate
-    # rim. Only components that end up at/above rim_close_min_result_area
-    # (i.e., plausibly a bridged large-condensate rim, not ordinary puncta)
-    # get the closed/filled version; everything else reverts to the
-    # pre-closing mask.
-    #
-    # Size alone is NOT sufficient: a dense cluster of several genuinely
-    # separate small puncta (common in a punctate nucleus) can also
-    # close+fill into a single result >= rim_close_min_result_area, and
-    # binary_fill_holes doesn't just add a thin bridge between them -- it
-    # can solidly fill the entire span, erasing the internal valleys
-    # between the original detections that downstream watershed needs to
-    # split them back apart. Empirically validated (synthetic dense-cluster
-    # vs. fragmented-rim cases, at realistic gap sizes for this closing
-    # radius): per-fragment solidity does NOT reliably separate these (a
-    # moderately thick rim arc can be just as individually solid as a real
-    # punctum). What does separate them cleanly: (a) how many separate
-    # pre-closing pieces are being joined -- a broken rim fragments into a
-    # handful of adjacent arcs, while a dense field of real puncta commonly
-    # numbers in the dozens -- and (b) how much of the bridged result is
-    # real pre-closing signal vs. newly-manufactured fill. Both required;
-    # otherwise revert that region to its pre-closing (unbridged) pixels.
-    pre_close_labeled = sk.measure.label(segmented_mask)
-    lbl_closed = sk.measure.label(filled_closed)
-    accept = np.zeros_like(filled_closed, dtype=bool)
-    for closed_label in range(1, lbl_closed.max() + 1):
-        region_mask = lbl_closed == closed_label
-        region_area = int(region_mask.sum())
-        if region_area < rim_close_min_result_area:
-            continue
-        contributing_labels = np.unique(pre_close_labeled[region_mask])
-        contributing_labels = contributing_labels[contributing_labels != 0]
-        if contributing_labels.size == 0:
-            continue
-        pre_close_area = int(np.isin(pre_close_labeled, contributing_labels).sum())
-        if contributing_labels.size == 1:
-            # Filling a single pre-existing component's own hollow interior
-            # merges nothing -- always safe.
-            accept |= region_mask
-            continue
-        if contributing_labels.size <= 8 and region_area <= 2.0 * pre_close_area:
-            accept |= region_mask
-    segmented_mask = np.where(accept, filled_closed, segmented_mask)
+    # Large-condensate rim bridging: reconnect a fragmented ring without also gluing
+    # together separate, nearby small puncta. See _bridge_fragmented_rims.
+    segmented_mask = _bridge_fragmented_rims(segmented_mask, rim_close_radius,
+                                             rim_close_min_result_area)
 
     # Determine the maximum area for objects based on the input cell mask.
     # This is intentionally permissive (previously a hard 25% cap): rejecting
