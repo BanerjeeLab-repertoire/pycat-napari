@@ -1,5 +1,23 @@
 # Claude Code spec — Manuscript-prep figure toolbox
 
+> **Part C (runtime by method) — DONE, 1.6.425.** The benchmark's *performance* axis, beside Fig 2's accuracy
+> axis: a `supp_runtime` panel reads the same `benchmark_results` and renders each candidate's measured
+> `runtime_s` (recorded by `basic_metrics` when the method ran) through the canonical `FigureSpec`. An
+> external/uploaded mask has no runtime → skipped; the panel greys when nothing was timed (never invents a
+> runtime). `tests/test_manuscript_panels.py` (`base`, 13). The other two Part C panels (lazy-load latency,
+> batch throughput) need timing harnesses not yet in the tree, and stay unbuilt.
+>
+> **Fig 2 (benchmark/validation) — WIRED, 1.6.424.** Premise-drift correction: an earlier increment concluded
+> "no validation/Dice-F1 suite found" — but it searched for the spec's named `benchmarks/run_suite.py`; the real
+> suite is `toolbox/benchmark_tools.py` (`run_benchmark` → per-candidate pixel Dice/IoU + matched-detection F1 vs
+> a named ground truth). Fig 2 now `available` when `context['benchmark_results']` is a **validation-mode** result
+> (a named ground truth), and `generate` builds the Dice-vs-ground-truth figure through the canonical `FigureSpec`
+> (one point per method, F1/IoU in the benchmark table). A comparison-mode result (no ground truth) greys — the
+> panel never invents ground truth. **All five panels now generate when their data is present** (the dead
+> `_never`/`_unavailable_generate` greyed-panel stubs are removed). `tests/test_manuscript_panels.py` (`base`,
+> 11: +3 for Fig 2). **Remaining (Qt-gated): the interactive gallery, the export-widget GIF option, Part C timed
+> panels (need real runtime data), Part D recorded demos, Part E FeatureCard discoverability.**
+>
 > **◐ STATUS — Part A DONE (the panel registry), shipped 1.6.384.** `toolbox/manuscript/panels.py`: the
 > `FigurePanel` dataclass + a registry of five panels in figure order, each with a plain-language
 > `data_requirement` and a data-driven `available(context)` so a data-absent panel is greyed with its

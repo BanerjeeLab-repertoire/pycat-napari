@@ -126,6 +126,7 @@ from pycat.batch.steps.preprocessing_steps import (replay_preprocessing, replay_
 from pycat.batch.steps.segmentation_steps import (replay_cellpose_segmentation, replay_ts_cellpose_keyframe)
 from pycat.batch.steps.brightfield_steps import (replay_bf_preprocess, replay_bf_condensate_segmentation, replay_bf_condensate_analysis, replay_bf_cell_segmentation, replay_ivbf_preprocess, replay_ivbf_segmentation)
 from pycat.batch.steps.invitro_steps import (replay_ivf_preprocess, replay_ivf_field_summary, replay_ivf_size_distribution, replay_ivf_spatial_metrology, replay_ivf_segmentation, replay_ivf_droplet_segment, replay_ivf_droplet_analysis, replay_client_enrichment)
+from pycat.batch.steps.vpt_steps import replay_vpt_microrheology
 from pycat.batch.steps.analysis_steps import (replay_condensate_analysis, replay_measure_line, replay_cell_analysis, replay_sacf_analysis, replay_condensate_segmentation, replay_pixel_coloc)
 
 from pycat.batch.steps._common import _get_data, _save_array, _raw_counts, _normalize_to_float  # for replay_background_removal (kept here: a source-level test pins it)
@@ -291,9 +292,7 @@ _STEP_MAP = {
         '[PyCAT Batch]   VPT bead detection skipped in headless mode.'),
     'vpt_link_trajectories':    lambda s,p,pa,o: print(
         '[PyCAT Batch]   VPT trajectory linking skipped in headless mode.'),
-    'vpt_microrheology':        lambda s,p,pa,o: print(
-        '[PyCAT Batch]   VPT microrheology skipped in headless mode '
-        '(terminal reporting step).'),
+    'vpt_microrheology':        replay_vpt_microrheology,
     # FRAP — interactive ROI selection; recorded for provenance, not replayed.
     'frap_define_roi':          lambda s,p,pa,o: print(
         '[PyCAT Batch]   FRAP ROI definition skipped in headless mode.'),
@@ -377,6 +376,7 @@ _STEP_OPERATIONS: dict[str, tuple[str, ...]] = {
     'bf_condensate_segmentation': ('bf_segment',),
     'ivbf_segmentation':        ('bf_segment',),
     'ivf_size_distribution':    ('invitro.size_distribution',),   # a MEASURE op
+    'vpt_microrheology':        ('vpt.microrheology',),           # the INTERPRET terminal (N2b-1)
 }
 
 
