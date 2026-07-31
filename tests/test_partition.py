@@ -141,3 +141,58 @@ def test_over_inclusive_droplet_mask_is_detected():
         f"measurement, and an over-inclusive one is detectable from the CV of the intensity "
         f"inside it (0.016 for a clean mask, 0.807 for this one)."
     )
+
+
+# ── N6-2: partition_coefficient_field does NOT distort Kp at low dilute intensity ────────────────────────
+# `partition_coefficient_field` estimates the dilute phase from a low background percentile, with two floors: it
+# falls back to the background MEAN when that percentile is degenerate (<=0 or a tiny fraction of the mean), and a
+# final `bulk_div > 1e-6` guard. The audit asked whether those floors distort Kp at low dilute intensity. They do
+# NOT for a well-posed (uniform) dilute phase — Kp is recovered exactly across the whole low range; the floors
+# only engage on a degenerate right-skewed background, where they trade a ~1e8 explosion for a bounded bias.
+
+def _ivf_field(bulk, dense, H=192, W=192, r=10, skew_zeros=0.0, seed=0):
+    """A synthetic in-vitro field: 16 dense droplets on a uniform dilute background of intensity `bulk`.
+    `skew_zeros` forces a fraction of background pixels to 0 (a degenerate, right-skewed dark background)."""
+    rng = np.random.default_rng(seed)
+    img = np.full((H, W), float(bulk))
+    if skew_zeros:
+        img[rng.random((H, W)) < skew_zeros] = 0.0
+    lbl = np.zeros((H, W), int)
+    yy, xx = np.ogrid[:H, :W]
+    k = 1
+    for gy in range(4):
+        for gx in range(4):
+            cy, cx = 28 + gy * 45, 28 + gx * 45
+            disc = (yy - cy) ** 2 + (xx - cx) ** 2 <= r * r
+            img[disc] = float(dense)
+            lbl[disc] = k
+            k += 1
+    return img, lbl
+
+
+@pytest.mark.base
+@pytest.mark.parametrize("bulk,true_kp", [(0.3, 2.0), (0.1, 6.0), (0.03, 20.0),
+                                          (0.01, 60.0), (0.003, 200.0), (0.001, 600.0)])
+def test_partition_field_recovers_Kp_across_low_dilute_intensities(bulk, true_kp):
+    """GOLDEN-MASTER (closes N6-2): for a uniform dilute phase, Kp = dense/bulk is recovered EXACTLY even as the
+    dilute intensity drops three orders of magnitude and Kp climbs to 600 — the percentile==mean==bulk, so neither
+    floor engages. This is the regression guard proving no low-intensity distortion."""
+    from pycat.toolbox.invitro.partition import partition_coefficient_field
+    img, lbl = _ivf_field(bulk=bulk, dense=0.6)
+    res = partition_coefficient_field(img, lbl)
+    assert res['partition_coeff'] == pytest.approx(true_kp, rel=1e-2)
+    assert res['c_sat_proxy'] == pytest.approx(bulk, rel=1e-2)     # the dilute estimate is the real bulk
+
+
+@pytest.mark.base
+def test_partition_field_mean_fallback_is_bounded_not_an_explosion():
+    """CHARACTERISATION: on a degenerate right-skewed background (30% near-zero pixels) the 10th-percentile
+    collapses to ~0 and the documented mean-fallback engages. It biases Kp (the mean sits below the true dilute),
+    but the point of the floor is that the result stays BOUNDED — not the ~1e8 a divide-by-~0 would give. This
+    pins the deliberate trade so a future change does not silently reintroduce the explosion."""
+    from pycat.toolbox.invitro.partition import partition_coefficient_field
+    img, lbl = _ivf_field(bulk=0.1, dense=0.6, skew_zeros=0.3)
+    res = partition_coefficient_field(img, lbl)
+    kp = res['partition_coeff']
+    assert np.isfinite(kp) and 0 < kp < 100        # bounded — NOT the 1e8 the raw percentile-0 would produce
+    assert res['c_sat_proxy'] > 0                  # the floor kept the denominator off zero

@@ -1,3 +1,600 @@
+## [1.6.457] - 2026-07-30
+### Added — **Kernel mask/label family: the first ops that consume a mask/label, not raw intensity (Spec 6).**
+The execution kernel (`OperationService.execute`) migrated 23 ops across enhance / segment / measure — but every
+one consumed raw INTENSITY. This family adds the first ops whose input is a mask or a label image: binary opening,
+binary closing, general binary morphology (all mask→mask), and watershed label-splitting (label→label). It proves
+the kernel's input contract covers the mask/label data ROLE, not only the intensity role — the last untested shape
+of `(inputs, params) -> AnalysisResult`.
+
+- **Four new kernels** in `kernel/operation_service.py` (`binary_open`, `binary_close`, `binary_morph`,
+  `split_watershed`), each the SAME toolbox call (`custom_binary_opening` / `custom_binary_closing` /
+  `binary_morph_operation` / `split_touching_objects`) the manual and session routes make, keyed on `mask` /
+  `labels` inputs. 27 ops now migrated.
+- **Four new route-equivalence rows** (matrix now 25 workflows) via a new `_mask_only_workflow` factory — the
+  mask/label analogue of the filter factory, feeding the kernel a mask/label under its role key. Each asserts
+  `headless ≈ session ≈ kernel` bit-for-bit (batch is a declared gap — a standalone mask transform is not a
+  recorded per-image batch step); no divergence found.
+- **Kernel-contract test** pinning that each mask/label op consumes its role and returns a same-shape artifact
+  with no measurements, plus the coverage-set assertion extended to the new family.
+
+Full route-equivalence + kernel + budget gate green (44 passed). No SRC behavior change to existing ops — this is
+purely additive kernel coverage.
+
+## [1.6.456] - 2026-07-30
+### Added — **'Why this one' scores in the revision pop-out, and a pin-honoring fix (Method-Widget Spec 5).**
+The live-revision pop-out (1.6.455) now shows the planner's reasoning next to each candidate: the segmenter's
+context match and preference, with a ✓ on the current pick. The chooser stops being "here are the alternatives"
+and becomes "here is why cellpose is the default, and what you'd trade by choosing watershed" — the anti-black-box
+payoff, delivered at the exact moment the scientist is deciding whether to override the default.
+
+- **`navigator.session.segmentation_scores(session)`** (tested, `base`) maps each segmenter candidate to its
+  `context_score` (+1 a context-confirmed specialist / 0 general / −1 unconfirmed specialist / −2 context-violated),
+  its `preference`, and whether it is currently chosen. It reuses the Spec 5 explainer, so the scores can't drift
+  from the actual pick, and it honors the session's pins, so after a revision the pinned op is the one marked ✓.
+- **`ui/guidance_popout.py`** renders a `· context 0 · pref 0.67 ✓ chosen` annotation on the op heading and each
+  alternative row; **`GeneratedMethodUI`** computes the scores per pop-out open against the current pins. An op
+  with no reasoning (not a scored role) gets no annotation — never a fabricated score.
+
+**Fix — the explainer silently ignored pins.** `Planner.explain_provider_choice` keyed its pin lookup on
+`goal.representation`, but a `Capability` has no such attribute (it is `.kind`), so `kind_hint` was always `None`
+and the pinned choice was never consulted. Left unfixed, the 'why this one' annotations would keep naming the
+*default* segmenter after a live revision pinned a different one — the reasoning contradicting the panel in front
+of the user. Now keyed on `.kind`; a regression test pins that a pinned segmenter becomes the explained `chosen`.
+
+Three new headless tests (scores justify the default + follow the pin; empty without a target; the pin-honoring
+regression). Full navigator gate green. GUI-bound: the annotations need a manual napari acceptance run; the
+scoring + pin logic is tested.
+
+## [1.6.455] - 2026-07-30
+### Added — **Live plan revision from the guidance pop-out (Method-Widget Spec 4, the larger half).**
+The pop-out that showed a section's alternatives (1.6.454) can now ACT on them: each alternative carries a
+**Use this instead** button, and clicking it swaps that step's op and rebuilds the panel from the amended plan.
+This is where the generated panel stops being a read-only rendering of one plan and becomes an editing surface —
+choose watershed over cellpose and the whole panel recompiles around the choice, the rest of the pipeline intact.
+
+Split, as always, into a headlessly-verified core and a thin GUI shell:
+- **`navigator.session.revise_plan(session, current_op, new_op)`** (tested, `base`) is the whole intelligence:
+  it pins the chosen op at the REPRESENTATION its predecessor filled and recompiles, so the planner re-satisfies
+  the new op's requirements and PRESERVES the rest of the plan (swap the segmenter and the cell-analysis + QC
+  stay). Reuses the planner's existing pin mechanism — no new planning path. An undeterminable role recompiles
+  unchanged rather than guessing a wrong swap. Pins accumulate on the session, so successive revisions stack.
+- **`navigator.session.alternatives_for_op(session, op_id)`** (tested, `base`) is the swappable set the pop-out
+  offers: every provider of the same role, PEER-filtered to those that consume the same representation. That
+  filter is load-bearing — it keeps a from-scratch cell segmenter's alternatives to the other from-scratch
+  segmenters and excludes label→label transforms (relabel, expand-labels, merges) that provide the same
+  `instance_labels` but only by reworking an existing segmentation; offering one would silently change what the
+  step eats. `provided_representation(registry, op_id)` exposes the pin key.
+- **`ui/guidance_popout.py`** renders each alternative as a row with a **Use this instead** button (when a revise
+  callback is wired); **`GeneratedMethodUI`** provides that callback — it builds/caches a session from the panel's
+  intent + live context, revises, docks the replacement panel, then removes the superseded dock so the surface
+  never blinks empty.
+
+Five headless tests pin the core: the segmenter swaps while the analysis + QC survive; the revision persists and
+can be re-revised; the alternatives are peer segmenters not transforms; an undeterminable role is a no-op. Full
+navigator gate green (176 passed). GUI-bound: the buttons + rebuild need a manual napari acceptance run; the
+revision logic is tested apart from the panel it rebuilds.
+
+## [1.6.454] - 2026-07-30
+### Added — **Pop-out guidance on generated-panel sections (Method-Widget Spec 4).**
+Each section of a generated method panel now carries a **❔** affordance on its header; clicking it pops out the
+op's authored guidance IN PLACE — when to use it, its advantages and limitations, when it does NOT apply, its
+references — and the same for the alternatives it could be swapped for, side by side. This is the step that turns
+the Navigator from a wizard you exit into the panel's editing surface.
+
+Split, as before, into a headlessly-verified core and a thin GUI shell:
+- **`navigator.guidance.section_guidance(op_id, alternatives=…)`** (tested, `base`) assembles WHAT the pop-out
+  shows: the op's own guidance plus each alternative's, each with a `documented` flag. The caller passes the
+  candidate alternatives (e.g. the planner's considered ops from Spec 5's `explain_segmentation_choice`), so the
+  pop-out mirrors the real decision; with none, it falls back to the op's authored `alternatives` field. An
+  unauthored op or alternative comes back `documented=False` — never a fabricated stand-in.
+- **`ui/guidance_popout.py`** (`GuidancePopout` + `guidance_popout_html`) renders that dict as rich text; an
+  unauthored op shows an honest "not documented yet — author it in the guidance workbook". `GeneratedMethodUI`
+  adds the ❔ link before each section, opening the pop-out for that op.
+
+The content store still ships empty, so today every pop-out reads "not documented yet" — the surface lights up
+op by op as the guidance is authored (Spec 3). GUI-bound: the pop-out rendering and the ❔ affordance need a
+manual napari acceptance run; the assembly logic is tested. Full gate green.
+
+## [1.6.453] - 2026-07-30
+### Added — **Execution kernel, increment B (cont.): four contrast/edge enhancers — ridge, tone-map, local-contrast, peak+edge (Method-Widget Spec 6).**
+Four more enhancer op families migrated: `ridge` (vesselness), `tone_map`, `local_contrast` (local contrast
+normalisation), and `peak_edge` (peak-and-edge enhancement). Each is a route-equivalence workflow proving
+`headless ≈ session ≈ kernel` bit-for-bit plus a kernel registration; batch is a documented gap. The matrix is
+now **twenty-one workflows**; the kernel covers **23 ops**. Full gate green.
+
+## [1.6.452] - 2026-07-30
+### Added — **Execution kernel, increment B (cont.): Felzenszwalb segmenter + interpolation upscaling (Method-Widget Spec 6).**
+Two more op families migrated: `felzenszwalb` (Felzenszwalb graph segmentation + region merging — a SECOND
+torch-free segmenter) and `upscale` (interpolation upscaling; the kernel reads the original dims from the image,
+not from a scientific parameter). Each is a route-equivalence workflow proving `headless ≈ session ≈ kernel`
+bit-for-bit plus a kernel registration; batch is a documented gap. The matrix is now **seventeen workflows**; the
+kernel covers **19 ops**. Full gate green.
+
+## [1.6.451] - 2026-07-30
+### Added — **Execution kernel, increment B (cont.): three more enhancer families — invert, rescale, gabor (Method-Widget Spec 6).**
+Three more pure image→image enhancer op families migrated to the kernel: `invert` (intensity inversion),
+`rescale` (intensity rescaling), and `gabor` (Gabor texture filter). Each is a route-equivalence workflow proving
+`headless ≈ session ≈ kernel` bit-for-bit (via the `_filter_only_workflow` factory) plus a kernel registration;
+batch is a documented gap for each. The route-equivalence matrix is now **fifteen workflows**, and the kernel
+covers **17 ops**.
+
+## [1.6.450] - 2026-07-30
+### Fixed — **SpIDA recovers low-density N — the N6-1 truncation bias is fixed (the last xfail closed).**
+N6-1's deferred recovery, resolved. `build_intensity_histogram` used to drop every pixel at/below the noise floor
+(`p = p[p > 0]`), discarding the zero-molecule (k=0) population — a large fraction at low density (P(k=0)=e⁻ᴺ) —
+which biased the fitted density upward (~+56% at a true N=2). The fix has two parts, both grounded in SpIDA being
+a distribution-MOMENT analysis:
+
+- **Keep the k=0 population** (`p >= 0`, dropping only genuinely sub-floor negatives), so the histogram and the
+  moments read from it reflect the FULL pixel population and are unbiased at every density.
+- **Anchor on the moment estimate where the least-squares fit collapses.** The curve fit can over-fit the sharp
+  zero-intensity bin at low density and *under*-estimate N (a naive "keep the zeros and re-fit" was verified to
+  over-correct to ~0.6); so when the fit falls below half the moment anchor, `fit_spida_histogram` reports the
+  moment estimate instead. The fit still governs the peak-brightness shape where it is well-behaved.
+
+Result: SpIDA now recovers N across the range — true N = 2 reads ≈ 2.0 (was ~3.1), true N = 8 unchanged (~7.8) —
+and the pedestal sensitivity that guards against a camera offset is preserved (a 200-count pedestal still inflates
+a true 8 to ~31). The `low_density_regime` flag (1.6.436) survives but changes meaning: a low N is no longer
+biased, only inherently higher-variance (fewer samples per molecule count), so it is flagged as a caution to
+confirm against a monomeric control, not a number to distrust.
+
+Tests (`tests/test_group_a_moments.py`): the N6-1 strict-`xfail` golden-master is promoted to passing; a new
+recovery guard pins N tracking the truth across densities 2→8; the flag test is updated to the new (variance, not
+bias) meaning; the N=8 baseline and pedestal tests stay green. **Zero xfails remain in the suite.** Full gate green.
+
+## [1.6.449] - 2026-07-30
+### Added — **Execution kernel, increment B: a torch-free segmenter (local threshold) — all op archetypes now proven (Method-Widget Spec 6).**
+Rounds out increment B by diversifying beyond filters: `local_threshold` (Niblack/Sauvola local thresholding) is
+a TORCH-FREE segmenter, so its route-equivalence workflow proves the segmentation kernel path in the CORE gate —
+where the torch-gated cellpose family cannot run. Its binary mask round-trips exactly as float32 0/1.
+
+With this the kernel spans **every operation archetype**: enhance (background removal + 5 filters), measure (MSD,
+clean-detect, partition enrichment, the three coloc coefficients), segmentation both torch-gated (cellpose) and
+torch-free (local threshold), and the composite (coloc) and looped (time-series) workflow shapes. 12 route-
+equivalence workflows, **14 ops migrated** to `OperationService.execute`, every one asserted `≈ kernel`. Full
+gate green.
+
+## [1.6.448] - 2026-07-30
+### Added — **Execution kernel, increment B (cont.): three more filter families — bilateral, LoG, FFT-bandpass (Method-Widget Spec 6).**
+Continues increment B with three more pure array→array filter op families: `bilateral` (edge-preserving),
+`log` (Laplacian-of-Gaussian), and `bandpass` (FFT bandpass). Each gets a route-equivalence workflow proving
+`headless ≈ session ≈ kernel` bit-for-bit and a kernel registration; the near-identical filter rows are built by
+a small `_filter_only_workflow` factory to keep the fixtures DRY. Batch is a documented gap for each (a standalone
+filter is not a recorded per-image batch step).
+
+The route-equivalence matrix is now **eleven workflows**; the kernel covers **13 ops** — the six increment-A
+families plus five image filters (`gaussian`, `dog`, `bilateral`, `log`, `bandpass`). Full gate green.
+
+## [1.6.447] - 2026-07-30
+### Added — **Execution kernel, increment B: image-filter families (Gaussian, DoG) migrated with NEW route-equivalence workflows (Method-Widget Spec 6).**
+Increment A migrated the kernel across the existing route-equivalence matrix; increment B extends the matrix
+itself. Two pure image-filter op families — `gaussian` (Gaussian smoothing) and `dog` (difference-of-Gaussians
+blob enhancement) — each get a NEW route-equivalence workflow (Workflows 7 & 8) proving
+`headless ≈ session ≈ kernel` bit-for-bit on a deterministic array→array filter, plus their kernel registrations.
+Both are enhance ops (the filtered image is the `artifacts` payload); batch is a documented gap for each (a
+standalone filter has no batch replay step — it is an interactive/kernel operation, not a recorded per-image
+step).
+
+The matrix is now **eight workflows**. Migrated ops: `rolling_ball`, `condensate_physics.compute_msd`, `clean`,
+`cellpose`, `client_enrichment`, the three coloc coefficients, plus `gaussian` and `dog`. Each new op family is
+one `Workflow(...)` entry + one kernel — the pattern the spec prescribes for growing coverage. Full gate green.
+
+## [1.6.446] - 2026-07-30
+### Added — **Execution kernel, families 5 & 6: partition enrichment + colocalization — every canonical workflow now proves ≈ kernel (Method-Widget Spec 6).**
+Closes the last two `kernel` gaps in the route-equivalence matrix, so all six canonical workflows now assert the
+kernel computes identically to their other routes:
+
+- **Family 5 — `client_enrichment`** (partition/enrichment, a MEASURE op returning a one-row metrics table). A
+  per-frame series is a WORKFLOW over one op: the kernel runs the op, Workflow 6's `kernel` route loops it per
+  frame — same science as `headless`, so the time-series-partition row closes `≈ kernel`.
+- **Family 6 — colocalization** (a COMPOSITE of three single-coefficient ops: `coloc.manders_m1`,
+  `coloc.manders_m2`, pixel-wise `colocalization`/Pearson). Each is its own kernel; Workflow 5's `kernel` route
+  calls all three and assembles the same 3-row table — the kernel handling a multi-op workflow (the workflow
+  orchestrates, each kernel runs one op).
+
+With this, **zero kernel gaps remain** in the route-equivalence matrix: rolling-ball, puncta, VPT→MSD, cellpose,
+time-series partition, and colocalization all prove `headless ≈ (batch) ≈ session ≈ kernel`. Eight ops are now
+migrated to `OperationService.execute`. (Coloc's BATCH route stays a documented gap — it has no batch replay
+step — but its kernel route now runs.) Full gate green.
+
+## [1.6.445] - 2026-07-30
+### Fixed — **Route-equivalence now genuinely runs the `kernel` route; cellpose migrated (family 4) (Method-Widget Spec 6).**
+**Correction:** families 1–3 (1.6.442–444) added a `kernel` route to the route-equivalence workflows, but the
+harness's `run_all_routes` only iterated `ROUTE_ORDER = (headless, batch, session)` — so those `kernel` routes
+were in the workflow dicts but **never actually run or compared**. The kernel's science was still verified
+(`test_operation_service.py` asserts the kernel output equals a direct toolbox call bit-for-bit), but the
+"`≈ kernel` row closes" claim was not yet backed by the matrix. This adds `kernel` to `ROUTE_ORDER`, so the
+harness now genuinely executes each migrated workflow's kernel route and asserts it agrees with `headless`, and a
+workflow whose op is NOT migrated declares `kernel` a documented gap (coloc, time-series partition) — an
+unmigrated op is a visible gap, never a silent absence. The `runs_all_routes` count tests now expect `kernel`.
+
+**Family 4:** `cellpose` cell segmentation is migrated (a CREATE op → the label mask in `artifacts`).
+`OperationService.execute("cellpose", {"image": <normalised>}, {"cell_diameter", "postprocess"})` runs the same
+`cellpose_segmentation` science as the manual/batch/session routes; Workflow 4 now proves `headless ≈ batch ≈
+session ≈ kernel` (torch-gated). Migrated ops: `rolling_ball`, `condensate_physics.compute_msd`, `clean`,
+`cellpose` — the four canonical workflows that have a kernel route, all genuinely compared. Full gate green.
+
+## [1.6.444] - 2026-07-30
+### Added — **Execution kernel, family 3: clean spot detection migrated — all torch-free canonical workflows now prove ≈ kernel (Method-Widget Spec 6).**
+Family 3 is `clean` (`clean_detect`) — clean-mask spot detection with per-object measurement, another MEASURE op.
+`OperationService.execute("clean", {"image": …}, {psf_sigma, psf_size})` returns
+`AnalysisResult(entity_type="puncta", measurements=<DataFrame>)`, the same `clean_detect` science the manual and
+session routes run. Workflow 2 (puncta) gains a `kernel` route and closes its `≈ kernel` row.
+
+With this, **all three torch-free canonical route-equivalence workflows** — background removal (Workflow 1), puncta
+detection (Workflow 2), and VPT→MSD (Workflow 3) — now assert `headless ≈ (batch) ≈ session ≈ kernel`, so the
+migrated science is proven identical across every route including the new kernel. Migrated ops: `rolling_ball`,
+`condensate_physics.compute_msd`, `clean`. (Cellpose/Workflow 4 is torch-gated; its kernel migration waits on the
+torch lane.) Full gate green.
+
+## [1.6.443] - 2026-07-30
+### Added — **Execution kernel, family 2: MSD transport analysis migrated (Method-Widget Spec 6, the measurements path).**
+Continues the per-family kernel migration. Family 2 is `condensate_physics.compute_msd` — a MEASURE op, so it
+exercises the other `AnalysisResult` path: the result is the measurements TABLE (ensemble MSD per lag), where
+family 1 (background removal) produced only an artifact array. `OperationService.execute(
+"condensate_physics.compute_msd", {"tracks": …}, {frame_interval_s, min_track_length, …})` returns
+`AnalysisResult(entity_type="track", measurements=<DataFrame>)`, a thin wrapper over the same `compute_msd`
+science the manual/session routes run.
+
+Route-equivalence: Workflow 3 (VPT → MSD) gains a `kernel` route asserted to agree with `headless ≈ session` on
+the MSD table — its `≈ kernel` row now closes. Tests (`tests/test_operation_service.py`, +1): a measure op returns
+its table in `measurements` (not `artifacts`), and `migrated_ops` now reports both families. Full gate green.
+
+## [1.6.442] - 2026-07-30
+### Added — **The execution kernel: OperationService.execute → AnalysisResult, first family migrated (Method-Widget Spec 6, proof).**
+The convergence the audit and the roadmap call for: ONE place an operation's science runs, below batch /
+Navigator / generated panels / manual panels / headless — so the same step cannot compute differently depending
+on how it was launched. `pycat.kernel.OperationService.execute(op_id, inputs, params)` runs a registered
+operation and returns a typed `AnalysisResult` (measurements for a measure op; the produced array in `artifacts`
+for a create/enhance op). An op with no kernel yet raises a clear error — it still runs through its batch/panel
+route until migrated; nothing is silently rerouted.
+
+Migrated **per operation family, behind route-equivalence** — not a big-bang refactor. This lands the FIRST
+family, background removal (rolling-ball), and extends the cross-route matrix: Workflow 1 in
+`test_route_equivalence.py` now has a fourth route, `kernel`, asserted **bit-for-bit identical** to
+`headless ≈ batch ≈ session` (the same `rb_gaussian_bg_removal_with_edge_enhancement` call on the same raw
+image). The kernel is a THIN wrapper over the existing toolbox science, not a reimplementation.
+
+Tests: `tests/test_operation_service.py` (`base`, 4) pins the kernel contract (typed `AnalysisResult`; same
+science as the direct toolbox call; an unmigrated op raises rather than reroutes; `migrated_ops` reports
+coverage); the route-equivalence row proves the science agrees across all four routes. This is a proof-of-concept
+first family — subsequent families each register a kernel and close their own `≈ kernel` row. Full gate green.
+
+## [1.6.441] - 2026-07-30
+### Added — **The planner explains its DEPENDENCY choice too: "why this segmenter, not the others" (Method-Widget Spec 5 core, extended).**
+Extends the terminal explainer (1.6.440) to the dependency layer. `Planner.explain_provider_choice(goal, ctx)`
+returns, for a resolution goal (a Capability — e.g. the instance-labels a segmenter must provide), the candidate
+providers with their CONTEXT SCORE (+1 context-matched specialist / 0 general / −1 unconfirmed specialist / −2
+context-violated) and preference, and which `_pick` selects; `explain_segmentation_choice(intent, ctx)` is the
+convenience that builds the segmentation goal for the target. Reuses `_pick` for the winner and the shared
+`_context_score` for the scores — no drift.
+
+It surfaces the dependency-layer anti-black-box insight: on **brightfield**, `bf_segment` (a context-matched
+specialist, score +1) wins the condensate segmenter over the generic `subcellular_segment` **even though the
+generic has higher preference** — the context score is the deciding factor, now legible. On neutral 2D
+fluorescence the same call shows `cellpose` chosen by preference among a full field of alternatives.
+
+Tests (`tests/navigator/test_navigator_selection_explain.py`, `base`, +4): preference-wins-when-neutral;
+specialist-beats-higher-preference-generic (bf_segment +1 vs subcellular_segment 0 with higher preference); the
+explained segmenter matches the compiled plan (no-drift guard); and no-target → None. Full gate green.
+
+## [1.6.440] - 2026-07-29
+### Added — **The planner explains its terminal choice: "why this op, not that" (Method-Widget Spec 5 core).**
+The anti-black-box payoff, from the planner's OWN logic (no authored content needed): `Planner.explain_terminal_choice(intent, ctx)`
+returns, per requested observable, the terminal ops the planner CONSIDERED — each with its selection scores
+(`in_vitro` context bonus, target specificity, preference) and whether it was chosen — ordered winner-first. So a
+scientist can see not just *what* was selected but *why*, and what the runner-up was. On a bead/viscosity intent
+it shows `vpt.microrheology` chosen over the generic `condensate_physics.fit_anomalous_diffusion` **despite the
+generic's higher preference**, because it is specialised to the bead target — the scores make that legible.
+
+Built by extracting `_pick_terminal`'s scoring (the `in_vitro` context bonus + target specificity) into shared
+methods (`_terminal_ctx_bonus`, `_terminal_specificity`) that BOTH the picker and the explainer call, and taking
+the winner straight from `_pick_terminal` — so the explanation **cannot drift** from the actual pick. The
+extraction is behaviour-preserving: all navigator + route-equivalence tests pass unchanged.
+
+Tests (`tests/navigator/test_navigator_selection_explain.py`, `base`, 4): the explanation names the considered
+terminals and the winner (winner-first); it exposes WHY the winner won (specificity 1 vs 0 where preference alone
+would have picked the generic); the explained `chosen` matches the compiled plan exactly (the no-drift guard);
+and an observable with no terminal is simply absent, never a fabricated entry. Full gate green.
+
+## [1.6.439] - 2026-07-29
+### Added — **Operation-guidance infrastructure: schema + reader + coverage ratchet + authoring workbook (Method-Widget Spec 3, infra only).**
+Spec 3 lets the Navigator not just choose an op but *explain* one — when to use it, its advantages, limitations,
+alternatives, when it does not apply, and references. That content is a scientific judgement authored by hand and
+must never be machine-generated, so this ships the INFRASTRUCTURE with the content store deliberately EMPTY:
+
+- **`navigator/data/operation_guidance.json`** (schema-versioned, `guidance: {}`) — the store, keyed by op-id
+  like `section_bindings.json`. Each entry (once authored) has `when_to_use` (prose) + `advantages` /
+  `limitations` / `alternatives` / `not_applicable_when` / `references` (lists).
+- **`navigator/guidance.py`** — the reader: `guidance_for(op_id)` returns the authored entry or `None` for an
+  unauthored op (refuse-to-guess, the same discipline as the adapters and section bindings), `authored_op_ids()`
+  for the ratchet, and the authoring vehicle — `generate_guidance_workbook(path)` writes a fill-in `.xlsx` (one
+  row per catalog op, factual columns pre-filled, judgement columns blank) and `ingest_guidance_workbook(path)`
+  reads a filled workbook back into the JSON (list fields split one-per-line; blank rows are not entries). The
+  runtime reader needs only `json`; the workbook helpers import `openpyxl` lazily.
+- **`tests/navigator/test_guidance_coverage.py`** (`base`, 5) — the ratchet: the store is well-formed and
+  schema-versioned; every authored entry references a REAL op (catalog + measure ops) with only known fields of
+  the right types; the reader refuses to guess; authored coverage only grows (floor 0 while empty); and the
+  workbook round-trips (generate → author one op → ingest yields it, ingesting to a tmp path so the shipped store
+  is never mutated).
+
+This is the schema + reader + ratchet + authoring vehicle the Spec-3 curation project needs; the guidance CONTENT
+is the scientist's to author (and gates Specs 4–5). Full gate green.
+
+## [1.6.438] - 2026-07-29
+### Added — **Custom Methods submenu — saved methods rebuild into a generated panel (Method-Widget Spec 2, complete).**
+Completes Spec 2: the persisted methods (1.6.437) now surface in the analysis tree and rebuild on demand. Two
+parts:
+
+- **`plan_from_saved_method(template, central_manager)`** (`navigator/session.py`, headlessly tested) — the
+  rebuild step: recompiles a saved method's ANSWERS against the CURRENT data's context (`context_from_session`)
+  into a fresh plan, so every quality gate re-evaluates on the live data (verdicts were never stored). Pure — no
+  Qt — so the menu's core logic is verified apart from the widget it feeds; a test drives it with a fake
+  central_manager and confirms a saved viscosity method recompiles to a runnable plan end to end.
+- **The Custom Methods submenu** (`ui/custom_methods_menu.py` + a one-line hook in `menu_manager`) — the analysis
+  tree's first DYNAMICALLY populated submenu: it lists the saved methods (repopulated on `aboutToShow`, so
+  saving/deleting is reflected without a restart) and, on selection, recompiles via `plan_from_saved_method` and
+  docks a `GeneratedMethodUI`. Deliberately kept OUT of `menu_manager` (a complexity-ratchet concentration point)
+  so the feature does not grow that god-file — the hook is a single line, and a 2-line comment there was tightened
+  to hold the file at its 1105-line ceiling.
+
+The submenu is GUI-bound (Qt menu wiring) and shares the generated panel's Spec 1.6 manual acceptance; its rebuild
+logic (`plan_from_saved_method`) is fully headlessly tested. Full gate green.
+
+## [1.6.437] - 2026-07-29
+### Added — **Generated-method persistence: schema versioning + duplicate (Method-Widget Spec 2 core).**
+Spec 2 persists a generated method so it survives sessions and reappears as a Custom Method. The store already
+existed (`navigator/templates.py` — `GuidedTemplate` saves the answers, the section/step list, and the reviewed
+parameters via `save_template`/`load_template`/`list_templates`/`delete_template`/`rename_template`); this adds
+the two pieces Spec 2 requires on top of it, both headlessly verified:
+
+- **Schema versioning** — `GuidedTemplate` now carries `schema_version` (current `_SCHEMA_VERSION = 1`), written
+  into every serialized entry, so a future field change can migrate old saves rather than silently mis-read them.
+  Backward-compatible: an entry written before versioning (no key) reads as the current schema (the fields are
+  unchanged — only the marker was added), not as corrupt.
+- **Duplicate** — `duplicate_template(name, new_name)` copies a saved method while KEEPING the original (unlike
+  rename), refusing to overwrite an existing name, copy a missing source, or take a blank name — completing the
+  Custom Methods CRUD set (delete/rename already existed).
+
+Tests (`tests/navigator/test_navigator_templates.py`, `base`, +4): schema_version round-trips; a pre-versioning
+entry still loads; duplicate keeps the original and makes an independent copy carrying the same answers +
+parameters; and duplicate refuses to overwrite / copy-nothing / take a blank name. The **Custom Methods submenu**
+(the GUI layer — a dynamically-populated `menu_manager` submenu that rebuilds a saved method into a generated
+panel) builds on this and is the next, GUI-bound step. Full gate green.
+
+## [1.6.436] - 2026-07-29
+### Added — **SpIDA flags the low-density regime where the histogram truncation biases N (N6-1 guardrail).**
+N6-1 confirmed `build_intensity_histogram` drops every pixel at/below the noise floor (`p = p[p > 0]`), which at
+low density removes the many zero-molecule pixels and inflates the fitted N (~+56% at a true N=2). Attempting the
+naive fix REFUTED it: under the repo's doubly-Poisson model, keeping the zeros over-corrects a true N=2 to ~0.6 —
+worse, in the opposite direction — so no simple data cut recovers truth; a truncation-aware histogram model is
+needed. Rather than ship a wrong "fix", this adds the honest guardrail: `fit_spida_histogram` now returns
+`low_density_regime` (true when the fitted N is below `_SPIDA_LOW_DENSITY_N` = 4, where the truncation bias is
+appreciable), and `run_spida_analysis` prints a LOW-DENSITY note flagging the N as a lower-confidence, likely
+over-estimated value. The fit math is UNCHANGED — high-density results are byte-identical; this only stops a
+biased low-density N from being reported as if trustworthy (the anti-black-box move).
+
+Tests (`tests/test_group_a_moments.py`): a new test pins that the flag fires at N=2 and not at N=8; the mechanism
+characterization stays green; the recovery golden-master stays a strict-`xfail`, its reason now recording that the
+naive fix was verified to over-shoot (so a proper truncation-aware fit is still the open spec). Full gate green.
+
+## [1.6.435] - 2026-07-29
+### Fixed — **GLCM texture is computed over the object mask, not the ROI bounding box (N6-3 fix).**
+N6-3 confirmed `calculate_glcm_features` ran `graycomatrix` over the ROI *bounding box* with no mask restriction,
+so background pixels and the object/background edge entered the co-occurrence matrix — a uniform object (true
+texture 0) reported contrast ≈ 11919, entirely edge. The fix adds `_masked_graycomatrix`, which counts only
+object–object pixel pairs (the co-occurrence offset per distance/angle, restricted to pairs where BOTH pixels are
+inside the mask; symmetric + normed like skimage; vectorised with a bincount per distance/angle so it stays fast
+on real objects). A uniform object now gives contrast **0.0**.
+
+Crucially it is **byte-identical to `skimage.feature.graycomatrix(symmetric, normed)` when the mask is the whole
+bounding box** — so every existing GLCM number (no ROI, or a rectangular ROI) is preserved; only non-rectangular
+objects change, which is exactly the contaminated case. That equivalence is pinned by a new regression guard, and
+the pre-existing `test_glcm_features_basic`/`test_glcm_features_with_mask` stay green. The N6-3 strict-`xfail`
+golden-master is promoted to passing. (LBP's milder boundary contamination — codes computed over the bbox, then
+histogrammed within the mask — is documented but left as-is; no failing golden-master was written for it.)
+
+Full gate green.
+
+## [1.6.434] - 2026-07-29
+### Added — **Navigator → generated method panel: the Qt panel + dock action (Method-Widget Spec 1.2/1.3/1.4).**
+The "Build method" outcome the navigator was missing: an actual dockable PyCAT analysis panel, generated from the
+plan. `GeneratedMethodUI` (`ui/generated_method_ui.py`) subclasses `AnalysisMethodsUI` — inheriting the workflow
+header, pixel gate, dock lifecycle, and save/clear footer — and its `setup_ui` walks the plan via the
+headless-tested `resolve_plan_sections`, calling each mapped step's bound builder into one layout and rendering a
+visible placeholder (`placeholder_text`) for any unmapped step, so a planned step is never silently dropped.
+Because every `_add_*` builder already produces complete controls (tag-bound dropdowns, status circles, run
+buttons), the panel is fully functional with no per-step UI code. Parameter seeding (Spec 1.3) writes the reviewed
+values into the data repository BEFORE the builders run, so each section constructs already seeded; a reviewed
+param with no repository home is skipped and logged, never given an invented location. Provenance (`_plan`,
+`_intent`, `_review`) is stored on the instance for Specs 2/4.
+
+Dock wiring (Spec 1.4, `navigator_dock.py`): the primary action becomes **🛠 Build method panel**
+(`build_method_panel_via_central_manager` constructs and docks the panel through the standard lifecycle), gated by
+`run_blocked_reason` so an untrustworthy plan says why rather than building a panel that would produce a wrong
+number; the old executor path stays as a secondary **▶ Run the steps that support it**, labelled honestly.
+
+Headlessly verified: `placeholder_text` (names the step + where to run it) is tested, on top of the already-tested
+`resolve_plan_sections`/`builder_for`/coverage ratchet; both GUI modules compile and import. The panel's rendering
+and the dock button are GUI-bound (PyQt5) — **Spec 1.6 acceptance is a manual napari run** of the cell/condensate
+pipeline: answer the navigator, Build, and confirm each section is live and produces the same outputs as the
+hand-written `CondensateAnalysisUI`. Full headless gate green.
+
+## [1.6.433] - 2026-07-29
+### Added — **Navigator → generated method panel: the plan→sections resolution logic (Method-Widget Spec 1.2 core, headless).**
+The join at the heart of the generated-method widget: a plan is an ordered list of steps, a panel is an ordered
+list of sections. `resolve_plan_sections(plan)` (`navigator/sections.py`) walks a compiled plan in the executor's
+execution order and returns an ordered list of `PlannedSection(op_id, builder_name, owner, gap)` — each mapped
+step carrying its `_add_*` builder name, each unmapped step flagged `gap=True` (builder `None`) so the panel
+renders a visible placeholder rather than silently dropping a step the plan said was necessary. It is pure over
+`(plan, section_bindings)` — no `central_manager`, no Qt — so the whole plan→panel decision is verified
+headlessly; the Qt panel (Spec 1.2 proper) only adds calling the bound builder / rendering the placeholder, and
+resolves `builder_name` to a live callable at render time via `builder_for`. Order is the executor's, never
+re-derived.
+
+Test (`tests/navigator/test_section_coverage.py`, `base`, +1): resolving a real cell plan yields its steps in
+execution order (matching `execution_order` exactly), `cellpose`/`feature_analysis.cell_analysis` carry their
+real builders, `data_qc.assess` is a gap with no builder, and every gap↔no-builder pairing is consistent. This
+completes the headlessly-verifiable core of Spec 1 (1.1 mapping + 1.5 ratchet + this 1.2 resolution logic); the
+remaining pieces — the `GeneratedMethodUI` Qt panel, parameter seeding, and the dock's "🛠 Build method panel"
+action (1.2 rendering / 1.3 / 1.4 / 1.6) — are GUI-bound and need a manual napari acceptance run. Full gate green.
+
+## [1.6.432] - 2026-07-29
+### Added — **Navigator → generated method panel, foundation: the op-id → UI-section mapping + coverage ratchet (Method-Widget Spec 1.1 + 1.5).**
+A PyCAT method panel is an ordered sequence of `_add_*` section builders; a Navigator plan is an ordered sequence
+of steps. The one missing piece to *generate* a panel from a plan is a mapping from step op-id to section builder.
+This lands it as explicit DATA (the `layer_bindings.json` precedent), not a fifth runtime name-similarity guess:
+
+- **`src/pycat/navigator/data/section_bindings.json`** (schema-versioned) — 22 verified bindings covering the
+  cell/condensate pipeline end to end. Keyed by the id a `PlanStep` actually carries — catalog op-ids for
+  enhancement/segmentation/labels (`cellpose`, `subcellular_segment`, `rolling_ball`, …) AND measure-op ids for
+  analysis steps (`feature_analysis.cell_analysis`, `pixel_wise_corr.pearson_manders`). NOTE: the spec's example
+  rows used a few ids from the 1.6.422 tree (`background_removal`, `cell_analysis`) that are not the current
+  catalog/plan ids; every binding here was verified against the real op the planner emits and the real builder.
+- **`src/pycat/navigator/sections.py`** — the loader: `section_for(op_id)`, `mapped_op_ids()`, and
+  `builder_for(central_manager, op_id)` which resolves a bound builder or returns `None` — never raises, never
+  guesses (the same refuse-to-guess discipline as the execution adapters; the caller renders a visible
+  placeholder for an unmapped step rather than dropping it).
+- **`tests/navigator/test_section_coverage.py`** (`base`, 5) — the ratchet: the JSON is well-formed; every mapped
+  builder EXISTS (AST-scan of the UI source — a stale name would be a silently missing section); coverage only
+  grows (floor 22); `builder_for` resolves-or-refuses; and every op a canonical cell/condensate plan selects is
+  either mapped or a declared `_KNOWN_GAPS` entry (`data_qc.assess`, `acquisition` — automatic gates, not tools),
+  mirroring the route-equivalence declared-gap discipline.
+
+This is the headlessly-verifiable foundation; the generated Qt panel (`GeneratedMethodUI`), parameter seeding, and
+the dock's "🛠 Build method panel" action (Spec 1.2–1.4/1.6) build on it next and are GUI-bound. Full gate green.
+
+## [1.6.431] - 2026-07-29
+### Fixed — **Size-distribution MLE now honours the detection limit (N6-4 fix — the truncated likelihood, additive).**
+N6-4 confirmed that `fit_size_distribution_mle` ignored left-truncation: its whole-sample candidates (lognormal,
+gamma, weibull, exponential) used the UNTRUNCATED MLE, and the `xmin` parameter in the signature was dead. When
+droplets below the detection limit are missing, that inflates the fitted median (+49% on a true-5 µm lognormal
+truncated at 5 µm) and deflates the spread. This wires `xmin` through to a proper left-truncated MLE: when a
+detection limit is given, each candidate is fit by numerically maximising `Σ log f(rᵢ) − n·log(1−F(xmin))`
+(Nelder-Mead, seeded by the untruncated estimate — no candidate has a closed form once truncated), the AIC uses
+that truncated log-likelihood, and the Vuong distinguishability test carries the same per-model truncation
+correction so the model comparison stays like-for-like. On the golden-master (a true lognormal, median 5 µm σ 0.5,
+truncated at 4 µm) the fit now recovers mu≈log 5 and σ≈0.5 where the untruncated default returns a ~6.5 µm median.
+
+The change is **additive**: `xmin` defaults to `None`, and that path is byte-identical to before (same closed-form
+lognormal log-moments, same `scipy .fit(floc=0)`, same log-likelihoods) — every existing caller is unaffected,
+pinned by the untruncated characterization tests. The result dict gains `detection_limit_xmin` recording the
+truncation applied.
+
+Tests (`tests/test_size_distribution_mle_characterization.py`): the N6-4 strict-`xfail` golden-master is promoted
+to a passing test (`test_size_mle_recovers_truth_from_truncated_data_when_xmin_is_honoured`); the untruncated
+baseline + bias characterization stay green. Full gate green.
+
+## [1.6.430] - 2026-07-28
+### Added — **Condensate MSD adapter — ensemble MSD → anomalous-diffusion fit runs from a navigator plan (spec N2b-4, the "build it" decision).**
+`msd_analysis` was a headless skip-stub documented "time-series; not a per-image batch step." That framing was no
+longer true: VPT microrheology (1.6.423) already runs a whole-stack detect→link→MSD→fit chain in the batch loop,
+and `dynamic_spatial` (1.6.428) now writes a trajectory table — `track_id / frame / y_um / x_um`, exactly
+`compute_msd`'s contract. So the N2b-4 decision is resolved by BUILDING the stack-level handler, not documenting
+why it can't exist. `replay_msd_analysis` (`analysis_steps.py`) reads the trajectories `dynamic_spatial` linked,
+runs the shared `compute_msd` (ensemble MSD with per-track independence) → `fit_anomalous_diffusion` (MSD = 4D·τ^α
+by log-log regression), writes `*_msd.csv` + `*_msd_fit.csv`, and stores `D_um2_per_s` in state / data_instance.
+
+Same scale discipline as VPT: a diffusion coefficient is a physical rate (µm²/s), so the handler REFUSES (a
+`_msd_scale_validity` flag, no number) when the pixel size is a 1.0 placeholder or the frame interval is missing —
+it never emits a pixel²/frame "D". Both diffusion ops (`condensate_physics.compute_msd` +
+`.fit_anomalous_diffusion`, each requiring `TRAJECTORIES`, both `needs_pixel_size`) resolve to the one handler; a
+`_msd_done` guard keeps a plan holding both from fitting twice. `_msd_params` threads the reviewed minimum track
+length (science default 200 frames) / lag cap. Registered net-negative against the `batch_step_registry.py`
+complexity ceiling (extended the `analysis_steps` import, swapped the 2-line skip-stub for a 1-line reference).
+
+Tests (`tests/navigator/test_navigator_msd_adapter.py`, `base`, 4): both ops resolve to `msd_analysis`; a guided
+`run_plan` over 12 seeded Brownian tracks recovers D ≈ 0.05 µm²/s and equals a direct `replay_msd_analysis` call
+bit for bit (both CSVs written); a both-ops plan fits once (guard); and the scale gate refuses a pixel-unit
+diffusion through the adapter path. The adapter-coverage guard now pins `msd_analysis`. Full gate green.
+
+## [1.6.429] - 2026-07-28
+### Changed — **Coloc "M1"-family labels are now self-distinguishing + adapter-keying convention documented (spec N5, clarity only — no math change).**
+**N5a — Costes/Manders label provenance.** A merged colocalization table could show `Costes Automatic Thresholded
+M1`, `Mander's M1 value`, and `Mander's k1 value` side by side — three "M1"-family entries that measure different
+things (intensity-after-Costes-threshold vs object-mask overlap vs an intensity split coefficient) with nothing on
+the label saying how. The arithmetic was already correct (A3 fixed the channel cross-referencing); this makes the
+labels self-explaining. The Costes output rows now read `Costes Automatic Thresholded M1/M2 (intensity,
+auto-threshold)` (`coloc/analysis.py`), and the object-based rows read `Mander's M1/M2 (object overlap)`
+(`coloc/object_based.py`). Both are provenance *suffixes*, not renames — the `…M1`/`…M2` stem is preserved. The
+object-based relabel is applied only when building the results table (`process_obca_methods`); the selection key
+(`"Mander's M1 value"`) is untouched, so UI wiring and saved presets still resolve. A new
+`_M1_FAMILY_LABEL_GLOSSARY` string block in `coloc/analysis.py` maps every M1-family label to its definition and
+reference (Costes 2004; Manders 1993), seeding the measurement-ontology roadmap item.
+
+**N5b — adapter-keying convention.** The comment above `_ADAPTERS` (`navigator/executor.py`) previously claimed
+the dict is "keyed by the REAL navigator module name" — no longer true now that op-id keys (`vpt.microrheology`,
+`spatial_metrology.ripley`, `dynamic_spatial.*`) sit alongside module keys (`segmentation_tools`). Replaced it
+with an accurate note of the dual convention: a key is either a module name (resolved for an op-id step via
+`_OP_TO_ADAPTER_MODULE`) or an op-id matched directly; `_adapter_for` tries the step name directly first, then the
+op→module translation — with guidance on which to use when adding an adapter. Zero behaviour change.
+
+Test: `tests/test_costes_manders.py` updated to look up the suffixed Costes labels. Full gate green.
+
+## [1.6.428] - 2026-07-28
+### Added — **Dynamic-spatial adapter — trajectory linking + merge/fission detection run from a navigator plan (spec N2b-3).**
+The `dynamic_spatial` batch step was a headless skip-stub, and neither dynamic-spatial op had an `ExecAdapter`, so
+a motion/fusion plan reported "run from its panel". This builds the real handler and wires both ops in.
+`replay_dynamic_spatial` (`analysis_steps.py`) is self-contained like the VPT terminal: from a segmented
+`(T, H, W)` object-label stack it runs the shared `extract_frame_properties` → `link_trajectories` (motion, one
+row per detection with a `track_id`) and `detect_merge_fission` (fusion, one row per merge/fission event),
+writing `*_dynamic_spatial_tracks.csv` + `*_dynamic_spatial_events.csv` and the matching `state`/`data_instance`
+DataFrames. `_dynamic_spatial_params` threads the reviewed max displacement / gap-bridging window / merge
+proximity over grounded defaults; pixel size comes from the file metadata, never guessed.
+
+Both the motion op (`dynamic_spatial.link_trajectories`, CREATE) and the fusion op
+(`dynamic_spatial.detect_merge_fission`, INTERPRET) resolve to the one handler — a plan that reaches either gets
+real numbers — and a `_dynamic_spatial_done` state guard keeps a plan holding *both* from tracking twice. The
+handler refuses cleanly (a clear skip, no CSV, no numbers) when state has no 3-D segmented stack: it never
+fabricates a per-frame segmentation to invent a "trajectory" from a single frame. Registered net-zero against the
+`batch_step_registry.py` complexity ceiling (432) — extended the `analysis_steps` import, swapped the 1-line
+skip-stub.
+
+Tests (`tests/navigator/test_navigator_dynamic_spatial_adapter.py`, `base`, 4): both ops resolve to
+`dynamic_spatial`; a guided `run_plan` on a synthetic moving-object stack equals a direct `replay_dynamic_spatial`
+call column for column (both CSVs written); a plan holding both ops tracks once (guard set); and a 2-D mask
+refuses cleanly. The adapter-coverage guard now pins `dynamic_spatial` in the expected batch-step set. Full gate
+green.
+
+## [1.6.427] - 2026-07-28
+### Added — **Spatial metrology adapter — per-cell Ripley/nearest-neighbour/radial organisation runs from a navigator plan (spec N2b-2).**
+The `spatial_metrology` batch step was a headless skip-stub (it printed "skipped in headless mode" and computed
+nothing), and the `spatial_metrology.ripley` MEASURE op had no `ExecAdapter`, so a spatial-organisation plan
+reported "run from its panel". This builds the real handler and wires it in. `replay_spatial_metrology`
+(`analysis_steps.py`) is the cellular analogue of the existing `replay_ivf_spatial_metrology`: it reads the
+segmented objects (`puncta_mask`) and the real cell ROIs (`labeled_cells`), extracts per-cell centroids via the
+shared `get_puncta_centroids`, and runs the shared `run_all_spatial_metrics` (Ripley's L / nearest-neighbour /
+radial density) **within each cell**, writing one flattened row per cell to `*_spatial_metrology.csv` and into
+`state['spatial_metrology_df']`. The metrics are keyed per real cell ROI, never whole-frame — a cell with fewer
+than two objects is skipped (Ripley/NN are undefined there). The `spatial_metrology.ripley` op requires
+`INSTANCE_LABELS`, so the planner chains a segmenter first; `_spatial_metrology_params` takes no knobs (the object
+labels and cell ROIs come from state, the metrics run on grounded radial defaults). Registered net-zero against
+the `batch_step_registry.py` complexity ceiling (432) by extending the existing `analysis_steps` import and
+swapping the 1-line skip-stub for the handler reference.
+
+Tests (`tests/navigator/test_navigator_spatial_metrology_adapter.py`, `base`, 3): the adapter resolves to a real
+registered step; a guided `run_plan` on a synthetic two-cell / multi-punctum field equals a direct
+`replay_spatial_metrology` call column for column; and the output is keyed per cell (two rows, one CSV), not a
+whole-frame collapse. The adapter-coverage guard (`test_every_adapter_targets_a_real_registered_batch_step`) now
+pins `spatial_metrology` in the expected batch-step set. Full gate green.
+
+## [1.6.426] - 2026-07-28
+### Added — **VPT microrheology adapter — the flagship viscosity terminal runs from a navigator plan (spec N2b-1b).**
+1.6.423 built the `vpt_microrheology` batch handler (the full detect→link→MSD→fit→Stokes–Einstein chain). This
+wires it into the navigator: the `vpt.microrheology` INTERPRET op now has an `ExecAdapter` →
+`vpt_microrheology`, so a bead/viscosity plan computes end to end instead of reporting "run from its panel". The
+handler is self-contained (it runs the whole chain from the raw stack), so the terminal carries the workflow; the
+upstream detect/link steps stay panel-only until they get their own handlers. `_vpt_microrheology_params` threads
+the reviewed bead radius / temperature / min-track-length over grounded defaults — pixel size and frame interval
+come from the file metadata (the scale gate), never guessed. The `vpt.microrheology` op already declares
+`needs_pixel_size`, so the planner blocks it without calibration; the handler's scale gate refuses a pixel-unit
+viscosity as a second line of defence. The "Video Particle Tracking" `CanonicalCase` (already reproducible at the
+plan level) now runs end to end (N2b-1c).
+
+Tests (`tests/navigator/test_navigator_vpt_adapter.py`, `base`, 3): the adapter resolves and the plan chains it;
+a guided run's viscosity equals the manual `replay_vpt_microrheology` bit for bit on the seeded bead stack; the
+scale gate still refuses a pixel-unit viscosity through the adapter path. Full gate green.
+
 ## [1.6.425] - 2026-07-28
 ### Added — **Manuscript Supp panel: runtime by method (the benchmark's performance axis) — Part C, measured not asserted.**
 Fig 2 (1.6.424) added the benchmark's *accuracy* axis (Dice vs ground truth); this adds its *speed* axis, so the

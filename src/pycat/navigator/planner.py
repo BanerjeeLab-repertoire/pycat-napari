@@ -281,35 +281,100 @@ class Planner:
             for c in candidates:
                 if c.name == pinned:
                     return c
-        tgt = intent.target
-
-        def specificity(m: ModuleContract) -> int:
-            if not tgt:
-                return 0
-            caps = list(m.requires_inputs) + list(m.provides)
-            return 1 if any(c.target() == tgt for c in caps) else 0
-
-        def ctx_bonus(m: ModuleContract) -> int:
-            # PROMOTE a terminal gated on a WORKFLOW-SELECTING context (`in_vitro`) when that context is confirmed
-            # — so the in-vitro size-distribution INTERPRET wins the 'size' terminal on an in-vitro plan, while an
-            # in-cell plan falls back to the per-object measure by preference. Restricted to `in_vitro` ON PURPOSE:
-            # a workflow flag selects WHICH analysis to run, whereas quality/dimensionality gates (`calibrated`,
-            # `z_stack`, `time_series`) only gate a chosen op — promoting those would re-order the msd/coarsening/
-            # fusion terminals (whose ordering is preference-based). See the 2026-07-27 in-vitro chain.
-            try:
-                if "in_vitro" in getattr(m, "requires_context", ()) \
-                        and ctx.context_requirement("in_vitro") is True:
-                    return 1
-            except Exception:      # broad-ok: optional_probe — an unknown gate key just yields no bonus
-                pass
-            return 0
-
-        best = max(candidates, key=lambda m: (ctx_bonus(m), specificity(m), m.preference, -ord(m.name[0])))
-        # deterministic: if several share the top (context bonus, specificity, preference), the
-        # base policy (preference, cost, name) breaks the tie.
+        best = max(candidates, key=lambda m: (self._terminal_ctx_bonus(m, ctx),
+                                              self._terminal_specificity(m, intent),
+                                              m.preference, -ord(m.name[0])))
+        # deterministic: if several share the top (context bonus, specificity), the base policy
+        # (preference, cost, name) breaks the tie.
         top = [m for m in candidates
-               if ctx_bonus(m) == ctx_bonus(best) and specificity(m) == specificity(best)]
+               if self._terminal_ctx_bonus(m, ctx) == self._terminal_ctx_bonus(best, ctx)
+               and self._terminal_specificity(m, intent) == self._terminal_specificity(best, intent)]
         return self.select(top, ctx)
+
+    def _terminal_specificity(self, m: ModuleContract, intent) -> int:
+        """1 if the terminal op is specialised to the intent's target (its inputs/outputs carry ``target:<tgt>``),
+        else 0 — the bead-vs-object distinction made operational. Shared by ``_pick_terminal`` and
+        ``explain_terminal_choice`` so the surfaced reasoning cannot drift from the actual pick."""
+        tgt = intent.target
+        if not tgt:
+            return 0
+        caps = list(m.requires_inputs) + list(m.provides)
+        return 1 if any(c.target() == tgt for c in caps) else 0
+
+    def _terminal_ctx_bonus(self, m: ModuleContract, ctx: AnalysisContext) -> int:
+        """+1 for a terminal gated on the WORKFLOW-SELECTING ``in_vitro`` context when it is confirmed (so the
+        in-vitro size-distribution wins the 'size' terminal on an in-vitro plan); 0 otherwise. Restricted to
+        ``in_vitro`` on purpose: a workflow flag selects WHICH analysis to run, whereas quality/dimensionality
+        gates (``calibrated``, ``z_stack``, ``time_series``) only gate a chosen op — promoting those would
+        re-order the msd/coarsening/fusion terminals. Shared by ``_pick_terminal`` and ``explain_terminal_choice``."""
+        try:
+            if "in_vitro" in getattr(m, "requires_context", ()) \
+                    and ctx.context_requirement("in_vitro") is True:
+                return 1
+        except Exception:      # broad-ok: optional_probe — an unknown gate key just yields no bonus
+            pass
+        return 0
+
+    def explain_terminal_choice(self, intent, ctx, pins=None) -> dict:
+        """Anti-black-box (Method-Widget Spec 5 core): for each requested observable, the terminal ops the planner
+        CONSIDERED, each with its selection scores (``in_vitro`` context bonus, target specificity, preference),
+        and which one it chose. This is the planner's OWN reasoning, surfaced — the winner comes from
+        ``_pick_terminal`` and the per-candidate scores from the same shared helpers, so the explanation can never
+        drift from the actual pick. Returns ``{observable: {"chosen": name, "candidates": [{name, context_bonus,
+        target_specificity, preference, chosen}]}}`` (candidates ordered winner-first)."""
+        pins = pins or {}
+        report = {}
+        for obs in getattr(intent, "observables", ()) or ():
+            candidates = self.registry.measuring(obs)
+            if not candidates:
+                continue
+            chosen = self._pick_terminal(candidates, ctx, pins, intent)
+            report[obs] = {
+                "chosen": chosen.name,
+                "candidates": sorted(
+                    ({"name": m.name,
+                      "context_bonus": self._terminal_ctx_bonus(m, ctx),
+                      "target_specificity": self._terminal_specificity(m, intent),
+                      "preference": m.preference,
+                      "chosen": m.name == chosen.name} for m in candidates),
+                    key=lambda d: (not d["chosen"], -d["context_bonus"], -d["target_specificity"],
+                                   -d["preference"], d["name"])),
+            }
+        return report
+
+    def explain_provider_choice(self, goal, ctx, pins=None):
+        """The dependency-layer analogue of :meth:`explain_terminal_choice`: for a resolution GOAL (a Capability
+        — e.g. the instance-labels a segmenter must provide), the candidate providers the planner weighs, each
+        with its CONTEXT SCORE (+1 context-matched specialist / 0 general / -1 unconfirmed specialist / -2 context
+        violated) and preference, and which one ``_pick`` selects. Reuses ``_pick`` for the winner and the shared
+        ``_context_score`` for the scores, so it cannot drift from the actual dependency choice. ``None`` if the
+        goal has no provider. Candidates ordered winner-first."""
+        pins = pins or {}
+        providers = self.registry.providers_of(goal)
+        if not providers:
+            return None
+        kind_hint = getattr(goal, "kind", None)   # a Capability's representation-kind IS its pin key
+        chosen = self._pick(providers, ctx, pins, kind_hint=kind_hint)
+        return {
+            "goal": str(goal),
+            "chosen": chosen.name,
+            "candidates": sorted(
+                ({"name": p.name,
+                  "context_score": _context_score(p, ctx),
+                  "preference": p.preference,
+                  "chosen": p.name == chosen.name} for p in providers),
+                key=lambda d: (not d["chosen"], -d["context_score"], -d["preference"], d["name"])),
+        }
+
+    def explain_segmentation_choice(self, intent, ctx, pins=None):
+        """Why THIS segmenter, not the others: the provider choice for the instance-labels of the intent's target
+        (e.g. ``cellpose`` for cells on 2D, ``cellpose_3d`` on a z-stack, ``bf_segment`` for brightfield
+        condensates). A convenience over :meth:`explain_provider_choice` that builds the segmentation goal.
+        ``None`` when the intent has no target."""
+        if not getattr(intent, "target", None):
+            return None
+        goal = Capability(Representation.INSTANCE_LABELS, frozenset([f"target:{intent.target}"]))
+        return self.explain_provider_choice(goal, ctx, pins)
 
     def _resolve_module(self, module: ModuleContract, produces_goal: Capability,
                         reason: str, ctx: AnalysisContext, plan: Plan,

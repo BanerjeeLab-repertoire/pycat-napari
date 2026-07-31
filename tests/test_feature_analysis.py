@@ -122,3 +122,45 @@ def test_glcm_features_invalid_input():
     # Test with negative object size
     with pytest.raises(Exception):
         calculate_glcm_features(np.ones((5, 5)), object_size=-1)
+
+# ── N6-3: GLCM texture is computed over the OBJECT MASK, not the ROI bbox (verified + FIXED, 1.6.x) ──────
+# calculate_glcm_features used to crop the ROI's BOUNDING BOX and run graycomatrix over it WITHOUT restricting to
+# the mask, so background pixels and the object/background edge entered the co-occurrence matrix — a uniform
+# object reported a large, spurious contrast. The fix (`_masked_graycomatrix`) counts only object–object pixel
+# pairs. It is byte-identical to skimage when the mask is the whole bbox (guarded below), so only non-rectangular
+# objects change — correctly. (The pre-existing `test_glcm_features_with_mask` never caught the bug because its
+# mask is rectangular, so bbox == mask.)
+
+def _uniform_disc(H=80, W=80, r=18, obj=0.5):
+    """A UNIFORM-intensity disc (zero true texture) on a zero background — bbox != mask, so any contrast the
+    function reports would come from the object/background edge the bbox includes, not the object."""
+    yy, xx = np.ogrid[:H, :W]
+    disc = (yy - H // 2) ** 2 + (xx - W // 2) ** 2 <= r * r
+    img = np.zeros((H, W), dtype=float)
+    img[disc] = obj
+    return img, disc.astype(np.uint8)
+
+
+@pytest.mark.base
+def test_glcm_contrast_of_a_uniform_object_is_near_zero_now_masked():
+    """N6-3 FIX (was the failing golden-master): a uniform object has no texture, so the mask-restricted GLCM
+    gives ~0 contrast — the object/background edge no longer contaminates it."""
+    img, mask = _uniform_disc()
+    contrast = float(calculate_glcm_features(img, object_size=3, roi_mask=mask)["contrast"].iloc[0])
+    assert contrast < 1.0, f"a uniform object must give ~0 contrast once masked; got {contrast:.3f}"
+
+
+@pytest.mark.base
+def test_masked_glcm_is_byte_identical_to_skimage_over_the_whole_bbox():
+    """REGRESSION GUARD: the fix must NOT change the un-masked path. When the mask is the whole rectangle, the
+    masked co-occurrence equals skimage's graycomatrix(symmetric, normed) exactly — so every existing GLCM number
+    (no ROI, or a rectangular ROI) is preserved; only non-rectangular objects change."""
+    import skimage as sk
+    from pycat.toolbox.feature_analysis_tools import _masked_graycomatrix
+    rng = np.random.default_rng(0)
+    img8 = (rng.uniform(0, 1, (40, 40)) * 255).astype(np.uint8)
+    dists = np.array([3, 4, 5])
+    angles = np.array([0, np.pi/8, np.pi/4, 3*np.pi/8, np.pi/2, 5*np.pi/8, 3*np.pi/4, 7*np.pi/8])
+    mine = _masked_graycomatrix(img8, np.ones((40, 40), bool), dists, angles)
+    theirs = sk.feature.graycomatrix(img8, dists, angles, symmetric=True, normed=True)
+    np.testing.assert_allclose(mine, theirs, atol=1e-12)

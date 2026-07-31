@@ -183,11 +183,49 @@ def _pixel_coloc_params(intent, ctx, state, reviewed):
     return {}       # the two channels + the ROI are resolved from state; the raw coloc measures take no knob
 
 
-#: The declared adapters, keyed by the REAL navigator module name `execution_order` reports. The ONLY place a
-#: plan step is tied to a computation — a step absent here (or one whose batch step resolves to ``None``) is
-#: reported "run from its panel", never guessed at. Grows one workflow per phase, each behind a
-#: route-equivalence test: ``background_removal`` (rolling-ball) and ``cellpose_segmentation`` are the batch
-#: steps `test_route_equivalence` proves compute identically to the manual route.
+#: VPT microrheology knobs the handler reads from `params` — the bead radius + temperature + min track length
+#: for the Stokes–Einstein viscosity. Pixel size and frame interval come from the file metadata (the scale gate),
+#: NOT from here — a viscosity in pixel units is refused, never guessed.
+_VPT_MICRORHEOLOGY_DEFAULTS: dict = {"bead_radius_um": 0.5, "temperature_C": 24.0, "min_track_length": 10}
+
+
+def _vpt_microrheology_params(intent, ctx, state, reviewed):
+    return _reviewed_or_default(reviewed, _VPT_MICRORHEOLOGY_DEFAULTS)
+
+
+def _spatial_metrology_params(intent, ctx, state, reviewed):
+    return {}       # the object labels + cell ROIs come from state; Ripley/NN/radial run on grounded defaults
+
+
+#: Dynamic-spatial linking/merge-fission knobs the handler reads from `params` — the max per-frame displacement,
+#: the gap-bridging window, and the merge/fission proximity. The mask stack + pixel size come from state.
+_DYNAMIC_SPATIAL_DEFAULTS: dict = {"max_displacement_um": 2.0, "max_gap_frames": 1, "proximity_um": 1.0}
+
+
+def _dynamic_spatial_params(intent, ctx, state, reviewed):
+    return _reviewed_or_default(reviewed, _DYNAMIC_SPATIAL_DEFAULTS)
+
+
+#: MSD analysis knobs — the min track length to admit (the science default is 200 frames) and an optional lag cap.
+#: The trajectory table comes from the upstream `dynamic_spatial` step; pixel size + frame interval (the scale
+#: gate) come from the file metadata, never from here.
+_MSD_DEFAULTS: dict = {"min_track_length": 200}
+
+
+def _msd_params(intent, ctx, state, reviewed):
+    return _reviewed_or_default(reviewed, _MSD_DEFAULTS)
+
+
+#: The declared adapters — the ONLY place a plan step is tied to a computation. A step absent here (or one whose
+#: batch step resolves to ``None``) is reported "run from its panel", never guessed at. Grows one workflow per
+#: phase, each behind a route-equivalence test: ``background_removal`` (rolling-ball) and ``cellpose_segmentation``
+#: are the batch steps `test_route_equivalence` proves compute identically to the manual route.
+#:
+#: KEYING (N5b) — a key may be EITHER a module name (resolved for an op-id step via _OP_TO_ADAPTER_MODULE) OR an
+#: op-id matched directly. _adapter_for tries the step name directly first, then the op->module translation.
+#: When you add an adapter: if plan_step is an op-id with no module indirection, key it directly here (e.g.
+#: "vpt.microrheology", "spatial_metrology.ripley"); if it's a coarse module fronting several ops, key it by
+#: module (e.g. "segmentation_tools") and add the op->module rows to _OP_TO_ADAPTER_MODULE below.
 _ADAPTERS: dict = {
     "image_processing_tools": ExecAdapter("image_processing_tools", "background_removal",
                                           _background_removal_params),
@@ -211,6 +249,33 @@ _ADAPTERS: dict = {
     # planner chains a segmenter, and the correlation runs inside objects, not whole-frame.
     "pixel_wise_corr.pearson_manders": ExecAdapter("pixel_wise_corr.pearson_manders", "pixel_colocalization",
                                                    _pixel_coloc_params),
+    # VPT microrheology (Gable's flagship): the `vpt.microrheology` INTERPRET terminal runs the whole
+    # detect→link→MSD→fit→Stokes-Einstein chain in `replay_vpt_microrheology` (self-contained from the raw bead
+    # stack). The op declares `needs_pixel_size`, so the planner blocks it without calibration; the handler's
+    # scale gate refuses a pixel-unit viscosity as a second line of defence. See spec N2b-1.
+    "vpt.microrheology": ExecAdapter("vpt.microrheology", "vpt_microrheology", _vpt_microrheology_params),
+    # Spatial metrology (spec N2b-2): the `spatial_metrology.ripley` MEASURE runs Ripley's L / nearest-neighbour /
+    # radial density PER CELL on the segmented objects' centroids (`replay_spatial_metrology` → the shared
+    # `run_all_spatial_metrics`). It requires INSTANCE_LABELS, so the planner chains a segmenter first; the metrics
+    # run within each cell ROI, never whole-frame. Replaces the old headless skip-stub.
+    "spatial_metrology.ripley": ExecAdapter("spatial_metrology.ripley", "spatial_metrology",
+                                            _spatial_metrology_params),
+    # Dynamic spatial (spec N2b-3): BOTH the motion op (`dynamic_spatial.link_trajectories`, CREATE) and the
+    # fusion op (`dynamic_spatial.detect_merge_fission`, INTERPRET) resolve to the one self-contained handler,
+    # which runs extract_frame_properties -> link + merge/fission over the segmented (T,H,W) stack. A plan holding
+    # both ops only tracks once (the handler's `_dynamic_spatial_done` guard). No 3-D stack in state -> clear skip.
+    "dynamic_spatial.link_trajectories": ExecAdapter("dynamic_spatial.link_trajectories", "dynamic_spatial",
+                                                     _dynamic_spatial_params),
+    "dynamic_spatial.detect_merge_fission": ExecAdapter("dynamic_spatial.detect_merge_fission", "dynamic_spatial",
+                                                        _dynamic_spatial_params),
+    # Condensate MSD (spec N2b-4): the stack-level branch of the msd_analysis decision. BOTH diffusion ops
+    # (`condensate_physics.compute_msd` + `.fit_anomalous_diffusion`, each requiring TRAJECTORIES) resolve to the
+    # one handler, which reads the trajectory table `dynamic_spatial` linked, computes the ensemble MSD and fits
+    # anomalous diffusion. A `_msd_done` guard keeps a plan holding both from fitting twice; the handler's scale
+    # gate refuses a pixel^2/frame "D" (needs a calibrated pixel size + frame interval), like VPT.
+    "condensate_physics.compute_msd": ExecAdapter("condensate_physics.compute_msd", "msd_analysis", _msd_params),
+    "condensate_physics.fit_anomalous_diffusion": ExecAdapter("condensate_physics.fit_anomalous_diffusion",
+                                                              "msd_analysis", _msd_params),
 }
 
 

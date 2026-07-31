@@ -1,11 +1,22 @@
-"""**The cross-route equivalence matrix — three canonical workflows, asserted identical per route.**
+"""**The cross-route equivalence matrix — twenty-five canonical workflows, asserted identical per route.**
 
 Read `tests/route_equivalence.py` first: it explains why this exists (the same analysis must not yield
 different numbers depending on how it was launched) and what a route / a documented gap is.
 
-The matrix grew from three to **six** workflows (increment A), chosen for distinct data shapes and failure
-modes — not the 15 the audit imagined at once, because three-per-increment that genuinely run will grow and
-fifteen written at once are abandoned. Adding another is one `Workflow(...)` entry.
+The matrix grew from three to six workflows (increment A), then to twenty-one (increment B added pure image
+filters — Gaussian, DoG, bilateral, LoG, FFT-bandpass, invert, rescale, gabor, upscale — and two torch-free
+segmenters (local-threshold, Felzenszwalb)), and then to **twenty-five** with the mask/label family (binary
+opening / closing / morphology and watershed label-splitting — the first ops that CONSUME a mask or a label
+image rather than raw intensity). Each was chosen for a distinct data shape and failure mode — not the 15 the
+audit imagined at once, because three-per-increment that genuinely run will grow and fifteen written at once are
+abandoned. Adding another is one `Workflow(...)` entry.
+
+A fourth route, **`kernel`** (the Spec-6 execution kernel, `OperationService.execute`), joins headless / batch /
+session: a workflow whose op is migrated to the kernel adds a `kernel` route asserted identical to the rest, and
+one not yet migrated declares `kernel` a documented gap — so an unmigrated op is a VISIBLE gap, never a silent
+absence. Every workflow above has a `kernel` route (27 ops migrated across the matrix). The mask/label rows also
+prove the kernel's input contract covers the mask/label data ROLE (input keyed `mask` / `labels`), not only the
+intensity role the filters exercise.
 
 | workflow | headless | batch replay | session reload |
 |---|---|---|---|
@@ -15,6 +26,13 @@ fifteen written at once are abandoned. Adding another is one `Workflow(...)` ent
 | **cellpose segmentation** (most parameter surface) | ✓ | ✓ | ✓ |
 | **colocalization** (two-channel; channel-assignment risk) | ✓ | gap: no coloc step | ✓ |
 | **time-series condensate partition** (per-frame stack) | ✓ | gap: not a per-image step | ✓ |
+| **gaussian smoothing** (increment B — a pure filter) | ✓ | gap: no batch step | ✓ |
+| **DoG blob enhancement** (increment B — a pure filter) | ✓ | gap: no batch step | ✓ |
+| **bilateral / LoG / FFT-bandpass filters** (increment B) | ✓ | gap: no batch step | ✓ |
+| **local-threshold segmentation** (increment B — torch-free segmenter) | ✓ | gap: no batch step | ✓ |
+| **invert / rescale / gabor / upscale** (increment B — enhancers) | ✓ | gap: no batch step | ✓ |
+| **Felzenszwalb segmentation** (increment B — torch-free segmenter) | ✓ | gap: no batch step | ✓ |
+| **ridge / tone-map / local-contrast / peak+edge** (increment B) | ✓ | gap: no batch step | ✓ |
 
 The batch **gaps are declared, not skipped silently** — and the harness fails if a gap closes or a route
 vanishes without the table being updated. They mark where the headless batch API stops: colocalization has
@@ -114,10 +132,17 @@ def _rolling_ball_workflow():
         result = rb_gaussian_bg_removal_with_edge_enhancement(raw, _BALL_RADIUS).astype(np.float32)
         return session_roundtrip_image(result, 'Enhanced Background Removed').astype(np.float32)
 
+    def kernel():
+        # The Spec-6 execution kernel: OperationService.execute runs the SAME science as the routes above, so a
+        # migrated family closes its route-equivalence row. Background removal is the first migrated family.
+        from pycat.kernel.operation_service import OperationService
+        result = OperationService.execute('rolling_ball', {'image': raw}, {'ball_radius': _BALL_RADIUS})
+        return np.asarray(result.artifacts[0]).astype(np.float32)
+
     return Workflow(
         'rolling-ball background removal',
-        routes={'headless': headless, 'batch': batch, 'session': session},
-        # Exact: all three are the same deterministic float32 operation on the same raw input.
+        routes={'headless': headless, 'batch': batch, 'session': session, 'kernel': kernel},
+        # Exact: all four are the same deterministic float32 operation on the same raw input.
         compare=compare_arrays(rtol=0.0, atol=0.0))
 
 
@@ -135,9 +160,14 @@ def _puncta_workflow():
     def session():
         return session_roundtrip_dataframe(headless(), 'puncta_df')
 
+    def kernel():
+        # Spec-6 kernel, family 3 (a MEASURE op → per-object table). Same clean_detect science as the routes above.
+        from pycat.kernel.operation_service import OperationService
+        return OperationService.execute('clean', {'image': image}, {'psf_sigma': 2.5, 'psf_size': 11}).measurements
+
     return Workflow(
         'puncta detection + measurement',
-        routes={'headless': headless, 'session': session},
+        routes={'headless': headless, 'session': session, 'kernel': kernel},
         # A session round-trip is a DECIMAL (CSV) serialization, so a float64 can come back differing
         # in its last bit (~1 ULP, ~2e-16). That is the text format's precision, NOT a route computing
         # a different number — so the tolerance is 1 ULP-scale (rtol 1e-12, atol 1e-15), far below any
@@ -165,9 +195,17 @@ def _vpt_workflow():
     def session():
         return session_roundtrip_dataframe(headless(), 'msd_df')
 
+    def kernel():
+        # Spec-6 kernel, family 2 (a MEASURE op → the measurements TABLE). Same compute_msd science as the routes
+        # above, so the row closes ≈ kernel too.
+        from pycat.kernel.operation_service import OperationService
+        result = OperationService.execute('condensate_physics.compute_msd', {'tracks': tracks},
+                                          {'frame_interval_s': dt_s, 'min_track_length': 5})
+        return result.measurements
+
     return (Workflow(
         'VPT tracks -> MSD -> viscosity',
-        routes={'headless': headless, 'session': session},
+        routes={'headless': headless, 'session': session, 'kernel': kernel},
         # 1-ULP CSV decimal round-trip tolerance — see the puncta workflow for the justification.
         compare=compare_dataframes(columns, rtol=1e-12, atol=1e-15),
         documented_gaps={
@@ -211,10 +249,18 @@ def _cellpose_workflow():
     def session():
         return session_roundtrip_image(headless(), 'Cell Mask').astype(np.float32)
 
+    def kernel():
+        # Spec-6 kernel, family 4 (a CREATE op → the label mask artifact). Same normalised image, same
+        # cellpose_segmentation science as the routes above — so this row closes ≈ kernel too.
+        from pycat.kernel.operation_service import OperationService
+        result = OperationService.execute('cellpose', {'image': _normalize_to_float(raw)},
+                                          {'cell_diameter': _CELL_DIAMETER, 'postprocess': False})
+        return np.asarray(result.artifacts[0]).astype(np.float32)
+
     return Workflow(
         'cellpose segmentation',
-        routes={'headless': headless, 'batch': batch, 'session': session},
-        # Exact: all three feed the same deterministic normalised image to the same cellpose call.
+        routes={'headless': headless, 'batch': batch, 'session': session, 'kernel': kernel},
+        # Exact: all four feed the same deterministic normalised image to the same cellpose call.
         compare=compare_arrays(rtol=0.0, atol=0.0))
 
 
@@ -246,12 +292,26 @@ def _coloc_workflow():
                              {'coefficient': 'm2', 'value': float(m2), 'units': 'fraction'},
                              {'coefficient': 'pearson', 'value': float(pcc), 'units': 'dimensionless'}])
 
+    def kernel():
+        # Spec-6 kernel, family 6. Coloc is a composite of three single-coefficient ops; the kernel runs each,
+        # the route assembles the same 3-row table — closing ≈ kernel for a multi-op workflow.
+        from pycat.kernel.operation_service import OperationService
+        m1 = OperationService.execute('coloc.manders_m1',
+                                      {'masked_image_1': ch1 * mask1, 'mask_2': mask2, 'roi': roi})
+        m2 = OperationService.execute('coloc.manders_m2',
+                                      {'mask_1': mask1, 'masked_image_2': ch2 * mask2, 'roi': roi})
+        pcc = OperationService.execute('colocalization', {'ch1': ch1, 'ch2': ch2, 'roi': roi})
+        val = lambda r: float(r.measurements['value'].iloc[0])
+        return pd.DataFrame([{'coefficient': 'm1', 'value': val(m1), 'units': 'fraction'},
+                             {'coefficient': 'm2', 'value': val(m2), 'units': 'fraction'},
+                             {'coefficient': 'pearson', 'value': val(pcc), 'units': 'dimensionless'}])
+
     def session():
         return session_roundtrip_dataframe(headless(), 'coloc_df')
 
     return Workflow(
         'colocalization (two-channel)',
-        routes={'headless': headless, 'session': session},
+        routes={'headless': headless, 'session': session, 'kernel': kernel},
         # 1-ULP CSV decimal round-trip tolerance (see the puncta workflow).
         compare=compare_dataframes(['value'], rtol=1e-12, atol=1e-15),
         # Beyond the numbers: the schema, the dtype, the NaN policy, and the UNITS column must survive the
@@ -299,9 +359,22 @@ def _timeseries_condensate_workflow():
     def session():
         return session_roundtrip_dataframe(headless(), 'condensate_ts_df')
 
+    def kernel():
+        # Spec-6 kernel, family 5. A per-frame series is a WORKFLOW over one op (client_enrichment): the kernel
+        # runs the op, the route loops it — the same per-frame science as headless, so the row closes ≈ kernel.
+        from pycat.kernel.operation_service import OperationService
+        rows = []
+        for t in range(n_frames):
+            res = OperationService.execute('client_enrichment',
+                                           {'image': _frame(t), 'dense_mask': dense, 'cell_mask': cell},
+                                           {'background': 0.0})
+            rows.append({'frame': t, 'enrichment': float(res.measurements['enrichment'].iloc[0]),
+                         'units': 'dimensionless'})
+        return pd.DataFrame(rows)
+
     return Workflow(
         'time-series condensate partition',
-        routes={'headless': headless, 'session': session},
+        routes={'headless': headless, 'session': session, 'kernel': kernel},
         compare=compare_dataframes(['enrichment'], rtol=1e-12, atol=1e-15),
         compare_metadata=compare_frame_metadata(['frame', 'enrichment', 'units'], units_column='units'),
         documented_gaps={
@@ -309,6 +382,271 @@ def _timeseries_condensate_workflow():
                      "(the batch condensate replay is a single-frame step; the lazy stack is materialized "
                      "by the interactive/time-series path, not the batch recorder) — same class as the "
                      "VPT/MSD skip-stub gap"})
+
+
+# ── Workflow 7 — Gaussian smoothing (headless ≈ session ≈ kernel; batch is a gap) ────────────────
+# Increment B: a pure deterministic array→array filter, the simplest new op family for the kernel. A standalone
+# smoothing filter has no batch replay step (it is an interactive/kernel operation, not a recorded per-image
+# batch step), so batch is a documented gap.
+
+_GAUSSIAN_SIGMA = 2.0
+
+
+def _gaussian_workflow():
+    from pycat.toolbox.image_processing.filters import gaussian_smooth_2d
+
+    raw = _synthetic_image(seed=3).astype(np.float64)
+
+    def headless():
+        return gaussian_smooth_2d(raw, _GAUSSIAN_SIGMA).astype(np.float32)
+
+    def session():
+        return session_roundtrip_image(headless(), 'Gaussian Smoothed').astype(np.float32)
+
+    def kernel():
+        from pycat.kernel.operation_service import OperationService
+        out = OperationService.execute('gaussian', {'image': raw}, {'sigma': _GAUSSIAN_SIGMA}).artifacts[0]
+        return np.asarray(out).astype(np.float32)
+
+    return Workflow(
+        'gaussian smoothing',
+        routes={'headless': headless, 'session': session, 'kernel': kernel},
+        compare=compare_arrays(rtol=0.0, atol=0.0),
+        documented_gaps={'batch': "a standalone Gaussian smoothing filter has no batch replay step — it is an "
+                                  "interactive/kernel operation, not a recorded per-image batch step"})
+
+
+# ── Workflow 8 — Difference-of-Gaussians blob enhancement (headless ≈ session ≈ kernel; batch is a gap) ──
+
+def _dog_workflow():
+    from pycat.toolbox.image_processing.filters import dog_blob_enhance_2d
+
+    raw = _synthetic_image(seed=4).astype(np.float64)
+
+    def headless():
+        return dog_blob_enhance_2d(raw, sigma_lo=2.0, sigma_hi=3.2).astype(np.float32)
+
+    def session():
+        return session_roundtrip_image(headless(), 'DoG Enhanced').astype(np.float32)
+
+    def kernel():
+        from pycat.kernel.operation_service import OperationService
+        out = OperationService.execute('dog', {'image': raw}, {'sigma_lo': 2.0, 'sigma_hi': 3.2}).artifacts[0]
+        return np.asarray(out).astype(np.float32)
+
+    return Workflow(
+        'DoG blob enhancement',
+        routes={'headless': headless, 'session': session, 'kernel': kernel},
+        compare=compare_arrays(rtol=0.0, atol=0.0),
+        documented_gaps={'batch': "a standalone DoG enhancement filter has no batch replay step — an "
+                                  "interactive/kernel operation, not a recorded per-image batch step"})
+
+
+# ── Workflows 9–11 — more increment-B filters (bilateral, LoG, FFT bandpass) ──────────────────────
+# Same shape as Gaussian/DoG: a deterministic array→array filter proven headless ≈ session ≈ kernel, batch a gap.
+
+def _filter_only_workflow(name, op_id, seed, layer, call, kernel_params):
+    """Build a route-equivalence workflow for a pure array→array filter. `call(raw)` is the direct toolbox call
+    (the headless route); `kernel_params` drives the same op through OperationService.execute. Reduces the
+    boilerplate of the near-identical filter rows to one factory."""
+    def build():
+        raw = _synthetic_image(seed=seed).astype(np.float64)
+
+        def headless():
+            return np.asarray(call(raw)).astype(np.float32)
+
+        def session():
+            return session_roundtrip_image(headless(), layer).astype(np.float32)
+
+        def kernel():
+            from pycat.kernel.operation_service import OperationService
+            out = OperationService.execute(op_id, {'image': raw}, dict(kernel_params)).artifacts[0]
+            return np.asarray(out).astype(np.float32)
+
+        return Workflow(
+            name, routes={'headless': headless, 'session': session, 'kernel': kernel},
+            compare=compare_arrays(rtol=0.0, atol=0.0),
+            documented_gaps={'batch': f"a standalone {name} has no batch replay step — an interactive/kernel "
+                                      "operation, not a recorded per-image batch step"})
+    return build
+
+
+def _bilateral_call(raw):
+    from pycat.toolbox.image_processing.filters import apply_bilateral_filter
+    return apply_bilateral_filter(raw, 3)
+
+
+def _log_call(raw):
+    from pycat.toolbox.image_processing.filters import apply_laplace_of_gauss_filter
+    return apply_laplace_of_gauss_filter(raw, sigma=3)
+
+
+def _bandpass_call(raw):
+    from pycat.toolbox.fft_bandpass_tools import fft_bandpass
+    return fft_bandpass(raw, 2.0, 20.0)
+
+
+def _local_threshold_call(raw):
+    from pycat.toolbox.segmentation.local_thresholding import local_thresholding_func
+    out = local_thresholding_func(raw, 15)
+    return out[0] if isinstance(out, (tuple, list)) else out
+
+
+_bilateral_workflow = _filter_only_workflow(
+    'bilateral filter', 'bilateral', 6, 'Bilateral Filtered', _bilateral_call, {'radius': 3})
+# A TORCH-FREE segmenter (local Niblack/Sauvola threshold) — proves the segmentation kernel path in the core
+# gate, where torch-gated cellpose cannot run. Its bool mask round-trips exactly as float32 0/1.
+_local_threshold_workflow = _filter_only_workflow(
+    'local-threshold segmentation', 'local_threshold', 9, 'Local Threshold Mask',
+    _local_threshold_call, {'window_size': 15})
+
+
+def _invert_call(raw):
+    from pycat.toolbox.image_processing._base import invert_image
+    return invert_image(raw)
+
+
+def _rescale_call(raw):
+    from pycat.toolbox.image_processing._base import apply_rescale_intensity
+    return apply_rescale_intensity(raw)
+
+
+def _gabor_call(raw):
+    from pycat.toolbox.image_processing.filters import gabor_filter_func
+    return gabor_filter_func(raw)
+
+
+def _fz_call(raw):
+    from pycat.toolbox.segmentation.fz import felzenszwalb_segmentation_and_merging
+    out = felzenszwalb_segmentation_and_merging(raw)
+    return out[0] if isinstance(out, (tuple, list)) else out
+
+
+def _upscale_call(raw):
+    from pycat.toolbox.image_processing._base import upscale_image_interp
+    return upscale_image_interp(raw, raw.shape[0], raw.shape[1], 2)
+
+
+_invert_workflow = _filter_only_workflow('intensity inversion', 'invert', 10, 'Inverted', _invert_call, {})
+_rescale_workflow = _filter_only_workflow('intensity rescale', 'rescale', 11, 'Rescaled', _rescale_call, {})
+_gabor_workflow = _filter_only_workflow('gabor filter', 'gabor', 12, 'Gabor Filtered', _gabor_call, {})
+# A second torch-free segmenter (Felzenszwalb graph merge) and an interpolation upscaler.
+_fz_workflow = _filter_only_workflow('felzenszwalb segmentation', 'felzenszwalb', 13, 'FZ Labels', _fz_call, {})
+_upscale_workflow = _filter_only_workflow('interpolation upscaling', 'upscale', 14, 'Upscaled', _upscale_call,
+                                          {'upscale_factor': 2})
+
+
+def _ridge_call(raw):
+    from pycat.toolbox.contrast_cascade_tools import ridge_enhance
+    return ridge_enhance(raw)
+
+
+def _tone_map_call(raw):
+    from pycat.toolbox.contrast_cascade_tools import tone_map
+    return tone_map(raw)
+
+
+def _local_contrast_call(raw):
+    from pycat.toolbox.contrast_cascade_tools import local_contrast_normalize
+    return local_contrast_normalize(raw)
+
+
+def _peak_edge_call(raw):
+    from pycat.toolbox.image_processing.filters import peak_and_edge_enhancement_func
+    return peak_and_edge_enhancement_func(raw, 5)
+
+
+_ridge_workflow = _filter_only_workflow('ridge enhancement', 'ridge', 15, 'Ridge', _ridge_call, {})
+_tone_map_workflow = _filter_only_workflow('tone mapping', 'tone_map', 16, 'Tone Mapped', _tone_map_call, {})
+_local_contrast_workflow = _filter_only_workflow('local contrast', 'local_contrast', 17, 'Local Contrast',
+                                                 _local_contrast_call, {})
+_peak_edge_workflow = _filter_only_workflow('peak+edge enhancement', 'peak_edge', 18, 'Peak Edge',
+                                            _peak_edge_call, {'ball_radius': 5})
+_log_workflow = _filter_only_workflow(
+    'LoG filter', 'log', 7, 'LoG Filtered', _log_call, {'sigma': 3})
+_bandpass_workflow = _filter_only_workflow(
+    'FFT bandpass', 'bandpass', 8, 'Bandpass Filtered', _bandpass_call, {'low_cutoff': 2.0, 'high_cutoff': 20.0})
+
+
+# ── Workflows 22–25 — mask / label transforms (the first ops that CONSUME a mask / label, not raw intensity) ──
+# Same equivalence, different data ROLE: the kernel is fed a mask (or a label image) keyed as `mask` / `labels`,
+# proving OperationService handles the mask/label input role, not only the intensity role the filters exercised.
+
+def _synthetic_mask(seed):
+    """A deterministic binary mask — the bright 20% of a seeded synthetic puncta image."""
+    from tests.fixtures_synthetic import synthetic_puncta_image
+    image, _labels = synthetic_puncta_image(shape=(128, 128), n_puncta=20, seed=seed)
+    a = np.asarray(image)
+    return a > np.percentile(a, 80)
+
+
+def _synthetic_labels(seed):
+    """A deterministic label image — the seeded synthetic puncta ground-truth labels."""
+    from tests.fixtures_synthetic import synthetic_puncta_image
+    _image, labels = synthetic_puncta_image(shape=(128, 128), n_puncta=20, seed=seed)
+    return np.asarray(labels).astype(np.int32)
+
+
+def _mask_only_workflow(name, op_id, seed, layer, make_input, call, input_key, kernel_params):
+    """Build a route-equivalence workflow for a pure mask/label transform. Mirror of `_filter_only_workflow`, but
+    the input is a mask/label (built by `make_input(seed)`) and the kernel is fed it under `input_key`
+    (`mask` or `labels`) — the point of this family: the kernel's input contract covers the mask/label role."""
+    def build():
+        arr = make_input(seed)
+
+        def headless():
+            out = call(arr)
+            out = out[0] if isinstance(out, (tuple, list)) else out
+            return np.asarray(out).astype(np.float32)
+
+        def session():
+            return session_roundtrip_image(headless(), layer).astype(np.float32)
+
+        def kernel():
+            from pycat.kernel.operation_service import OperationService
+            out = OperationService.execute(op_id, {input_key: arr}, dict(kernel_params)).artifacts[0]
+            return np.asarray(out).astype(np.float32)
+
+        return Workflow(
+            name, routes={'headless': headless, 'session': session, 'kernel': kernel},
+            compare=compare_arrays(rtol=0.0, atol=0.0),
+            documented_gaps={'batch': f"a standalone {name} has no batch replay step — a mask/label transform run "
+                                      "interactively/kernel, not a recorded per-image batch step"})
+    return build
+
+
+def _binary_open_call(m):
+    from pycat.toolbox.masks.morphology import custom_binary_opening
+    return custom_binary_opening(m, iterations=1)
+
+
+def _binary_close_call(m):
+    from pycat.toolbox.masks.morphology import custom_binary_closing
+    return custom_binary_closing(m, iterations=1)
+
+
+def _binary_morph_call(m):
+    from pycat.toolbox.masks.morphology import binary_morph_operation
+    return binary_morph_operation(m, iterations=1, element_size=3, element_shape='Disk', mode='Opening')
+
+
+def _split_watershed_call(labels):
+    from pycat.toolbox.masks.morphology import split_touching_objects
+    return split_touching_objects(labels, sigma=3.5)
+
+
+_binary_open_workflow = _mask_only_workflow(
+    'binary opening', 'binary_open', 19, 'Opened Mask', _synthetic_mask, _binary_open_call, 'mask',
+    {'iterations': 1})
+_binary_close_workflow = _mask_only_workflow(
+    'binary closing', 'binary_close', 20, 'Closed Mask', _synthetic_mask, _binary_close_call, 'mask',
+    {'iterations': 1})
+_binary_morph_workflow = _mask_only_workflow(
+    'binary morphology', 'binary_morph', 21, 'Morph Mask', _synthetic_mask, _binary_morph_call, 'mask',
+    {'iterations': 1, 'element_size': 3, 'element_shape': 'Disk', 'mode': 'Opening'})
+_split_watershed_workflow = _mask_only_workflow(
+    'watershed label splitting', 'split_watershed', 22, 'Split Labels', _synthetic_labels, _split_watershed_call,
+    'labels', {'sigma': 3.5})
 
 
 # ── The matrix ──────────────────────────────────────────────────────────────────────────────────
@@ -320,6 +658,25 @@ _WORKFLOW_BUILDERS = {
     'cellpose': _cellpose_workflow,
     'colocalization': _coloc_workflow,
     'time_series_condensate': _timeseries_condensate_workflow,
+    'gaussian': _gaussian_workflow,          # increment B
+    'dog': _dog_workflow,                    # increment B
+    'bilateral': _bilateral_workflow,        # increment B
+    'log': _log_workflow,                    # increment B
+    'bandpass': _bandpass_workflow,          # increment B
+    'local_threshold': _local_threshold_workflow,   # increment B — a torch-free segmenter
+    'invert': _invert_workflow,              # increment B
+    'rescale': _rescale_workflow,            # increment B
+    'gabor': _gabor_workflow,                # increment B
+    'felzenszwalb': _fz_workflow,            # increment B — a second torch-free segmenter
+    'upscale': _upscale_workflow,            # increment B
+    'ridge': _ridge_workflow,                # increment B
+    'tone_map': _tone_map_workflow,          # increment B
+    'local_contrast': _local_contrast_workflow,   # increment B
+    'peak_edge': _peak_edge_workflow,        # increment B
+    'binary_open': _binary_open_workflow,    # mask/label family
+    'binary_close': _binary_close_workflow,  # mask/label family
+    'binary_morph': _binary_morph_workflow,  # mask/label family
+    'split_watershed': _split_watershed_workflow,   # mask/label family (consumes labels)
 }
 
 
@@ -338,7 +695,7 @@ def test_cellpose_genuinely_runs_all_three_routes():
     from tests.route_equivalence import Unavailable
     results = run_all_routes(_cellpose_workflow())
     ran = {r for r, v in results.items() if not isinstance(v, Unavailable)}
-    assert ran == {'headless', 'batch', 'session'}, f"cellpose only ran {sorted(ran)}"
+    assert ran == {'headless', 'batch', 'session', 'kernel'}, f"cellpose only ran {sorted(ran)}"
 
 
 def test_the_metadata_comparator_would_catch_a_units_or_nan_divergence():
@@ -363,7 +720,7 @@ def test_rolling_ball_runs_all_three_routes_not_just_headless():
     results = run_all_routes(_rolling_ball_workflow())
     from tests.route_equivalence import Unavailable
     ran = {r for r, v in results.items() if not isinstance(v, Unavailable)}
-    assert ran == {'headless', 'batch', 'session'}, f"rolling-ball only ran {sorted(ran)}"
+    assert ran == {'headless', 'batch', 'session', 'kernel'}, f"rolling-ball only ran {sorted(ran)}"
 
 
 def test_the_VPT_chain_recovers_the_KNOWN_viscosity_end_to_end():

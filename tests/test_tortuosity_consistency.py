@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 
 from pycat.toolbox.morphological_complexity_tools import tortuosity_per_object
+from pycat.toolbox.fibril_tools import fibril_morphometry
 
 pytestmark = pytest.mark.base      # scikit-image / scipy / pandas stack
 
@@ -38,8 +39,51 @@ def _Y(main=40, stub=15):
     return m
 
 
+def _arc(R=18):
+    """An open circular arc — an UNBRANCHED but genuinely curved skeleton (not piecewise-linear), so the
+    cross-check below tests more than two straight segments meeting at a corner."""
+    H = W = 2 * R + 14
+    cy = cx = R + 7
+    m = np.zeros((H, W), dtype=int)
+    yy, xx = np.ogrid[:H, :W]
+    r = np.sqrt((yy - cy) ** 2 + (xx - cx) ** 2)
+    ang = np.arctan2(yy - cy, xx - cx)
+    m[(np.abs(r - R) < 1.0) & (ang > -1.0)] = 1
+    return m
+
+
 def _tort(mask):
     return float(tortuosity_per_object(mask)['tortuosity'].iloc[0])
+
+
+def _fb_main_tort(mask):
+    """The tortuosity of `fibril_morphometry`'s longest segment (its NetworkX per-edge path implementation)."""
+    segment_rows, _nodes, _summary = fibril_morphometry(mask)
+    main = max(segment_rows, key=lambda r: r['length_px'])
+    return float(main['tortuosity'])
+
+
+# ── N3: the two tortuosity implementations must not silently drift ───────────────────────────────────────
+# `tortuosity_per_object` (scipy-sparse adjacency + `shortest_path`) and `fibril_morphometry` (a NetworkX graph
+# with per-edge traced paths) compute tortuosity on two DIFFERENT skeleton representations. The S3 fix made them
+# agree numerically, but nothing structural keeps them agreeing. Rather than force one onto the other's graph
+# (which would cost `fibril_morphometry` its curvature/persistence-length information), this cross-check is the
+# anti-drift guarantee: on an unbranched skeleton both measure the same end-to-end geodesic and must agree to
+# floating point; on a branched one they legitimately measure different things, and that boundary is pinned too.
+
+@pytest.mark.parametrize("mask,name", [(_rod(), "rod"), (_L(arm=30), "L-bend"), (_arc(), "arc")])
+def test_the_two_tortuosity_impls_agree_on_an_unbranched_skeleton(mask, name):
+    # one path, no junction → the whole-object geodesic (MC) IS the single segment (FB). They share the geometry,
+    # so they agree to ~1e-15; a tolerance far tighter than the science needs, because its job is to catch drift.
+    assert abs(_tort(mask) - _fb_main_tort(mask)) < 1e-9, f"tortuosity impls drifted on the {name}"
+
+
+def test_the_impls_legitimately_diverge_on_a_branched_skeleton():
+    # On a Y the two measure DIFFERENT quantities BY DESIGN: MC reports the whole-object geodesic diameter (the
+    # path across the two farthest arms), FB reports its longest single segment. They must NOT be "unified" into
+    # agreement — this pins that the divergence is real, so a future reader does not mistake it for a bug.
+    y = _Y(main=40, stub=15)
+    assert abs(_tort(y) - _fb_main_tort(y)) > 0.02
 
 
 def test_a_straight_rod_is_tortuosity_one():

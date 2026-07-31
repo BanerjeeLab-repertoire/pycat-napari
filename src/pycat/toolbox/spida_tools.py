@@ -67,6 +67,11 @@ except Exception:  # pragma: no cover
 _THRESMIN = 6.0
 _THRESMAX = 7.0
 
+# N6-1: at or below this fitted density there are few molecules per beam-area, so the estimate is inherently
+# higher-variance (not biased — the truncation bias is fixed). `fit_spida_histogram` flags it as a regime worth
+# confirming against a monomeric control.
+_SPIDA_LOW_DENSITY_N = 4.0
+
 
 def _poisson_curve(amp, mea, div, x):
     """Port of ``poisson.m``: exp(-mea) * mea^(x/div) / Gamma(x/div + 1),
@@ -170,7 +175,12 @@ def build_intensity_histogram(pixels, n_bins=256, white_noise=0.0):
     p = p[np.isfinite(p)]
     if white_noise:
         p = p - float(white_noise)
-    p = p[p > 0]
+    # Keep the k=0 (zero-intensity) population (N6-1 fix). Dropping it (the old ``p > 0``) removed a real,
+    # information-bearing part of the distribution — at low density a large fraction of pixels see zero molecules
+    # (P(k=0)=e^-N) — and biased the density estimate upward. Only genuinely sub-floor NEGATIVE pixels are
+    # dropped; the zeros stay, so the histogram (and the moments the fit reads from it) reflect the FULL pixel
+    # population.
+    p = p[p >= 0]
     if p.size < 100:
         return None, None
     hi = np.percentile(p, 99.9)
@@ -390,7 +400,16 @@ def fit_spida_histogram(x, y):
         napari_show_warning(f"SpIDA fit did not converge: {e}")
         return {'success': False}
 
-    y_fit = spida_model(x, *popt) * amp
+    # N6-1 fix — truncation-robust density. With the k=0 population now kept (build_intensity_histogram), the
+    # moment estimate (x0, div) is unbiased at ALL densities: SpIDA is fundamentally a distribution-moment
+    # analysis, and the moments are stable. The least-squares curve fit, though, can COLLAPSE onto the sharp
+    # zero-intensity bin at low density and badly under-estimate N (e.g. 0.6 against a true 2). So when the fit
+    # has clearly collapsed below the moment anchor, report the moment estimate instead — the fit still governs
+    # the peak-brightness shape at the densities where it is well-behaved.
+    N_fit, eps_fit = popt[1], popt[2]
+    if N_fit < 0.5 * x0:
+        N_fit, eps_fit = x0, div
+    y_fit = spida_model(x, popt[0], N_fit, eps_fit) * amp
     # Align peaks before computing R^2: the model is peak-normalised internally,
     # so scale it to the data's peak to get a meaningful goodness-of-fit on the
     # histogram's own scale.
@@ -401,13 +420,19 @@ def fit_spida_histogram(x, y):
     ss_res = np.sum((y - y_fit_aligned) ** 2)
     ss_tot = np.sum((y - np.mean(y)) ** 2)
     r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
+    N = N_fit
     return {
         'success': True,
         'amp': popt[0] * amp,
-        'N': popt[1],
-        'epsilon': popt[2],
+        'N': N,
+        'epsilon': eps_fit,
         'y_fit': y_fit,
         'r_squared': r2,
+        # A low fitted density is not biased any more (the k=0 population is kept and the moment anchor is
+        # unbiased), but it is still the regime with the fewest independent samples per molecule count — so it is
+        # flagged as inherently higher-variance, worth confirming against a monomeric control, not as a wrong
+        # number to distrust.
+        'low_density_regime': bool(N < _SPIDA_LOW_DENSITY_N),
     }
 
 
@@ -500,6 +525,11 @@ def run_spida_analysis(image_layer, roi_shapes_layer, n_bins, white_noise,
     if r2 < 0.9:
         lines.append("NOTE: R^2 is low — the single-population model may not fit "
                      "this ROI well (mixed oligomers or heterogeneity).")
+    if res.get('low_density_regime'):
+        lines.append(f"NOTE: LOW DENSITY (N = {N:.1f}). Below ~{_SPIDA_LOW_DENSITY_N:.0f} particles/beam there "
+                     "are few molecules per beam-area, so the estimate has inherently higher variance — worth "
+                     "confirming against a monomeric control. (The old low-density truncation bias is fixed: the "
+                     "zero-molecule pixels are now kept and the density comes from the unbiased moment anchor.)")
     if modality_issues:
         lines.append("NOTE: modality warnings were raised above — if this is not "
                      "confocal/optically-sectioned data, the numbers are not "

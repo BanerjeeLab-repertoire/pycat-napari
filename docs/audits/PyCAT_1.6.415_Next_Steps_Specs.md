@@ -135,7 +135,12 @@ The order maximizes scientific value and reuses the most existing machinery:
 > (skip-stub replaced), op composition declared, registry held at its 432 ceiling. The whole chain runs headless;
 > the scale gate refuses a pixel-unit viscosity (verdict, not a number). Gate `test_vpt_microrheology_handler.py`
 > (`base`, 3): the full chain recovers the seeded viscosity within ±15% on a synthetic bead stack; both scale-gate
-> refusals proven. **Remaining: (b) the adapter `vpt.microrheology → vpt_microrheology` + (c) the CanonicalCase.**
+> refusals proven.
+> **STATUS N2b-1(b,c) — DONE (1.6.426).** Adapter `ExecAdapter("vpt.microrheology", "vpt_microrheology",
+> _vpt_microrheology_params)` in `_ADAPTERS`; the bead/viscosity plan chains the microrheology terminal, which runs
+> the whole chain. The "Video Particle Tracking" CanonicalCase (already reproducible at plan level) now runs end to
+> end. Gate `test_navigator_vpt_adapter.py` (`base`, 3): adapter resolves, guided viscosity == manual bit for bit,
+> scale gate still refuses through the adapter path. **N2b-1 COMPLETE — the VPT flagship computes in the guided flow.**
 
 **1. VPT microrheology → viscosity (highest value; Gable's flagship).** The science chain
 (`detect_beads_stack → link → compute_msd → fit_anomalous_diffusion → viscosity_from_diffusion`) is all
@@ -161,7 +166,17 @@ pure-Python and proven headless (the golden-master harness runs it). What's miss
      absent/1.0, never emit a pixel-unit viscosity. This is the same discipline as
      `check_calibration_validity`.
 
-**2. Spatial metrology (Ripley's L / nearest-neighbour) — reuses an existing tool.**
+**2. Spatial metrology (Ripley's L / nearest-neighbour) — reuses an existing tool. — DONE (1.6.427).**
+   - STATUS: `replay_spatial_metrology` built in `analysis_steps.py` (the cellular analogue of the existing
+     `replay_ivf_spatial_metrology`) — it wraps the shared `run_all_spatial_metrics` (Ripley's L + NN + radial
+     density, which subsumes `ripleys_l`) run PER CELL on the segmented objects' centroids via
+     `get_puncta_centroids`, writes `<stem>_spatial_metrology.csv` + `state['spatial_metrology_df']`, and skips
+     any cell with < 2 objects. Registered net-zero against the 432 ceiling (extended the `analysis_steps`
+     import + swapped the skip-stub). Adapter `ExecAdapter("spatial_metrology.ripley", "spatial_metrology",
+     _spatial_metrology_params)` added; coverage guard updated. Route test in
+     `tests/navigator/test_navigator_spatial_metrology_adapter.py` (guided == manual, keyed per cell). Full gate
+     green. NOTE: no separate `CanonicalCase` yet — deferred with N2b-3's, since both share the segmentation
+     upstream and are better added together.
    - **(a) Build `replay_spatial_metrology`** wrapping `spatial_metrology_tools.ripleys_l` (+ the
      nearest-neighbour / radial-profile family — note S1's `radial_localization_profile` is now correct,
      so it's safe to expose headlessly). Input: a points/labels layer + the cell mask. Output:
@@ -170,14 +185,35 @@ pure-Python and proven headless (the golden-master harness runs it). What's miss
    - **(b) Adapter:** `ExecAdapter("spatial_metrology.ripley", "spatial_metrology", _spatial_metrology_params)`.
    - **(c)** route test + `CanonicalCase`.
 
-**3. Dynamic spatial (trajectory linking → merge/fission) — 2D+t.**
+**3. Dynamic spatial (trajectory linking → merge/fission) — 2D+t. — DONE (1.6.428).**
+   - STATUS: `replay_dynamic_spatial` built in `analysis_steps.py` — self-contained from a segmented (T,H,W)
+     label stack: `extract_frame_properties` → `link_trajectories` (motion) and `detect_merge_fission` (fusion),
+     writing `*_dynamic_spatial_tracks.csv` + `*_dynamic_spatial_events.csv`. BOTH ops
+     (`dynamic_spatial.link_trajectories` CREATE + `dynamic_spatial.detect_merge_fission` INTERPRET) key to the
+     one handler via `_dynamic_spatial_params`; a `_dynamic_spatial_done` guard stops a both-ops plan tracking
+     twice. Refuses cleanly with no 3-D stack (never fabricates a per-frame segmentation). Registered net-zero
+     against the 432 ceiling. Route test in `tests/navigator/test_navigator_dynamic_spatial_adapter.py` (guided ==
+     manual, guard, clean refusal). Full gate green. NOTE: no `CanonicalCase` yet — deferred (see N2b-2's note);
+     the batch lane has no upstream producer of a labelled time-series stack today, so the end-to-end plan-level
+     case waits on a time-series segmentation handler.
    - **(a) Build `replay_dynamic_spatial`** wrapping `dynamic_spatial_tools.link_trajectories` (+
      `detect_merge_fission`). Register `'dynamic_spatial'` (replacing the skip-stub at :233). Dispatch on
      dimensionality — this is a time-series op, so the `_context_score` machinery already ranks it
      correctly once a real handler exists.
    - **(b) Adapter** keyed on the tracking op-id; **(c)** tests.
 
-**4. MSD / condensate biophysics** — `msd_analysis` (:253) is stubbed as *"time-series; not a per-image
+**4. MSD / condensate biophysics — DONE (1.6.430, the "build it" branch).**
+   - STATUS: The stub's "not a per-image batch step" premise was refuted by VPT (a whole-stack handler already
+     runs in the batch loop) and by `dynamic_spatial` now writing a trajectory table that is exactly
+     `compute_msd`'s contract (track_id / frame / y_um / x_um). So the decision is resolved by BUILDING, not
+     documenting: `replay_msd_analysis` (`analysis_steps.py`) reads `state['dynamic_spatial_tracks_df']` → shared
+     `compute_msd` → `fit_anomalous_diffusion`, writing `*_msd.csv` + `*_msd_fit.csv` and storing `D_um2_per_s`.
+     Both diffusion ops (`condensate_physics.compute_msd` + `.fit_anomalous_diffusion`) key to it via `_msd_params`
+     (guard `_msd_done`); the scale gate refuses a pixel²/frame D (needs calibrated pixel size + frame interval),
+     exactly like VPT. Registered net-negative against the 432 ceiling. Route test
+     `tests/navigator/test_navigator_msd_adapter.py` (D≈0.05 recovered, guided == manual, guard, scale refusal).
+     Full gate green.
+   - ORIGINAL SPEC (for reference): `msd_analysis` (:253) is stubbed as *"time-series; not a per-image
 batch step."* This one is genuinely different: MSD needs the *whole* stack, not per-frame replay. Either
 build a stack-level handler (the batch loop would need a stack-aware entry) **or** leave it panel-only
 and document why. Decide explicitly; don't leave it as a silent stub that an adapter might later point
@@ -197,7 +233,19 @@ is visible, not implicit.
 
 ---
 
-## N3 — Extract a shared skeleton-geodesic helper (consistency, cosmetic)
+## N3 — Extract a shared skeleton-geodesic helper (consistency, cosmetic) — DONE (test-only, git-only).
+STATUS: Delivered the anti-drift **cross-check test** (the spec's preferred deliverable), skipped the optional
+helper extraction (its "nice-to-have" internal tidiness isn't worth touching working geodesic code). Added to
+`tests/test_tortuosity_consistency.py` (`base`, +4): a parametrized guard that `tortuosity_per_object` (MC,
+scipy-sparse) and `fibril_morphometry`'s main segment (FB, NetworkX per-edge) agree to `< 1e-9` on UNBRANCHED
+skeletons (rod, L-bend, and a new curved arc — they share the end-to-end geodesic, so they agree to ~1e-15), plus
+a companion test pinning that on a BRANCHED Y they **legitimately diverge** (MC = whole-object geodesic diameter
+across two arms; FB = longest single segment) so the difference is never mistaken for a bug and "fixed" into
+false agreement. IMPORTANT CORRECTION to the spec's snippet: its illustrative `test_tortuosity_impls_agree` put a
+Y-shape in the agreement set — empirically the Y diverges by ~0.09 (they measure different quantities on a branch),
+so the agreement fixtures MUST be unbranched; the Y belongs in the divergence test instead. Full gate green.
+
+
 
 **Finding.** The S3 fix put a correct geodesic-diameter computation in
 `morphological_complexity_tools.py:291` (scipy sparse + KD-tree `query_pairs`, degree-1 endpoints,
@@ -274,7 +322,18 @@ benchmark-agreement input the MRI cluster wants.)*
 
 ---
 
-## N5 — Small consistency fixes (fold into the next change touching each file)
+## N5 — Small consistency fixes (fold into the next change touching each file) — DONE (1.6.429).
+STATUS: Both parts shipped. N5a — Costes output rows now read `Costes Automatic Thresholded M1/M2 (intensity,
+auto-threshold)` and object-based rows read `Mander's M1/M2 (object overlap)` (provenance suffixes, stem
+preserved; the object-based relabel is at the output row only via `_OBCA_OUTPUT_LABELS`, selection key untouched);
+added `_M1_FAMILY_LABEL_GLOSSARY` in `coloc/analysis.py` mapping every M1-family label to its definition + ref.
+`tests/test_costes_manders.py` updated to the suffixed labels. N5b — replaced the (now-inaccurate) "keyed by the
+REAL module name" comment above `_ADAPTERS` with the dual-convention note (module-name vs op-id keys) + author
+guidance. Full gate green. NOTE: the Manders k1/k2 and Overlap Coefficient labels were left as-is (they are
+already distinct from "M1" by name) — the glossary documents them; only the two literally-"M1"-named collisions
+got suffixes.
+
+
 
 **N5a — Costes/Manders "M1" labelling.** Confirmed multiple distinct labels for related-but-different
 quantities across the coloc panels: `coloc/analysis.py` emits `'Costes Automatic Thresholded M1'`
@@ -309,13 +368,77 @@ re-checked in the 1.6.415 pass. Each needs a *verification* pass (run it on a co
 deciding whether it needs a fix — don't fix blind. In priority order:
 
 1. **SpIDA noise-tail truncation** — confirm whether the histogram fit still truncates the low-intensity
-   tail in a way that biases the monomer fraction.
+   tail in a way that biases the monomer fraction. **VERIFIED — bias CONFIRMED at low density (1.6.x, test-only).**
+   `build_intensity_histogram` drops every pixel at/below the noise floor (`p = p[p > 0]`). At low density a large
+   fraction of pixels see zero molecules (P(k=0)=e^-N), so the cut removes real information and inflates N: +56%
+   at true N=2, catastrophic (>20x) at N=1, tracking the dropped-zero fraction; the valid regime (N>=5, e^-N
+   negligible) is unaffected — which is why the pre-existing N=8 baseline test passes. Encoded in
+   `tests/test_group_a_moments.py`: a CHARACTERISATION test pinning the mechanism (bias scales with dropped
+   fraction; N=5 unaffected) + a strict-`xfail` FAILING GOLDEN-MASTER asserting N≈2 recovery, the acceptance test
+   for the fix. FIX DIRECTION (evidence-backed, deferred to its own real-data-validated change — changing a core
+   fit's histogram for all users must not be done blind): keep the low tail instead of `p[p>0]` — on noisy
+   synthetics that recovers low-N D≈truth and leaves the high-N regime bit-identical.
+   **UPDATE (1.6.436): GUARDRAIL SHIPPED; recovery still deferred (correctly).** Attempting the naive fix under
+   the repo's doubly-Poisson model REFUTED it: keeping the zeros over-corrects a true N=2 to ~0.6 (worse, opposite
+   direction) — so no simple data cut recovers truth; a truncation-aware histogram model is needed (and MATLAB-ref
+   validation). Rather than ship a wrong "fix", `fit_spida_histogram` now returns `low_density_regime`
+   (fitted N < `_SPIDA_LOW_DENSITY_N` = 4) and `run_spida_analysis` prints a LOW-DENSITY note, so a biased low-N
+   result is reported lower-confidence instead of silently trusted — the anti-black-box move. The recovery
+   golden-master stays strict-`xfail` (its reason now records the refuted naive fix); a new test pins that the
+   flag fires at N=2 and not at N=8. The fit math is unchanged (high-N byte-identical).
+   **FIX SHIPPED (1.6.450): recovery closed, the last xfail resolved.** The truncation-aware fix keeps the k=0
+   population (`p >= 0`, not `p > 0`) so the moments are full-population and unbiased, and anchors the reported
+   density on the moment estimate where the least-squares fit collapses onto the zero bin (which is what made the
+   naive keep-zeros over-correct to ~0.6). SpIDA now recovers true N = 2 ≈ 2.0, leaves N = 8 unchanged (~7.8), and
+   keeps the pedestal sensitivity (a 200-count offset still inflates 8 → ~31). The `low_density_regime` flag is
+   repurposed from "biased over-estimate" to "inherently higher-variance — confirm against a monomer control."
 2. **Partition-coefficient clipping** — check whether `partition_coefficient_field` clips or floors in a
-   way that distorts K_p at low dilute-phase intensity.
+   way that distorts K_p at low dilute-phase intensity. **VERIFIED — recovers truth; CLOSED with a guard
+   (test-only).** For a well-posed (uniform) dilute phase, Kp = dense/bulk is recovered EXACTLY across the whole
+   low range (bulk 0.3 → 0.001, Kp 2 → 600, 0% error) — the percentile == mean == bulk, so neither floor engages.
+   The two floors (mean-fallback when the percentile is degenerate; the `bulk_div > 1e-6` guard) only engage on a
+   degenerate right-skewed dark background, where they trade a ~1e8 divide-by-≈0 explosion for a bounded bias — a
+   documented, deliberate choice. Encoded in `tests/test_partition.py`: a parametrized golden-master pinning exact
+   Kp recovery across low dilute intensities (the regression guard) + a characterization pinning that the
+   mean-fallback stays bounded (not an explosion) on the degenerate background. No fix needed.
 3. **GLCM / LBP over the bbox** — confirm texture features are computed over the object mask, not the
-   full bounding box (bbox includes background → contaminated texture).
+   full bounding box (bbox includes background → contaminated texture). **VERIFIED — GLCM IS contaminated
+   (test-only golden-master; fix deferred).** `calculate_glcm_features` crops the ROI *bounding box*
+   (`crop_bounding_box(...)[0]`) and runs `graycomatrix` over it with NO mask restriction — a uniform disc (true
+   contrast 0) reports contrast ≈ 11919, entirely the object/background edge (even a zero-noise background does
+   it). `calculate_image_entropy` restricts via `cropped_mask`; LBP restricts its histogram but computes codes
+   over the bbox, so its boundary ring is contaminated too — GLCM is the clear case. The pre-existing
+   `test_glcm_features_with_mask` missed it (rectangular mask → bbox == mask). Encoded in
+   `tests/test_feature_analysis.py`: a characterization pinning the contamination + a strict-`xfail` FAILING
+   GOLDEN-MASTER asserting ≈0 contrast for a uniform object. **FIX SHIPPED (1.6.435).** `_masked_graycomatrix`
+   restricts the co-occurrence to object–object pixel pairs (vectorised bincount per distance/angle); it is
+   byte-identical to skimage's `graycomatrix(symmetric, normed)` when the mask is the whole bbox (guarded), so
+   every existing GLCM number (no ROI / rectangular ROI) is preserved and only non-rectangular objects change —
+   correctly. A uniform object now gives contrast 0.0 (was ~11919). The golden-master flipped from strict-`xfail`
+   to passing; a skimage-equivalence regression guard was added. (LBP's milder boundary contamination is
+   documented but left as-is — no failing golden-master was written for it.)
 4. **Size-distribution detection-limit truncation** — check the MLE size distribution handles the
-   left-truncation at the detection limit.
+   left-truncation at the detection limit. **VERIFIED — it does NOT (test-only golden-master; fix deferred).**
+   `fit_size_distribution_mle`'s whole-sample fits (lognormal via closed-form log-moments; gamma/weibull/
+   exponential via scipy `.fit(floc=0)`) are UNTRUNCATED MLEs; only the power law uses a lower cut-off (Clauset
+   x_min). The `xmin` parameter in the signature is DEAD — it never reaches the whole-sample fits. Left-truncating
+   a true lognormal (median 5 µm) at a detection limit inflates the fitted median (+14% at r_min=3, +49% at
+   r_min=5) and deflates the spread; passing `xmin` corrects nothing. Encoded in
+   `tests/test_size_distribution_mle_characterization.py`: a baseline (untruncated recovers truth) + a
+   characterization pinning the truncation bias of the default fit + a strict-`xfail` FAILING GOLDEN-MASTER that
+   `xmin` should recover the true lognormal from detection-limited data. FIX (deferred, and additive since `xmin`
+   defaults to None so existing untruncated behaviour is unchanged): honour `xmin` with a truncated likelihood
+   `f(r)/(1−F(xmin))` per candidate. **FIX SHIPPED (1.6.431).** `xmin` now drives a left-truncated MLE for all four
+   whole-sample candidates (numerical maximisation of `Σ log f(rᵢ) − n·log(1−F(xmin))`, seeded by the untruncated
+   estimate); the AIC and the Vuong test carry the same truncation correction. The golden-master flipped from
+   strict-`xfail` to passing (recovers mu≈log 5, σ≈0.5 from data truncated at 4 µm). `xmin=None` stays
+   byte-identical (existing callers unaffected); the result dict gains `detection_limit_xmin`.
+
+**N6 SUMMARY:** all four verified. #2 (partition) recovers truth → CLOSED with a regression guard. #1 (SpIDA
+low-density), #3 (GLCM bbox), #4 (size-dist truncation) each CONFIRMED biased → each pinned with a
+characterization + a strict-`xfail` failing golden-master that becomes its fix's acceptance test. All test-only;
+fixes to the three core science functions deferred to focused, individually-validated changes (each alters a
+shipping function's output broadly and must not be done blind).
 
 **Spec per item:** write a golden-master test on a synthetic input with a known answer (a known monomer
 fraction, a known K_p, a known texture, a known size distribution), run the current function, and record

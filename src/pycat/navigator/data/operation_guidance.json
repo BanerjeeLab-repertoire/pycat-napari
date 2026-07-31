@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "_comment": "Per-operation SCIENTIFIC guidance for the Navigator (Method-Widget Spec 3): when to use an op, its advantages, its limitations, the alternatives, when it does NOT apply, and references. Keyed by the op-id a PlanStep carries (catalog op-ids + measure-op ids), like section_bindings.json. THE CONTENT IS AUTHORED BY THE SCIENTIST, never generated: it encodes judgement (e.g. when Cellpose beats thresholding) that a machine must not invent. This store ships EMPTY on purpose; `guidance.guidance_for(op_id)` returns None for an unauthored op (refuse-to-guess), and the coverage ratchet (tests/navigator/test_guidance_coverage.py) tracks the authored fraction, which only grows. Author by filling the workbook `guidance.generate_guidance_workbook(path)` produces, then `guidance.ingest_guidance_workbook(path)` reads it back here. Each entry has: when_to_use (str), advantages (list[str]), limitations (list[str]), alternatives (list[str]), not_applicable_when (list[str]), references (list[str]).",
+  "guidance": {}
+}

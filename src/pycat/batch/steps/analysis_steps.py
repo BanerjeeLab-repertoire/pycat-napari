@@ -358,3 +358,151 @@ def replay_pixel_coloc(state: dict, image_path: Path, params: dict, output_dir: 
     state['data_instance'].set_data('coloc_df', df)
     df.to_csv(output_dir / f"{image_path.stem}_colocalization.csv", index=False)
     print(f"[PyCAT Batch]   Colocalization (within ROI): r={pcc}, MOC={moc}.")
+
+
+def replay_spatial_metrology(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """Per-cell spatial organisation of the segmented objects — Ripley's L / nearest-neighbour / radial density
+    (`run_all_spatial_metrics`) on the puncta centroids WITHIN each cell. Replaces the `spatial_metrology`
+    skip-stub (spec N2b-2); the cellular analogue of `replay_ivf_spatial_metrology`, which treats the whole field
+    as one 'cell'."""
+    from pycat.toolbox.spatial_metrology_tools import get_puncta_centroids, run_all_spatial_metrics
+    import pandas as pd
+
+    puncta = state.get('puncta_mask')
+    cells = state.get('labeled_cells')
+    if puncta is None or cells is None:
+        print(f"[PyCAT Batch]   Spatial metrology skipped for {image_path.name}: "
+              f"needs a puncta mask + labelled cells.")
+        return
+    puncta = np.asarray(puncta)
+    cells = np.asarray(cells)
+    mpx = state['data_instance'].data_repository.get('microns_per_pixel_sq', 1.0) ** 0.5
+
+    def _flatten(prefix, obj, out):
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                _flatten(f"{prefix}_{k}" if prefix else str(k), v, out)
+        elif np.isscalar(obj):
+            out[prefix] = obj
+
+    coords_df = get_puncta_centroids(puncta, cells, mpx)
+    rows = []
+    for cl in [c for c in coords_df['cell_label'].unique() if c != 0]:
+        sub = coords_df[coords_df['cell_label'] == cl]
+        coords = sub[['y_um', 'x_um']].values
+        if len(coords) < 2:                       # Ripley/NN need at least two points in the cell
+            continue
+        res = run_all_spatial_metrics(coords, (cells == cl), mpx)
+        row = {'cell_label': int(cl)}
+        _flatten('', res, row)
+        rows.append(row)
+    if not rows:
+        print(f"[PyCAT Batch]   Spatial metrology skipped for {image_path.name}: no cell had >= 2 objects.")
+        return
+    df = pd.DataFrame(rows)
+    state['spatial_metrology_df'] = df
+    state['data_instance'].set_data('spatial_metrology_df', df)
+    df.to_csv(output_dir / f"{image_path.stem}_spatial_metrology.csv", index=False)
+    print(f"[PyCAT Batch]   Spatial metrology: {len(rows)} cell(s) analysed.")
+
+
+def replay_dynamic_spatial(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """Trajectory linking (motion) + merge/fission detection (fusion) over a segmented (T, H, W) time-series
+    object-label stack (spec N2b-3). Self-contained like the VPT terminal: `extract_frame_properties` ->
+    `link_trajectories` and `detect_merge_fission`, both straight from the label stack. Replaces the
+    `dynamic_spatial` skip-stub. Refuses (a clear skip, no numbers) when no 3-D segmented stack is in state — it
+    never fabricates a per-frame segmentation. Both the motion op (`dynamic_spatial.link_trajectories`) and the
+    fusion op (`dynamic_spatial.detect_merge_fission`) resolve here, so the `_dynamic_spatial_done` guard keeps a
+    plan that contains both from tracking twice."""
+    from pycat.toolbox.dynamic_spatial_tools import (
+        extract_frame_properties, link_trajectories, detect_merge_fission)
+    import pandas as pd
+
+    if state.get('_dynamic_spatial_done'):
+        return                                    # already linked+detected this stack (both ops in one plan)
+
+    stack = None
+    for key in ('puncta_mask', 'labeled_cells', 'cellpose_mask'):
+        cand = state.get(key)
+        if cand is not None and np.asarray(cand).ndim == 3:
+            stack = np.asarray(cand)
+            break
+    if stack is None:
+        print(f"[PyCAT Batch]   Dynamic spatial skipped for {image_path.name}: "
+              f"needs a segmented (T, H, W) time-series mask stack upstream.")
+        return
+
+    mpx = state['data_instance'].data_repository.get('microns_per_pixel_sq', 1.0) ** 0.5
+    max_disp = float(params.get('max_displacement_um', 2.0))
+    max_gap = int(params.get('max_gap_frames', 1))
+    proximity = float(params.get('proximity_um', 1.0))
+
+    props = extract_frame_properties(stack, mpx)
+    tracks = link_trajectories(props, max_displacement_um=max_disp, max_gap_frames=max_gap)
+    events = detect_merge_fission(stack, mpx, proximity_um=proximity)
+
+    di = state['data_instance']
+    state['dynamic_spatial_tracks_df'] = tracks
+    state['dynamic_spatial_events_df'] = events
+    di.set_data('dynamic_spatial_tracks_df', tracks)
+    di.set_data('dynamic_spatial_events_df', events)
+    tracks.to_csv(output_dir / f"{image_path.stem}_dynamic_spatial_tracks.csv", index=False)
+    events.to_csv(output_dir / f"{image_path.stem}_dynamic_spatial_events.csv", index=False)
+    state['_dynamic_spatial_done'] = True
+    n_tracks = int(tracks['track_id'].nunique()) if 'track_id' in tracks.columns else len(tracks)
+    print(f"[PyCAT Batch]   Dynamic spatial: {n_tracks} track(s), {len(events)} merge/fission event(s).")
+
+
+def replay_msd_analysis(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """Ensemble MSD -> anomalous-diffusion fit over the condensate trajectories `dynamic_spatial` linked
+    (spec N2b-4). This is the "build the stack-level handler" branch of the msd_analysis decision: `compute_msd`
+    needs a whole-stack trajectory table, and the batch loop now has one — `replay_dynamic_spatial` writes
+    `state['dynamic_spatial_tracks_df']` (track_id / frame / y_um / x_um, exactly compute_msd's contract). Same
+    scale discipline as VPT microrheology: a diffusion coefficient is a physical rate (um^2/s), so the handler
+    REFUSES (a validity flag, no number) when the pixel size is a 1.0 placeholder or the frame interval is
+    missing — it never emits a pixel^2/frame "D". Replaces the msd_analysis skip-stub."""
+    from pycat.toolbox.condensate_physics_tools import compute_msd, fit_anomalous_diffusion
+    from pycat.utils.pixel_size import has_real_pixel_size
+    from pycat.utils.frame_interval import frame_interval_s
+    import pandas as pd
+
+    if state.get('_msd_done'):
+        return                                        # compute_msd + fit ops both resolve here; run once per plan
+
+    tracks = state.get('dynamic_spatial_tracks_df')
+    if tracks is None or len(tracks) == 0:
+        print(f"[PyCAT Batch]   MSD analysis skipped for {image_path.name}: "
+              f"needs linked trajectories (run dynamic_spatial first).")
+        return
+
+    repo = state['data_instance'].data_repository
+    dt_s = frame_interval_s(repo, context='msd_analysis')
+    if not has_real_pixel_size(repo) or not np.isfinite(dt_s):
+        state['_msd_scale_validity'] = {'scale_valid': False}
+        print(f"[PyCAT Batch]   MSD analysis refused for {image_path.name}: a diffusion coefficient needs a "
+              f"calibrated pixel size AND a frame interval (um^2/s) — refusing a pixel^2/frame value.")
+        return
+
+    min_track_length = int(params.get('min_track_length', 200))
+    max_lag = params.get('max_lag')
+    msd = compute_msd(tracks, frame_interval_s=dt_s, min_track_length=min_track_length,
+                      max_lag=(int(max_lag) if max_lag is not None else None))
+    if msd is None or len(msd) == 0:
+        print(f"[PyCAT Batch]   MSD analysis: no track met the {min_track_length}-frame minimum length.")
+        return
+    fit = fit_anomalous_diffusion(msd, frame_interval_s=dt_s)
+
+    di = state['data_instance']
+    state['msd_df'] = msd
+    state['msd_fit'] = fit
+    state['_msd_scale_validity'] = {'scale_valid': True}
+    state['_msd_done'] = True
+    di.set_data('msd_df', msd)
+    di.set_data('msd_D_um2_per_s', fit.get('D_um2_per_s'))
+    msd.to_csv(output_dir / f"{image_path.stem}_msd.csv", index=False)
+    # the fit dict carries nested/array diagnostics — write only the scalar summary fields to the CSV.
+    scalar_fit = {k: fit.get(k) for k in
+                  ('D_um2_per_s', 'alpha', 'motion_type', 'r_squared', 'localization_error_nm', 'log_log_slope')}
+    pd.DataFrame([scalar_fit]).to_csv(output_dir / f"{image_path.stem}_msd_fit.csv", index=False)
+    print(f"[PyCAT Batch]   MSD analysis: D={fit.get('D_um2_per_s')} um^2/s, alpha={fit.get('alpha')} "
+          f"({fit.get('motion_type')}).")

@@ -56,6 +56,28 @@ from pycat.toolbox.coloc.nulls import spatial_null_test, perform_costes_test
 # Local application imports
 # ui_utils pulls in Qt -> imported at CALL time in the functions that display tables.
 
+# N5a glossary — the "M1"-family coloc labels a merged results table can show side by side look alike but
+# measure DIFFERENT things. The arithmetic is correct (A3 fixed the channel cross-referencing); this documents
+# how the labels differ so a reader is never left guessing. Each output label now carries a provenance suffix
+# (added here and in coloc/object_based.py) matching this map:
+_M1_FAMILY_LABEL_GLOSSARY = """Coloc "M1"-family output labels, and how they differ:
+
+  'Costes Automatic Thresholded M1/M2 (intensity, auto-threshold)'
+      INTENSITY-based Manders coefficient computed AFTER Costes' automatic threshold (the largest threshold at
+      which the below-threshold pixels are uncorrelated). M1 = fraction of channel-1 intensity in pixels where
+      channel 2 is above ITS Costes threshold; M2 is the symmetric ch2-vs-ch1 quantity.
+      Ref: Costes et al., Biophys. J. 86:3993 (2004); Manders et al., J. Microsc. 169:375 (1993).
+  "Mander's M1/M2 (object overlap)"   [coloc/object_based.py]
+      OBJECT-based overlap fraction from BINARY segmentation masks (not intensities): M1 = fraction of object-1
+      area that overlaps any object-2, within the ROI. A morphological quantity, blind to intensity.
+  "Mander's k1/k2 value"
+      Intensity co-localisation *split* coefficients (k1 = sum(ch1*ch2)/sum(ch1^2)); they weight overlap by the
+      OTHER channel's intensity and are NOT bounded to [0,1] like M1/M2. Ref: Manders et al. (1993).
+  "Mander's Overlap Coefficient"
+      The single symmetric MOC = sum(ch1*ch2)/sqrt(sum(ch1^2)*sum(ch2^2)); one number for both channels, not a
+      per-channel split. Ref: Manders et al. (1993).
+"""
+
 
 
 
@@ -607,8 +629,14 @@ def pixel_wise_correlation_analysis(image1, image2, roi_mask, method_selections,
             costes_m1 = np.round(np.sum(image1[above2]) / denom1, 4) if denom1 > 0 else np.nan
             costes_m2 = np.round(np.sum(image2[above1]) / denom2, 4) if denom2 > 0 else np.nan
         # Append results to the table
-        row_m1 = {'Method': 'Costes Automatic Thresholded M1', 'Coefficient': costes_m1, 'P-Value': np.nan}
-        row_m2 = {'Method': 'Costes Automatic Thresholded M2', 'Coefficient': costes_m2, 'P-Value': np.nan}
+        # Provenance suffix (N5a): distinguishes this INTENSITY-based, auto-thresholded Costes M1/M2 from the
+        # object-overlap Manders M1/M2 (coloc/object_based.py) and the thresholded Manders k1/k2 — see the
+        # _M1_FAMILY_LABEL_GLOSSARY at the top of this module. A suffix, not a rename: the "...M1"/"...M2" stem
+        # is preserved so older saved tables remain recognisable.
+        row_m1 = {'Method': 'Costes Automatic Thresholded M1 (intensity, auto-threshold)',
+                  'Coefficient': costes_m1, 'P-Value': np.nan}
+        row_m2 = {'Method': 'Costes Automatic Thresholded M2 (intensity, auto-threshold)',
+                  'Coefficient': costes_m2, 'P-Value': np.nan}
         if 'Calculate Costes Significance' in selected_methods:
                 row_m1['Costes P-Value'] = np.nan
                 row_m2['Costes P-Value'] = np.nan

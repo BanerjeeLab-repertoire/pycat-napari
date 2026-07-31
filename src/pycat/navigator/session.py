@@ -145,6 +145,94 @@ def context_from_session(central_manager, ctx: Optional[AnalysisContext] = None)
     return ctx
 
 
+def plan_from_saved_method(template, central_manager, *, registry=None, ctx=None):
+    """Recompile a saved guided method (a :class:`~pycat.navigator.templates.GuidedTemplate`) into a fresh plan
+    against the CURRENT data's context — the rebuild step the Custom Methods menu (Spec 2) runs before handing the
+    plan to ``GeneratedMethodUI``. The saved ANSWERS are re-run through the planner and every quality gate
+    re-evaluates on the live data (a method runnable on one dataset may be blocked on another; verdicts were never
+    stored — see templates.py). Pure/headless: given a ``central_manager`` whose ``active_data_class`` carries the
+    metadata, it returns a ``Plan`` with no Qt involved, so the menu's rebuild logic is testable apart from the
+    widget it feeds."""
+    from .templates import intent_from_template
+    from .op_catalog import build_operation_registry
+    from .planner import Planner
+    reg = registry if registry is not None else build_operation_registry()
+    context = context_from_session(central_manager, ctx)
+    return Planner(reg).compile(intent_from_template(template), context)
+
+
+def provided_representation(registry, op_id):
+    """The representation-kind an op PROVIDES — its 'role', and the key to pin it under when swapping it. A
+    segmenter provides ``instance_labels``, so pinning that role forces the chosen segmenter; an enhancer
+    provides an intensity field, and so on. Returns the kind string, or ``None`` if the op is absent from the
+    registry or provides nothing."""
+    try:
+        contract = registry.get(op_id)
+    except KeyError:
+        return None
+    for cap in getattr(contract, "provides", []) or []:
+        if getattr(cap, "kind", None):
+            return cap.kind
+    return None
+
+
+def _input_kinds(contract):
+    """The set of representation-kinds a contract consumes — its ``requires_inputs`` reduced to kinds."""
+    return frozenset(getattr(x, "kind", None) for x in getattr(contract, "requires_inputs", []) or [])
+
+
+def alternatives_for_op(session, op_id):
+    """The other ops that could fill ``op_id``'s role — the swappable candidates a live-revision pop-out offers.
+    Found the way the planner finds them: every provider whose output satisfies what this op provides, PEER-
+    filtered to those that consume the same representation (same ``requires_inputs`` kinds). That peer filter is
+    what keeps a from-scratch cell segmenter's alternatives to the other from-scratch segmenters and excludes
+    label→label transforms (relabel, expand-labels, merges) that provide the same ``instance_labels`` but only by
+    reworking an existing segmentation — offering one as a swap would silently change what the step consumes.
+    Ordered as the registry orders providers (preference, then name). ``[]`` if the op is absent or has no role."""
+    try:
+        contract = session.registry.get(op_id)
+    except KeyError:
+        return []
+    provided = next((c for c in getattr(contract, "provides", []) if getattr(c, "kind", None)), None)
+    if provided is None:
+        return []
+    want_inputs = _input_kinds(contract)
+    return [c.name for c in session.registry.providers_of(provided)
+            if c.name != op_id and _input_kinds(c) == want_inputs]
+
+
+def segmentation_scores(session):
+    """The Spec 5 'why this one' scores for the target's segmenter, keyed by op-id — what a pop-out annotates each
+    candidate with so the default is JUSTIFIED, not just asserted: the context match (+1 a specialist confirmed
+    for this context / 0 general-purpose / -1 an unconfirmed specialist / -2 context-violated) and the provider
+    preference, plus which op is currently chosen. Honors the session's pins, so after a live revision the pinned
+    op is the one marked chosen. ``{}`` when the intent has no target/segmenter — the pop-out then shows
+    alternatives without scores rather than inventing them."""
+    try:
+        rep = session.planner.explain_segmentation_choice(session.intent, session.ctx, pins=dict(session.pins))
+    except Exception:      # broad-ok: optional_probe — reasoning is decoration; its absence must not block the pop-out
+        rep = None
+    if not rep:
+        return {}
+    return {c["name"]: {"context_score": c["context_score"], "preference": c["preference"], "chosen": c["chosen"]}
+            for c in rep["candidates"]}
+
+
+def revise_plan(session, current_op_id, new_op_id):
+    """Live-revise a plan (Method-Widget Spec 4 — the editing surface): swap ``current_op_id`` for ``new_op_id``
+    at its role and recompile, so the planner re-satisfies the new op's requirements and PRESERVES the rest of
+    the plan (a cell plan's cell-analysis + QC stay; only the segmenter changes). Reuses the planner's pin
+    mechanism — the pin is keyed by the representation the op provides, so pinning ``instance_labels`` to
+    ``watershed`` makes every recompile pick watershed there. Returns the amended plan; if the role can't be
+    determined it recompiles unchanged rather than guessing. Pure over the session — no Qt — so the revision
+    logic is tested apart from the panel it rebuilds."""
+    kind = (provided_representation(session.registry, new_op_id)
+            or provided_representation(session.registry, current_op_id))
+    if kind is not None:
+        session.pin(kind, new_op_id)
+    return session.compile_plan()
+
+
 def data_observations(central_manager):
     """"**What we can tell from your data**" — human-readable observations derived from the loaded image's
     metadata, each with its EVIDENCE, for the navigator to show as suggestions rather than silent decisions

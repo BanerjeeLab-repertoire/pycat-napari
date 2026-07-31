@@ -15,15 +15,83 @@ from pycat.utils.general_utils import debug_log
 from pycat.utils.notify import show_warning as napari_show_warning
 
 
-def _fit_size_models(r, candidates, _st):
+# ── N6-4: left-truncated MLE at the detection limit ────────────────────────────────────────────────────
+# When a caller passes `xmin` (the smallest reliably-detectable radius), radii below it are MISSING, not zero —
+# the sample is left-truncated. Fitting the untruncated density then inflates the fitted median and deflates the
+# spread. The correct likelihood divides by the survival above the cut-off: L = prod f(r_i) / (1 - F(xmin)). No
+# candidate has that in closed form (lognormal's log-moments no longer apply), so we maximise it numerically,
+# seeded by the untruncated estimate. This path runs ONLY when xmin is given; xmin=None stays byte-identical.
+
+def _trunc_loglik(dist, r, xmin, params):
+    """Left-truncated log-likelihood ``sum[logpdf(r)] - n*logsf(xmin)`` for a scipy `dist` (loc folded into
+    `params`). Returns ``-inf`` on any non-finite term so the optimiser rejects that parameter point."""
+    lp = dist.logpdf(r, *params)
+    logsf = dist.logsf(xmin, *params)
+    if not (np.all(np.isfinite(lp)) and np.isfinite(logsf)):
+        return -np.inf
+    return float(np.sum(lp) - len(r) * logsf)
+
+
+def _fit_trunc_lognormal(r, xmin):
+    """Truncated-MLE lognormal ``(mu, sigma)`` from radii observed only above `xmin`. The untruncated
+    log-moment estimate seeds a Nelder-Mead maximisation of the truncated likelihood. Returns (mu, sigma, ll)."""
+    lr = np.log(r)
+    mu0, sig0 = float(lr.mean()), float(max(lr.std(ddof=0), 1e-3))
+
+    def nll(theta):
+        mu, log_s = theta
+        ll = _trunc_loglik(stats.lognorm, r, xmin, (np.exp(log_s), 0.0, np.exp(mu)))
+        return -ll if np.isfinite(ll) else 1e18
+
+    res = optimize.minimize(nll, [mu0, np.log(sig0)], method='Nelder-Mead',
+                            options={'xatol': 1e-7, 'fatol': 1e-7, 'maxiter': 10000})
+    mu, sig = float(res.x[0]), float(np.exp(res.x[1]))
+    return mu, sig, _trunc_loglik(stats.lognorm, r, xmin, (sig, 0.0, np.exp(mu)))
+
+
+def _fit_trunc_scipy(dist, r, xmin, shape):
+    """Truncated-MLE fit of a scipy `dist` with loc fixed at 0. `shape` True → free (shape, scale) (gamma /
+    weibull); False → free (scale) only (exponential). Returns ``(params_tuple_with_loc0, loglik)``, the params
+    in the same ``(*, loc, scale)`` order scipy's ``.fit`` would give, so downstream ``logpdf(r, *params)`` works."""
+    if shape:
+        a0, _loc0, sc0 = dist.fit(r, floc=0)
+
+        def nll(theta):
+            a, log_sc = theta
+            if a <= 0:
+                return 1e18
+            ll = _trunc_loglik(dist, r, xmin, (a, 0.0, np.exp(log_sc)))
+            return -ll if np.isfinite(ll) else 1e18
+
+        res = optimize.minimize(nll, [a0, np.log(max(sc0, 1e-9))], method='Nelder-Mead',
+                                options={'xatol': 1e-7, 'fatol': 1e-7, 'maxiter': 10000})
+        params = (float(res.x[0]), 0.0, float(np.exp(res.x[1])))
+    else:
+        _loc0, sc0 = dist.fit(r, floc=0)
+
+        def nll(theta):
+            ll = _trunc_loglik(dist, r, xmin, (0.0, np.exp(theta[0])))
+            return -ll if np.isfinite(ll) else 1e18
+
+        res = optimize.minimize(nll, [np.log(max(sc0, 1e-9))], method='Nelder-Mead',
+                                options={'xatol': 1e-7, 'fatol': 1e-7, 'maxiter': 10000})
+        params = (0.0, float(np.exp(res.x[0])))
+    return params, _trunc_loglik(dist, r, xmin, params)
+
+
+def _fit_size_models(r, candidates, _st, xmin=None):
     """MLE-fit each candidate distribution to the radii and return ``(models, pl_xmin)``.
 
     ``models[name]`` carries loglik / k / AIC / params. Lognormal is closed-form on log r; gamma /
     weibull / exponential use scipy's MLE with the location fixed at 0; the power law follows Clauset —
     x_min by KS minimisation over percentile candidates, the exponent by MLE on the tail. The power-law
     entry is tagged ``_tail_only`` because its likelihood lives on the TAIL and is NOT comparable with a
-    whole-sample AIC (the whole-sample ranking excludes it; it is tested separately)."""
+    whole-sample AIC (the whole-sample ranking excludes it; it is tested separately).
+
+    When `xmin` is given the whole-sample candidates use the LEFT-TRUNCATED MLE (`_fit_trunc_*`) so a detection
+    limit does not bias the fit; `xmin=None` keeps the original untruncated fits byte-identical."""
     models = {}
+    _trunc = xmin is not None and np.isfinite(xmin) and xmin > 0
 
     def _add(name, loglik, k, params):
         if loglik is None or not np.isfinite(loglik):
@@ -35,7 +103,10 @@ def _fit_size_models(r, candidates, _st):
         lr = np.log(r)
         mu, sig = float(lr.mean()), float(lr.std(ddof=0))
         if sig > 0:
-            ll = float(np.sum(_st.lognorm.logpdf(r, s=sig, scale=np.exp(mu))))
+            if _trunc:
+                mu, sig, ll = _fit_trunc_lognormal(r, xmin)
+            else:
+                ll = float(np.sum(_st.lognorm.logpdf(r, s=sig, scale=np.exp(mu))))
             _add('lognormal', ll, 2, dict(mu=mu, sigma=sig))
 
     for nm, dist in (('gamma', _st.gamma), ('weibull', _st.weibull_min),
@@ -43,13 +114,12 @@ def _fit_size_models(r, candidates, _st):
         if nm not in candidates:
             continue
         try:
-            if nm == 'exponential':
-                p = dist.fit(r, floc=0)
-                k = 1
+            k = 1 if nm == 'exponential' else 2
+            if _trunc:
+                p, ll = _fit_trunc_scipy(dist, r, xmin, shape=(nm != 'exponential'))
             else:
                 p = dist.fit(r, floc=0)
-                k = 2
-            ll = float(np.sum(dist.logpdf(r, *p)))
+                ll = float(np.sum(dist.logpdf(r, *p)))
             _add(nm, ll, k, dict(params=[float(x) for x in p]))
         except Exception:
             pass
@@ -154,10 +224,12 @@ def _powerlaw_tail_comparison(r, models, pl_xmin, candidates, _st):
     return powerlaw_verdict
 
 
-def _size_distinguishability(r, n, best_name, best_m, ranked, _st):
+def _size_distinguishability(r, n, best_name, best_m, ranked, _st, xmin=None):
     """Vuong-style test on the two top whole-sample models' per-point log-likelihoods → whether the best
     model is significantly better than the runner-up. Returns ``(distinguishable, comparison)``; with a
-    single model, distinguishable stays True and comparison is empty."""
+    single model, distinguishable stays True and comparison is empty. When `xmin` is given the per-point
+    log-likelihoods carry the same left-truncation correction the fit used, so the comparison is like-for-like."""
+    _trunc = xmin is not None and np.isfinite(xmin) and xmin > 0
     distinguishable = True
     comparison = {}
     if len(ranked) > 1:
@@ -165,13 +237,16 @@ def _size_distinguishability(r, n, best_name, best_m, ranked, _st):
 
         def _pointwise(nm, m):
             if nm == 'lognormal':
-                return _st.lognorm.logpdf(r, s=m['params']['sigma'],
-                                          scale=np.exp(m['params']['mu']))
+                s, scale = m['params']['sigma'], np.exp(m['params']['mu'])
+                lp = _st.lognorm.logpdf(r, s=s, scale=scale)
+                return lp - _st.lognorm.logsf(xmin, s=s, scale=scale) if _trunc else lp
             d = dict(gamma=_st.gamma, weibull=_st.weibull_min,
                      exponential=_st.expon).get(nm)
             if d is None:
                 return None
-            return d.logpdf(r, *m['params']['params'])
+            params = m['params']['params']
+            lp = d.logpdf(r, *params)
+            return lp - d.logsf(xmin, *params) if _trunc else lp
 
         l1, l2 = _pointwise(best_name, best_m), _pointwise(second_name, second_m)
         if l1 is not None and l2 is not None:
@@ -273,6 +348,11 @@ def fit_size_distribution_mle(radii_um, xmin=None, candidates=None):
 
     r = np.asarray(radii_um, dtype=float)
     r = r[np.isfinite(r) & (r > 0)]
+    # A detection limit left-truncates the sample: keep only radii at/above it and fit the truncated
+    # likelihood (below). Radii below xmin are unobservable, not absent-because-zero.
+    _trunc = xmin is not None and np.isfinite(xmin) and xmin > 0
+    if _trunc:
+        r = r[r >= xmin]
     n = len(r)
     if n < 20:
         return dict(best_model='insufficient_data', n=n, distinguishable=False,
@@ -283,7 +363,7 @@ def fit_size_distribution_mle(radii_um, xmin=None, candidates=None):
     if candidates is None:
         candidates = ['lognormal', 'gamma', 'weibull', 'exponential', 'powerlaw']
 
-    models, pl_xmin = _fit_size_models(r, candidates, _st)
+    models, pl_xmin = _fit_size_models(r, candidates, _st, xmin=xmin)
     if not models:
         return dict(best_model='fit_failed', n=n, distinguishable=False,
                     verdict="No candidate distribution could be fitted.")
@@ -296,7 +376,7 @@ def fit_size_distribution_mle(radii_um, xmin=None, candidates=None):
     best_name, best_m = ranked[0]
 
     powerlaw_verdict = _powerlaw_tail_comparison(r, models, pl_xmin, candidates, _st)
-    distinguishable, comparison = _size_distinguishability(r, n, best_name, best_m, ranked, _st)
+    distinguishable, comparison = _size_distinguishability(r, n, best_name, best_m, ranked, _st, xmin=xmin)
     verdict = _size_verdict(best_name, ranked, comparison, distinguishable, powerlaw_verdict)
 
     return dict(
@@ -306,6 +386,7 @@ def fit_size_distribution_mle(radii_um, xmin=None, candidates=None):
         comparison=comparison,
         powerlaw_test=powerlaw_verdict,
         powerlaw_xmin=pl_xmin,
+        detection_limit_xmin=(float(xmin) if _trunc else None),
         n=n,
         verdict=verdict,
         mean_radius_um=float(r.mean()),

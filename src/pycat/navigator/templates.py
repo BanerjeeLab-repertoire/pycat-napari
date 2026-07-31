@@ -36,6 +36,15 @@ class GuidedTemplate:
     question: str = ""
     steps: tuple = ()
     parameters: dict = dataclasses.field(default_factory=dict)
+    #: Persisted-structure version (Method-Widget Spec 2 — schema-versioned so a future field change can migrate
+    #: old saved methods rather than silently mis-reading them). Entries written before versioning read as 1
+    #: (the schema is unchanged — only the marker was added).
+    schema_version: int = 1
+
+
+#: The current persisted-template schema version. Bump when the stored shape changes AND add a migration in
+#: ``_deserialize``; the ``test_navigator_templates`` round-trip pins that a bump does not silently drop fields.
+_SCHEMA_VERSION = 1
 
 
 def template_from_plan(name, intent, plan, *, parameters=None) -> GuidedTemplate:
@@ -69,7 +78,8 @@ def _store(store):
 
 def _serialize(t: GuidedTemplate) -> dict:
     return {"name": t.name, "observables": list(t.observables), "target": t.target,
-            "question": t.question, "steps": list(t.steps), "parameters": dict(t.parameters)}
+            "question": t.question, "steps": list(t.steps), "parameters": dict(t.parameters),
+            "schema_version": t.schema_version}
 
 
 def _deserialize(d) -> "GuidedTemplate | None":
@@ -80,7 +90,9 @@ def _deserialize(d) -> "GuidedTemplate | None":
             target=d.get("target"),
             question=str(d.get("question") or ""),
             steps=tuple(d.get("steps") or ()),
-            parameters=dict(d.get("parameters") or {}))
+            parameters=dict(d.get("parameters") or {}),
+            # Entries written before versioning have no key → read as the current schema (fields are unchanged).
+            schema_version=int(d.get("schema_version", _SCHEMA_VERSION)))
     except Exception:      # broad-ok: optional_probe — a corrupt entry degrades to "not available", not a crash
         return None
 
@@ -133,3 +145,18 @@ def rename_template(old_name, new_name, *, store=None) -> bool:
     all_[str(new_name)] = entry
     s.set(_STORE_KEY, all_)
     return True
+
+
+def duplicate_template(name, new_name, *, store=None):
+    """Copy ``name`` to ``new_name``, KEEPING the original (unlike rename) — the Custom Methods 'duplicate'
+    action (Spec 2). Returns the new :class:`GuidedTemplate`, or ``None`` if the source is absent or ``new_name``
+    is already taken or blank: duplicating must never silently overwrite another saved method."""
+    s = _store(store)
+    all_ = _read_all(s)
+    if name not in all_ or new_name in all_ or not str(new_name).strip():
+        return None
+    entry = dict(all_[name])
+    entry["name"] = str(new_name)
+    all_[str(new_name)] = entry
+    s.set(_STORE_KEY, all_)
+    return _deserialize(entry)

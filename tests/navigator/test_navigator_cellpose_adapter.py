@@ -92,7 +92,11 @@ def test_every_adapter_targets_a_real_registered_batch_step():
                        "condensate_analysis", "condensate_segmentation",
                        "bf_preprocess", "bf_condensate_segmentation",   # + the brightfield chain (1.6.414)
                        "ivf_droplet_segment", "ivf_size_distribution",  # + the in-vitro droplet chain
-                       "pixel_colocalization"}                          # + within-ROI two-channel coloc
+                       "pixel_colocalization",                          # + within-ROI two-channel coloc
+                       "vpt_microrheology",                             # + VPT microrheology (N2b-1b)
+                       "spatial_metrology",                             # + per-cell Ripley/NN/radial (N2b-2)
+                       "dynamic_spatial",                               # + linking + merge/fission (N2b-3)
+                       "msd_analysis"}                                  # + ensemble MSD -> diffusion fit (N2b-4)
     missing = [bs for bs in targets if bs not in registry]
     assert not missing, f"adapters target batch steps that are not registered: {missing}"
 

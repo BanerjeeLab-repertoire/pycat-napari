@@ -220,6 +220,24 @@ def run_plan_via_central_manager(central_manager, plan, review=None):
         debug_log("navigator: run_plan_via_central_manager failed", exc)
 
 
+def build_method_panel_via_central_manager(central_manager, plan, review=None, intent=None):
+    """Construct a ``GeneratedMethodUI`` from a compiled plan and dock it through the standard panel lifecycle
+    (Method-Widget Spec 1.4). This is the useful outcome of the navigator — a real, keepable method panel the
+    user can inspect, adjust, and run by hand — as opposed to a read-only list. Best-effort: a construction
+    failure logs and returns None rather than tearing down the navigator dock."""
+    try:
+        from pycat.ui.generated_method_ui import GeneratedMethodUI
+        viewer = getattr(central_manager, "viewer", None)
+        ui = GeneratedMethodUI(viewer, central_manager, plan, review=review, intent=intent,
+                               name="Generated Method")
+        ui.setup_ui()
+        return ui
+    except Exception as exc:  # broad-ok: ui_cleanup — a panel build failure must not tear down the navigator dock
+        from pycat.utils.general_utils import debug_log
+        debug_log("navigator: build_method_panel_via_central_manager failed", exc)
+        return None
+
+
 def _guided_run_note(plan):
     """The honest guided-run message, made ACTIONABLE with the gate-respecting run ORDER. Auto-running the
     whole plan needs a per-operation execution adapter (PyCAT ops have bespoke, panel-collected signatures —
@@ -234,6 +252,46 @@ def _guided_run_note(plan):
     msg = ("This plan is ready. Auto-running from the guided panel is coming; for now run the steps in their "
            "method panels")
     return msg + (f", in this order:\n{order}." if order else ".")
+
+
+def _add_plan_action_buttons(widget, body_layout):
+    """The plan's primary/secondary actions (Spec 1.4). PRIMARY: '🛠 Build method panel' — the useful outcome, a
+    real dockable panel the user keeps and runs by hand. SECONDARY: '▶ Run the steps that support it' — the
+    executor path, honestly labelled for what it does (running just the adapted steps). Both are gated by
+    ``run_blocked_reason`` so an untrustworthy plan (uncalibrated scale, missing channel) says WHY rather than
+    building/running something that would produce a wrong number. A disabled action is never a dead control."""
+    from PyQt5.QtWidgets import QPushButton
+    reason = widget._session.run_blocked_reason()
+
+    def _build():
+        # Re-check the gate at click time (state can change since render), then hand to the panel lifecycle.
+        if widget._plan is None or widget._session.run_blocked_reason() is not None:
+            return
+        build_method_panel_via_central_manager(widget._cm, widget._plan, getattr(widget, "_review", None),
+                                               intent=getattr(widget._session, "intent", None))
+
+    def _run():
+        if callable(widget._on_run) and widget._plan is not None:
+            review = getattr(widget, "_review", None)
+            try:
+                widget._on_run(widget._plan, review)     # Phase 2: pass the reviewed params
+            except TypeError:
+                widget._on_run(widget._plan)             # a 1-arg on_run (older callers) still works
+
+    build = QPushButton("\U0001f6e0  Build method panel")     # 🛠
+    build.setEnabled(reason is None)
+    build.clicked.connect(_build)
+    body_layout.addWidget(build)
+    widget._build_button = build
+    run = QPushButton("▶  Run the steps that support it")
+    run.setEnabled(reason is None and callable(widget._on_run))
+    run.clicked.connect(_run)
+    body_layout.addWidget(run)
+    widget._run_button = run
+    if reason is not None:
+        body_layout.addWidget(_label("⛔  " + reason, "color: #c0392b; font-size: 11px;"))
+    elif not callable(widget._on_run):
+        body_layout.addWidget(_label(_guided_run_note(widget._plan), "color: gray; font-size: 11px;"))
 
 
 def _add_template_save(widget, body_layout):
@@ -395,17 +453,7 @@ def build_navigator_widget(session, *, on_run=None, central_manager=None, parent
         for row in widget._rows:
             body_layout.addWidget(_row_frame(row))
         _add_param_review(widget, body_layout, plan)     # Phase 2: the editable, seeded material params
-        run = QPushButton("▶  Run analysis")
-        reason = widget._session.run_blocked_reason()
-        run.setEnabled(reason is None and callable(widget._on_run))
-        run.clicked.connect(_run)
-        body_layout.addWidget(run)
-        widget._run_button = run
-        # Say WHY, always — a disabled run action is never a dead control.
-        if reason is not None:
-            body_layout.addWidget(_label("⛔  " + reason, "color: #c0392b; font-size: 11px;"))
-        elif not callable(widget._on_run):
-            body_layout.addWidget(_label(_guided_run_note(widget._plan), "color: gray; font-size: 11px;"))
+        _add_plan_action_buttons(widget, body_layout)     # Spec 1.4: 🛠 Build (primary) + ▶ Run (secondary)
         over = QPushButton("↺  Start over")
         over.clicked.connect(_restart)
         body_layout.addWidget(over)
@@ -414,14 +462,6 @@ def build_navigator_widget(session, *, on_run=None, central_manager=None, parent
     def _answer(spec, value):
         widget._session.answer(spec, value)
         render()
-
-    def _run():
-        if callable(widget._on_run) and widget._plan is not None:
-            review = getattr(widget, "_review", None)
-            try:
-                widget._on_run(widget._plan, review)     # Phase 2: pass the reviewed params
-            except TypeError:
-                widget._on_run(widget._plan)             # a 1-arg on_run (older callers) still works
 
     def _restart():
         widget._session = NavigatorSession()
