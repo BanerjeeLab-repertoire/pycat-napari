@@ -266,9 +266,13 @@ class MenuManager:
 
 
     def _home_fit_view(self, *args, **kwargs):
-        """Extracted to src/pycat/ui/viewer_actions.py (ui_decomposition)."""
+        """Extracted to src/pycat/ui/viewer_actions.py (ui_decomposition).
+
+        ``*args, **kwargs`` absorb the ``checked`` bool Qt's ``triggered`` signal passes when this
+        is connected directly (no lambda) — the real ``_impl`` takes only ``self`` and must not
+        receive that bool, or it raises "takes 1 positional argument but 2 were given"."""
         from pycat.ui.viewer_actions import _home_fit_view as _impl
-        return _impl(self, *args, **kwargs)
+        return _impl(self)
 
     def _setup_menu_bar(self):
         """
@@ -601,8 +605,12 @@ class MenuManager:
         from pycat.ui.viewer_actions import _process_foreign_layers as _impl
         return _impl(self, *args, **kwargs)
 
-    def _show_metadata_dialog(self):
-        """Show the per-file metadata dialog (extracted to ui/metadata_dialogs.py)."""
+    def _show_metadata_dialog(self, *args, **kwargs):
+        """Show the per-file metadata dialog (extracted to ui/metadata_dialogs.py).
+
+        ``*args, **kwargs`` absorb the ``checked`` bool Qt's ``triggered`` signal passes when this
+        is connected directly (no lambda) — the real ``_impl`` takes only ``self`` and must not
+        receive that bool, or it raises "takes 1 positional argument but 2 were given"."""
         from pycat.ui.metadata_dialogs import _show_metadata_dialog as _impl
         return _impl(self)
 
@@ -617,9 +625,13 @@ class MenuManager:
         return _impl(self, *args, **kwargs)
 
     def _show_recorded_steps_dialog(self, *args, **kwargs):
-        """Extracted to src/pycat/ui/recorded_steps_dialog.py (ui_decomposition)."""
+        """Extracted to src/pycat/ui/recorded_steps_dialog.py (ui_decomposition).
+
+        ``*args, **kwargs`` absorb the ``checked`` bool Qt's ``triggered`` signal passes when this
+        is connected directly (no lambda) — the real ``_impl`` takes only ``self`` and must not
+        receive that bool, or it raises "takes 1 positional argument but 2 were given"."""
         from pycat.ui.recorded_steps_dialog import _show_recorded_steps_dialog as _impl
-        return _impl(self, *args, **kwargs)
+        return _impl(self)
 
     def make_lambda(self, action_method, kwargs):
         """
