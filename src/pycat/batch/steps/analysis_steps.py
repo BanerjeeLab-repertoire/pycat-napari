@@ -293,6 +293,9 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
                 max_area_fraction=params.get('max_area_fraction', 0.25),
                 min_spot_radius=min_spot_radius,
                 image_stats=image_stats,
+                punctate_gate=params.get('punctate_gate', True),
+                punctate_gate_sigma=params.get('punctate_gate_sigma', 5.0),
+                punctate_gate_abs_sigma=params.get('punctate_gate_abs_sigma', 3.0),
             )
             # Stitch results back into full-image mask
             total_puncta_mask[y0:y1, x0:x1]         |= unrefined_crop
@@ -309,6 +312,9 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
                 max_area_fraction=params.get('max_area_fraction', 0.25),
                 min_spot_radius=min_spot_radius,
                 image_stats=image_stats,
+                punctate_gate=params.get('punctate_gate', True),
+                punctate_gate_sigma=params.get('punctate_gate_sigma', 5.0),
+                punctate_gate_abs_sigma=params.get('punctate_gate_abs_sigma', 3.0),
             )
             total_puncta_mask |= unrefined
             total_refined_puncta_mask |= refined

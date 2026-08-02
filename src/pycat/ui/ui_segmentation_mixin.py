@@ -25,6 +25,105 @@ from pycat.toolbox.segmentation_tools import (
     run_segment_subcellular_objects)
 
 
+def _build_condensate_refinement_params_group():
+    """Build the (initially hidden) 'Refinement Parameters' box for condensate segmentation.
+
+    Split out of ``_add_run_segment_subcellular_objects`` purely to keep that function under
+    the project's per-function length ratchet — no behaviour change. Returns
+    ``(params_group_widget, widgets)`` where ``widgets`` maps each parameter's name (matching
+    ``run_segment_subcellular_objects``'s keyword arguments) to its QDoubleSpinBox/QCheckBox.
+    """
+    from PyQt5.QtWidgets import QDoubleSpinBox, QFormLayout, QGroupBox
+
+    params_group = QGroupBox("Refinement Parameters")
+    params_layout = QFormLayout()
+    params_layout.setContentsMargins(9, 20, 9, 6)
+    params_group.setLayout(params_layout)
+
+    def _make_spinbox(min_val, max_val, default, step, decimals=2):
+        sb = QDoubleSpinBox()
+        sb.setRange(min_val, max_val)
+        sb.setValue(default)
+        sb.setSingleStep(step)
+        sb.setDecimals(decimals)
+        return sb
+
+    w = {}
+
+    w['min_spot_radius'] = _make_spinbox(1, 20, 2, 0.5, decimals=1)
+    w['min_spot_radius'].setToolTip(
+        "Minimum puncta radius in pixels. Increase to exclude small noise specks.")
+    params_layout.addRow("Min spot radius (px):", w['min_spot_radius'])
+
+    w['kurtosis_threshold'] = _make_spinbox(-10.0, 0.0, -3.0, 0.5)
+    w['kurtosis_threshold'].setToolTip(
+        "Kurtosis threshold. More negative = keep flatter distributions (more permissive). "
+        "Default -3.0. Try -5.0 to -8.0 if too many puncta are rejected.")
+    params_layout.addRow("Kurtosis threshold:", w['kurtosis_threshold'])
+
+    w['local_snr_threshold'] = _make_spinbox(0.0, 5.0, 1.0, 0.1)
+    w['local_snr_threshold'].setToolTip(
+        "Local SNR threshold. Lower = keep dimmer puncta. Default 1.0. Try 0.5 if puncta in "
+        "bright regions are being lost.")
+    params_layout.addRow("Local SNR threshold:", w['local_snr_threshold'])
+
+    w['global_snr_threshold'] = _make_spinbox(0.0, 5.0, 1.0, 0.1)
+    w['global_snr_threshold'].setToolTip(
+        "Global SNR threshold relative to whole-cell background. Default 1.0. Lower to "
+        "retain puncta in high-background cells.")
+    params_layout.addRow("Global SNR threshold:", w['global_snr_threshold'])
+
+    w['intensity_hwhm_scale'] = _make_spinbox(0.0, 5.0, 1.17, 0.1)
+    w['intensity_hwhm_scale'].setToolTip(
+        "Intensity threshold scale (multiples of local background SD). Default 1.17 (HWHM). "
+        "Lower = keep puncta closer to background intensity.")
+    params_layout.addRow("Intensity scale (×SD):", w['intensity_hwhm_scale'])
+
+    w['max_area_fraction'] = _make_spinbox(0.01, 1.0, 0.25, 0.05)
+    w['max_area_fraction'].setToolTip(
+        "Maximum puncta area as a fraction of cell area. Default 0.25. Increase if large "
+        "condensates are being excluded.")
+    params_layout.addRow("Max area (fraction of cell):", w['max_area_fraction'])
+
+    # ── Punctate gate: the WHOLE-CELL screen, not a per-object filter ────────────────
+    #
+    # Every spinbox above tunes `puncta_refinement_func`'s per-object conditions -- but
+    # `cell_has_punctate_signal` runs FIRST, on the whole cell, using ABSOLUTE (pre-enhancement)
+    # intensity, and skips the ENTIRE cell before any per-object condition is ever consulted.
+    # Its own two thresholds were hardcoded (5.0/3.0) with no way to loosen them from this
+    # panel -- so a cell with real but statistically weak raw signal (peak just under the
+    # floor) was unconditionally skipped, and the "0 objects" warning's own suggested fixes
+    # (Kurtosis / SNR / Intensity scale) do nothing for it, because none of those checks ever
+    # run. Reported by Meet Raval.
+    w['punctate_gate_sigma'] = _make_spinbox(1.0, 10.0, 5.0, 0.5, decimals=1)
+    w['punctate_gate_sigma'].setToolTip(
+        "Punctate gate: local threshold, in robust sigmas above the cell's own median "
+        "(pre-enhancement, absolute intensity). Default 5.0. Lower if a cell with real but "
+        "faint puncta is skipped entirely with 'no punctate signal above the absolute "
+        "intensity floor'.")
+    params_layout.addRow("Punctate gate — local (×σ):", w['punctate_gate_sigma'])
+
+    w['punctate_gate_abs_sigma'] = _make_spinbox(0.0, 10.0, 3.0, 0.5, decimals=1)
+    w['punctate_gate_abs_sigma'].setToolTip(
+        "Punctate gate: absolute threshold, in robust sigmas above the WHOLE IMAGE's "
+        "background noise floor. Default 3.0. Lower for the same reason as the local "
+        "threshold above.")
+    params_layout.addRow("Punctate gate — absolute (×σ):", w['punctate_gate_abs_sigma'])
+
+    from PyQt5.QtWidgets import QCheckBox as _QCheckBox
+    w['punctate_gate'] = _QCheckBox("Punctate gate enabled")
+    w['punctate_gate'].setChecked(True)
+    w['punctate_gate'].setToolTip(
+        "Whole-cell pre-screen: skips a cell entirely before any per-object refinement runs, "
+        "if its RAW intensity never rises above background. Uncheck only as a last resort — "
+        "this is what stops noise-only cells from being amplified into fake puncta by "
+        "per-cell CLAHE; the two thresholds above are the intended way to tune it for a "
+        "faint-but-real cell instead.")
+    params_layout.addRow(w['punctate_gate'])
+
+    return params_group, w
+
+
 class _SegmentationWidgetsMixin:
     """Segmentation widget builders for ToolboxFunctionsUI (mixin)."""
 
@@ -331,59 +430,23 @@ class _SegmentationWidgetsMixin:
 
     def _add_run_segment_subcellular_objects(self, layout=None, separate_widget=False):
         """Add a widget for subcellular object segmentation, optionally in a separate dock."""
-        from PyQt5.QtWidgets import QDoubleSpinBox, QSpinBox, QFormLayout, QGroupBox
         process_cells_layout = QVBoxLayout()
         self.add_text_label(process_cells_layout, 'Subcellular Object Segmentation', bold=True)
         process_cells_image1_dropdown = self._layer_row(process_cells_layout, 'Select Pre-Processed Image to Segment:', napari.layers.Image, name_hint='Enhanced Background Removed')
         process_cells_image2_dropdown = self._layer_row(process_cells_layout, 'Select Fluorescence Image to Process:', napari.layers.Image, name_hint='Upscaled Fluorescence')
 
-        # ── Refinement parameters ──────────────────────────────────────────
-        params_group = QGroupBox("Refinement Parameters")
-        params_layout = QFormLayout()
-        params_layout.setContentsMargins(9, 20, 9, 6)
-        params_group.setLayout(params_layout)
-
-        def _make_spinbox(min_val, max_val, default, step, decimals=2):
-            sb = QDoubleSpinBox()
-            sb.setRange(min_val, max_val)
-            sb.setValue(default)
-            sb.setSingleStep(step)
-            sb.setDecimals(decimals)
-            return sb
-
-        # Min spot radius — minimum puncta size in pixels
-        min_spot_spin = QDoubleSpinBox()
-        min_spot_spin.setRange(1, 20)
-        min_spot_spin.setValue(2)
-        min_spot_spin.setSingleStep(0.5)
-        min_spot_spin.setDecimals(1)
-        min_spot_spin.setToolTip("Minimum puncta radius in pixels. Increase to exclude small noise specks.")
-        params_layout.addRow("Min spot radius (px):", min_spot_spin)
-
-        # Kurtosis threshold — how peaked the intensity distribution must be
-        kurtosis_spin = _make_spinbox(-10.0, 0.0, -3.0, 0.5)
-        kurtosis_spin.setToolTip("Kurtosis threshold. More negative = keep flatter distributions (more permissive). Default -3.0. Try -5.0 to -8.0 if too many puncta are rejected.")
-        params_layout.addRow("Kurtosis threshold:", kurtosis_spin)
-
-        # Local SNR threshold
-        local_snr_spin = _make_spinbox(0.0, 5.0, 1.0, 0.1)
-        local_snr_spin.setToolTip("Local SNR threshold. Lower = keep dimmer puncta. Default 1.0. Try 0.5 if puncta in bright regions are being lost.")
-        params_layout.addRow("Local SNR threshold:", local_snr_spin)
-
-        # Global SNR threshold
-        global_snr_spin = _make_spinbox(0.0, 5.0, 1.0, 0.1)
-        global_snr_spin.setToolTip("Global SNR threshold relative to whole-cell background. Default 1.0. Lower to retain puncta in high-background cells.")
-        params_layout.addRow("Global SNR threshold:", global_snr_spin)
-
-        # Intensity scale (HWHM multiplier)
-        hwhm_spin = _make_spinbox(0.0, 5.0, 1.17, 0.1)
-        hwhm_spin.setToolTip("Intensity threshold scale (multiples of local background SD). Default 1.17 (HWHM). Lower = keep puncta closer to background intensity.")
-        params_layout.addRow("Intensity scale (×SD):", hwhm_spin)
-
-        # Max area fraction
-        max_area_spin = _make_spinbox(0.01, 1.0, 0.25, 0.05)
-        max_area_spin.setToolTip("Maximum puncta area as a fraction of cell area. Default 0.25. Increase if large condensates are being excluded.")
-        params_layout.addRow("Max area (fraction of cell):", max_area_spin)
+        # Refinement parameters (min spot radius, kurtosis/SNR/intensity/area thresholds, and
+        # the punctate-gate controls) — see _build_condensate_refinement_params_group.
+        params_group, _rp = _build_condensate_refinement_params_group()
+        min_spot_spin = _rp['min_spot_radius']
+        kurtosis_spin = _rp['kurtosis_threshold']
+        local_snr_spin = _rp['local_snr_threshold']
+        global_snr_spin = _rp['global_snr_threshold']
+        hwhm_spin = _rp['intensity_hwhm_scale']
+        max_area_spin = _rp['max_area_fraction']
+        punctate_local_spin = _rp['punctate_gate_sigma']
+        punctate_abs_spin = _rp['punctate_gate_abs_sigma']
+        punctate_gate_cb = _rp['punctate_gate']
 
         # Refinement parameters are hidden behind an off-by-default reveal
         # checkbox (advanced tuning; sensible defaults are used otherwise).
@@ -411,6 +474,9 @@ class _SegmentationWidgetsMixin:
                 intensity_hwhm_scale=hwhm_spin.value(),
                 max_area_fraction=max_area_spin.value(),
                 min_spot_radius=min_spot_spin.value(),
+                punctate_gate=punctate_gate_cb.isChecked(),
+                punctate_gate_sigma=punctate_local_spin.value(),
+                punctate_gate_abs_sigma=punctate_abs_spin.value(),
             )
             fn.__name__ = 'run_segment_subcellular_objects'
             self.on_general_button_clicked(
@@ -426,6 +492,9 @@ class _SegmentationWidgetsMixin:
                 'intensity_hwhm_scale': hwhm_spin.value(),
                 'max_area_fraction': max_area_spin.value(),
                 'min_spot_radius': min_spot_spin.value(),
+                'punctate_gate': punctate_gate_cb.isChecked(),
+                'punctate_gate_sigma': punctate_local_spin.value(),
+                'punctate_gate_abs_sigma': punctate_abs_spin.value(),
             })
         process_cells_button.clicked.connect(_on_condensate_seg)
         try:
