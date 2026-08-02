@@ -127,17 +127,33 @@ def _local_ring_radii(area_px, cell_area_px):
     return erode_r, gap_r, band_r
 
 
-def _ring_masks(puncta_mask_holder, erode_r, gap_r, band_r):
+def _ring_masks(puncta_mask_holder, erode_r, gap_r, band_r, exclude_mask=None, min_bg_px=8):
     """Interior, dilated-object and local-background masks at the given radii.
 
     Shared so the two filters cannot drift — the same reason `_snr_conditions` is
     shared. `binary_dilation` with `disk(r)` is one call rather than r iterations of
     `disk(1)`, which also removes the old 3x loop.
+
+    ``exclude_mask``, when given, removes pixels belonging to ANY OTHER punctum from
+    the ring before it is returned. A dense field (hundreds of puncta packing a
+    nucleus) can put a neighbouring punctum's own pixels inside this object's ring;
+    `_robust_bg`'s median resists that only up to ~50% contamination, and a tiling
+    field can exceed it. Excluding neighbours outright removes the contamination
+    itself rather than resisting it statistically. If exclusion leaves the ring too
+    thin to measure (`min_bg_px`), the band is grown outward — capped at 4x the
+    requested radius — until enough clean background is found or the cap is hit.
     """
     interior = ndi.binary_erosion(puncta_mask_holder, sk.morphology.disk(erode_r))
     dilated = ndi.binary_dilation(puncta_mask_holder, sk.morphology.disk(gap_r))
-    outer = ndi.binary_dilation(dilated, sk.morphology.disk(band_r))
-    local_bg = outer ^ dilated
+    r = band_r
+    local_bg = ndi.binary_dilation(dilated, sk.morphology.disk(r)) ^ dilated
+    if exclude_mask is not None:
+        clean = local_bg & ~exclude_mask
+        while clean.sum() < min_bg_px and r < 4 * band_r:
+            r += band_r
+            local_bg = ndi.binary_dilation(dilated, sk.morphology.disk(r)) ^ dilated
+            clean = local_bg & ~exclude_mask
+        local_bg = clean
     return interior, dilated, local_bg
 
 
@@ -332,8 +348,10 @@ def puncta_refinement_filtering_func(original_img, processed_img, puncta_mask, c
         # which is exactly the fixed geometry this replaces.
         _erode_r, _gap_r, _band_r = _local_ring_radii(
             int(puncta_mask_holder.sum()), cell_area)
+        # exclude_mask=puncta_mask: in a crowded field the ring can sit on top of a
+        # NEIGHBOURING punctum, not this one — see `_ring_masks`.
         eroded_puncta_holder, dilated_puncta_holder, local_bg_mask = _ring_masks(
-            puncta_mask_holder, _erode_r, _gap_r, _band_r)
+            puncta_mask_holder, _erode_r, _gap_r, _band_r, exclude_mask=puncta_mask)
         dilated_local_mask = local_bg_mask | dilated_puncta_holder
 
         # Collect pixel values from various masks and images for analysis
@@ -538,17 +556,23 @@ def puncta_refinement_filtering_func_fast(original_img, processed_img, puncta_ma
         # fixed 4px, which was exactly enough for the fixed 3-step dilation — now
         # that the ring scales with the object, a fixed pad would CLIP it, and the
         # windowed filter would silently sample a different background from the
-        # full-array one. +1 for the erosion/rounding margin.
+        # full-array one. +1 for the erosion/rounding margin. `_ring_masks` can grow
+        # the band up to 4x when neighbours crowd it out (`exclude_mask`) — pad for
+        # that worst case too, or the crop would clip the grown ring the full-array
+        # slow filter would not, breaking fast/slow parity.
         r0, c0, r1, c1 = p.bbox  # (min_row, min_col, max_row, max_col)
-        pad = _gap_r + _band_r + 1
+        pad = _gap_r + 4 * _band_r + 1
         rr0 = max(0, r0 - pad); rr1 = min(H, r1 + pad)
         cc0 = max(0, c0 - pad); cc1 = min(W, c1 + pad)
 
         sub_label = labeled_puncta_mask[rr0:rr1, cc0:cc1]
         puncta_mask_holder = (sub_label == label)
+        sub_puncta_mask = puncta_mask[rr0:rr1, cc0:cc1]
 
+        # exclude_mask=sub_puncta_mask: the SAME neighbour-exclusion the slow filter
+        # applies, windowed — see `_ring_masks`.
         eroded_puncta_holder, dilated_puncta_holder, local_bg_mask = _ring_masks(
-            puncta_mask_holder, _erode_r, _gap_r, _band_r)
+            puncta_mask_holder, _erode_r, _gap_r, _band_r, exclude_mask=sub_puncta_mask)
         dilated_local_mask = local_bg_mask | dilated_puncta_holder
 
         sub_orig = original_img[rr0:rr1, cc0:cc1]

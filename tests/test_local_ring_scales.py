@@ -213,3 +213,87 @@ def test_a_bright_PUNCTUM_is_unaffected():
     out = seg.puncta_refinement_filtering_func(
         img, img.copy(), obj, cell, obj.astype(int), 2, **_P)
     assert out.sum() == int(obj.sum()), 'a bright punctum was rejected'
+
+
+# ── the ring must exclude NEIGHBOURING puncta, not merely resist them statistically ──
+#
+# A dense field (hundreds of puncta tiling a nucleus) can put a NEIGHBOUR's own bright
+# pixels inside this object's local-background ring. `_robust_bg`'s median resists
+# outliers up to ~50% contamination; a tiling field can exceed that. `local_intensity_
+# condition` and `gradient_condition` do not even use `_robust_bg` -- they take the
+# ring's plain mean/std -- so they are contaminated by ANY neighbour overlap, not just
+# a majority. Excluding neighbours from the ring outright fixes both.
+
+def test_ring_excludes_NEIGHBOURING_puncta_pixels():
+    """Premise + fix, in one test: the naive ring overlaps a neighbour; the
+    ``exclude_mask`` ring does not."""
+    size = 40
+    obj = np.zeros((size, size), dtype=bool)
+    obj[18:22, 18:22] = True
+    neighbour = np.zeros((size, size), dtype=bool)
+    neighbour[18:22, 24:28] = True          # close enough to reach into obj's ring
+    puncta_mask = obj | neighbour
+
+    _, _, local_bg_naive = seg._ring_masks(obj, 1, 1, 2)
+    _, _, local_bg_clean = seg._ring_masks(obj, 1, 1, 2, exclude_mask=puncta_mask)
+
+    assert (local_bg_naive & neighbour).any(), "premise failed: the naive ring does not reach the neighbour"
+    assert not (local_bg_clean & neighbour).any(), "the cleaned ring still contains neighbour pixels"
+    assert local_bg_clean.sum() > 0, "excluding the neighbour left no background at all"
+
+
+def test_ring_GROWS_when_neighbours_CROWD_IT_OUT():
+    """If exclusion leaves too few clean pixels to measure anything, the ring widens
+    instead of silently running the checks on a handful of pixels (or none)."""
+    size = 60
+    obj = np.zeros((size, size), dtype=bool)
+    obj[28:32, 28:32] = True
+    puncta_mask = obj.copy()
+    for dy, dx in [(-4, 0), (4, 0), (0, -4), (0, 4), (-3, -3), (-3, 3), (3, -3), (3, 3)]:
+        cy, cx = 30 + dy, 30 + dx
+        puncta_mask[cy - 1:cy + 2, cx - 1:cx + 2] = True
+
+    _, _, local_bg = seg._ring_masks(obj, 1, 1, 2, exclude_mask=puncta_mask, min_bg_px=8)
+    assert local_bg.sum() >= 8, "the ring did not grow far enough to find clean background"
+    assert not (local_bg & puncta_mask).any(), "the grown ring still includes excluded (punctum) pixels"
+
+
+def _dense_field_scene(size=96, n_ring=8, ring_radius=5, amp=60.0, seed=3):
+    """A real, bright punctum at the centre of a ring of equally-real neighbours —
+    the geometry that put neighbour pixels inside the centre object's local-
+    background ring. All puncta are equally real; only the centre one is labelled,
+    so the test isolates its own verdict."""
+    rng = np.random.default_rng(seed)
+    img = rng.normal(120.0, 4.0, (size, size)).astype(np.float32)
+    cy, cx = size // 2, size // 2
+    obj = np.zeros((size, size), dtype=bool)
+    obj[cy - 2:cy + 2, cx - 2:cx + 2] = True
+    puncta_mask = obj.copy()
+    for k in range(n_ring):
+        theta = 2 * np.pi * k / n_ring
+        ny = cy + int(round(ring_radius * np.sin(theta)))
+        nx = cx + int(round(ring_radius * np.cos(theta)))
+        neighbour = np.zeros((size, size), dtype=bool)
+        neighbour[ny - 2:ny + 2, nx - 2:nx + 2] = True
+        puncta_mask |= neighbour
+        img[neighbour] += amp
+    img[obj] += amp
+    labeled = np.zeros((size, size), dtype=int)
+    labeled[obj] = 1
+    cell = np.ones((size, size), dtype=int)
+    return img, cell, puncta_mask, labeled
+
+
+@pytest.mark.parametrize('impl', ['puncta_refinement_filtering_func',
+                                  'puncta_refinement_filtering_func_fast'])
+def test_a_real_punctum_in_a_DENSE_FIELD_of_real_neighbours_is_kept(impl):
+    """The failure mode this fixes: a real, high-contrast punctum surrounded by
+    equally-real neighbours whose own pixels sit inside its ring. Both
+    implementations, because they must agree (this exercises the fast path's
+    matching window pad, not just the shared `_ring_masks`)."""
+    img, cell, puncta_mask, labeled = _dense_field_scene()
+    out = getattr(seg, impl)(img, img.copy(), puncta_mask, cell, labeled, 2, **_P)
+    assert out.sum() > 0, (
+        "a real, bright punctum was rejected because equally-real NEIGHBOURS "
+        "contaminated its local-background ring -- exactly the dense-field failure "
+        "`exclude_mask` exists to fix")

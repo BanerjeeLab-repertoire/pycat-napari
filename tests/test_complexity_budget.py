@@ -320,7 +320,13 @@ _FILE_LINE_CEILINGS = {
     # segmentation_tools.py) added the `is_large_object` gate + its measured rationale to BOTH filters. This
     # is a real, documented behaviour fix (the ratchet correctly FLAGGED the growth), not grandfathering an
     # offender — the added lines are mostly the rationale comment, which is worth keeping.
-    "toolbox/segmentation/puncta_refinement.py": 747,
+    # 747 -> 769: `_ring_masks` gained `exclude_mask` — a dense field (hundreds of puncta tiling a nucleus)
+    # can put a NEIGHBOURING punctum's own pixels inside this object's local-background ring; the existing
+    # `_robust_bg` median resists that only up to ~50% contamination, which a tiling field can exceed.
+    # Excluding neighbours outright (with a capped-growth fallback if exclusion leaves the ring too thin, and
+    # a matching fast-path window pad so the two filters cannot silently diverge) fixes the contamination
+    # itself instead of resisting it statistically. Another real, documented behaviour fix.
+    "toolbox/segmentation/puncta_refinement.py": 769,
     # vpt_ui.py: 2458 -> 1778 (panels) -> 1375 (napari) -> 1246 (table) -> 1139 (msd) as the four
     # adapter modules absorbed its responsibilities (decomposition steps 2-3). A 54% reduction. The
     # ratchet moving DOWN is the point — the file cannot grow back to where it was.
