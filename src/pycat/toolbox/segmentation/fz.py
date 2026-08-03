@@ -207,7 +207,8 @@ def run_fz_segmentation_and_merging(scale_input, sigma_input, min_size_input, me
     add_image_with_default_colormap(segmented_img, viewer, name=f"Felzenszwalb Segmented {active_layer.name}")
 
 
-def _bridge_fragmented_rims(segmented_mask, rim_close_radius=5, rim_close_min_result_area=150):
+def _bridge_fragmented_rims(segmented_mask, rim_close_radius=5, rim_close_min_result_area=150,
+                            raw_img=None, rim_fraction=0.5):
     """Reconnect a large condensate's rim when upstream processing fragmented it into arcs —
     without also gluing together several separate, nearby small puncta.
 
@@ -247,12 +248,30 @@ def _bridge_fragmented_rims(segmented_mask, rim_close_radius=5, rim_close_min_re
     hollow interior) keeps passing; 5 separate small puncta bridged by the same closing radius
     (no enclosed hole) correctly flip from accepted to rejected.
 
+    ── A condensate does not always fragment into a hollow ring ────────────────────────────
+
+    The same upstream artifact can also split one condensate into a SMALL NUMBER of SOLID
+    pieces with no enclosed gap between them (e.g. two roughly disc-shaped halves) -- closing
+    them together encloses nothing, so the hole-fill condition above (correctly, on its own
+    terms) refuses that merge. When ``raw_img`` (the pre-enhancement image) is supplied, a
+    fourth, ALTERNATIVE condition covers this: the pixels the CLOSING itself added to bridge
+    the pieces (not the pixels fill-holes added -- there's no hole here) are required to be, in
+    the RAW image, at least ``rim_fraction`` as bright as the contributing pieces' own detected
+    footprint there. A genuine single condensate's bridge is close to as bright as its own rim
+    in the raw image (measured ratio ~1.0); a bridge manufactured between separate real puncta
+    is only as bright as their PSF tails bleeding together (measured ratio ~0.17 mean) even
+    though that can still clear an absolute noise-floor test on its own -- which is why this
+    check is RELATIVE to the rim's own raw brightness, not an absolute threshold. This is an OR
+    with the hole-fill path, not a replacement -- ring fragmentation keeps being recovered by
+    hole-fill exactly as before, and is a no-op (identical to today) when ``raw_img`` is None.
+
     Returns the mask with only the qualifying bridged regions applied; everywhere else reverts
     to the pre-closing (unbridged) pixels.
     """
     close_radius = max(1, int(rim_close_radius))
     closed = ndi.binary_closing(segmented_mask, structure=sk.morphology.disk(close_radius))
     filled_closed = ndi.binary_fill_holes(closed)
+    raw = dtype_conversion_func(raw_img, 'float32') if raw_img is not None else None
 
     pre_close_labeled = sk.measure.label(segmented_mask)
     lbl_closed = sk.measure.label(filled_closed)
@@ -279,13 +298,36 @@ def _bridge_fragmented_rims(segmented_mask, rim_close_radius=5, rim_close_min_re
         hole_fill_area = int((filled_closed & ~closed)[region_mask].sum())
         if hole_fill_area >= max(20, 0.10 * pre_close_area):
             accept |= region_mask
+            continue
+        # No hole recovered: still accept a SOLID-PIECE split, verified against the raw image
+        # -- see the docstring section on solid-piece splits. A no-op when raw_img is None.
+        if raw is not None and _raw_bridge_is_real(
+                raw, segmented_mask, closed, region_mask, rim_fraction):
+            accept |= region_mask
     return np.where(accept, filled_closed, segmented_mask)
+
+
+def _raw_bridge_is_real(raw, segmented_mask, closed, region_mask, rim_fraction):
+    """Is the gap this candidate region's CLOSING bridged actually real, physical continuity
+    -- checked in the raw (pre-enhancement) image, which the enhancement artifact that split
+    the object never touched. Split out purely to keep `_bridge_fragmented_rims` reviewable.
+    """
+    bridge_px = (closed & ~segmented_mask) & region_mask
+    if not bridge_px.any():
+        return False
+    rim_px = segmented_mask & region_mask
+    if not rim_px.any():
+        return False
+    rim_brightness = np.median(raw[rim_px])
+    if rim_brightness <= 0:
+        return False
+    return np.median(raw[bridge_px]) >= rim_fraction * rim_brightness
 
 
 @tags_layer('felzenszwalb_binary', role='mask', inputs=('image',),
             summary='Felzenszwalb segmentation, binarised')
 def fz_segmentation_and_binarization(image, mask, ball_radius, rim_close_radius=5,
-                                     rim_close_min_result_area=150):
+                                     rim_close_min_result_area=150, raw_img=None):
     """
     Applies Felzenszwalb's segmentation method followed by additional processing to convert the segmented
     image into a refined binary mask. This involves contrast adjustments, morphological operations, and local
@@ -325,6 +367,11 @@ def fz_segmentation_and_binarization(image, mask, ball_radius, rim_close_radius=
         large-condensate rim reliably does. Default is 150 (well above a
         single ~7px-diameter punctum's area, well below a genuine large
         condensate's).
+    raw_img : numpy.ndarray, optional
+        The pre-enhancement image (e.g. ``orig_crop`` at the call site), same shape as
+        ``image``. When given, ``_bridge_fragmented_rims`` also bridges SOLID-piece splits
+        (no enclosed hole) that are verified as one real object in the raw image -- see its
+        docstring. Default None reproduces today's behaviour exactly (hole-fill-only).
 
     Returns
     -------
@@ -395,7 +442,7 @@ def fz_segmentation_and_binarization(image, mask, ball_radius, rim_close_radius=
     # Large-condensate rim bridging: reconnect a fragmented ring without also gluing
     # together separate, nearby small puncta. See _bridge_fragmented_rims.
     segmented_mask = _bridge_fragmented_rims(segmented_mask, rim_close_radius,
-                                             rim_close_min_result_area)
+                                             rim_close_min_result_area, raw_img=raw_img)
 
     # Determine the maximum area for objects based on the input cell mask.
     # This is intentionally permissive (previously a hard 25% cap): rejecting

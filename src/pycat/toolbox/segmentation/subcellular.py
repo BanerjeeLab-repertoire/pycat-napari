@@ -179,8 +179,13 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
         puncta_mask = np.zeros_like(cell_mask)
         refined_puncta_mask = np.zeros_like(cell_mask)
     else:
-        # Segment and refine on the cropped ROI
-        puncta_mask_crop = fz_segmentation_and_binarization(bg_removed_crop, mask_crop, ball_radius)
+        # Segment and refine on the cropped ROI. rim_close_radius is generous (vs. the 5px
+        # default used when raw_img is None) because raw_img makes that safe: the raw-image
+        # rim-brightness check in _bridge_fragmented_rims rejects any bridge a wider closing
+        # reaches that isn't real physical continuity, regardless of how far it reaches.
+        puncta_mask_crop = fz_segmentation_and_binarization(
+            bg_removed_crop, mask_crop, ball_radius,
+            rim_close_radius=4 * ball_radius, raw_img=orig_crop)
         # ── Pass the thresholds ON. They used to stop here. ────────────────────
         #
         # This call took `min_spot_radius` and `fast` and DROPPED the other five —
