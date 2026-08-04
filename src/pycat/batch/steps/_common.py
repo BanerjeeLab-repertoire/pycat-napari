@@ -69,6 +69,43 @@ def _load_image(image_path: Path, channel: int = 0):
     Load a single channel of an image file using AICSImage with a tifffile
     fallback for NumPy 2.0 compatibility.
 
+    Returns the plane as a dtype-max-normalised [0, 1] float32 — the SAME
+    convention the interactive 2-D loader uses (``to_unit_float32`` /
+    ``dtype_conversion_func(data, 'float32')``, see ``stack_access.py``:
+    *"[0, 1] is the contract"*, declared by 17 toolbox functions). Previously
+    this returned RAW counts (0-65535 for a uint16 source) while the GUI's
+    layer held the same pixels divided by 65535 -- same file, same pixels, a
+    factor of 65535 apart. Every self-normalising consumer (SNR, GLCM texture,
+    ratios) was immune and never showed it, but ``cell_analysis_func`` /
+    ``puncta_analysis_func`` report intensity directly with no internal
+    normalisation, so batch's cell_df/puncta_df intensity columns came out
+    ~65535x the GUI's for the exact same image. Reported by Meet Raval, with
+    matching CSVs from both paths (ratio measured at 65,344-65,924x across
+    intensity_mean/intensity_total on identical cells/puncta).
+
+    Normalising HERE, once, at the single chokepoint every batch step's image
+    data flows through, is what makes this fix hold everywhere rather than
+    needing a scale-aware patch at every consumer (the previous, narrower
+    attempt at exactly that — matching one function's absolute-threshold logic
+    onto raw-counts data — corrupted the image instead, see replay_upscaling's
+    history). `_raw_counts`/`_normalize_to_float` (this module) are unaffected
+    in spirit: a dtype-max division is a FIXED, frame-independent, purely
+    multiplicative rescale (unlike `_normalize_to_float`'s per-frame min-max,
+    which shifts the pedestal and IS what the raw-counts fixes were protecting
+    against) -- so it does not reintroduce the exposure-dependent partition/
+    intensity-ratio bugs those fixes exist for.
+
+    SIGNED integer sources (some camera/acquisition software writes non-negative
+    counts into a SIGNED 16-bit TIFF) are cast to uint16 before normalising --
+    mirroring `load_into_viewer`'s identical correction for the interactive
+    path (`if signedinteger: data = data.astype(np.uint16)`). Without it,
+    `to_unit_float32` divides by the SIGNED range's max (32767) instead of
+    65535 -- a clean, exact 2x -- for exactly this reason: a signed-vs-unsigned
+    dtype disagreement between readers (tifffile reports one TIFF's dtype as
+    int16; PIL, the GUI's own NumPy-2.0 fallback reader, can report the SAME
+    file differently) is a real, confirmed way for the two paths to disagree
+    without either being "wrong" about the file's nominal dtype tag.
+
     Parameters
     ----------
     image_path : Path
@@ -78,6 +115,14 @@ def _load_image(image_path: Path, channel: int = 0):
         non-zero channel for a given image type (e.g. Segmentation vs
         Fluorescence Image came from different channels in the GUI session).
     """
+    from pycat.file_io.stack_access import to_unit_float32
+
+    def _to_unit_float32_gui_convention(arr):
+        arr = np.asarray(arr)
+        if np.issubdtype(arr.dtype, np.signedinteger):
+            arr = arr.astype(np.uint16)
+        return to_unit_float32(arr, arr.dtype)
+
     microns_per_pixel = 1.0
 
     try:
@@ -87,6 +132,7 @@ def _load_image(image_path: Path, channel: int = 0):
         # runs once per file per step.
         from pycat.file_io.image_reader import read_plane
         data = read_plane(img, path=str(image_path), scene=0, t=0, c=channel)
+        data = _to_unit_float32_gui_convention(data)
         try:
             px_size = img.physical_pixel_sizes
             microns_per_pixel = float(px_size.Y) if px_size.Y else 1.0
@@ -115,7 +161,7 @@ def _load_image(image_path: Path, channel: int = 0):
     while data.ndim > 2:
         data = data[0]
 
-    return data.astype('float32'), microns_per_pixel
+    return _to_unit_float32_gui_convention(data), microns_per_pixel
 
 
 def _resolve_channel_for_layer(channel_assignment, layer_name_substring: str, default: int = 0) -> int:

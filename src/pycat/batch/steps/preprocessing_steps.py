@@ -230,7 +230,17 @@ def replay_calibration_correction(state: dict, image_path: Path, params: dict, o
         print('[PyCAT Batch]   Calibration correction skipped (reference file not found).')
         return
     import tifffile
-    ref = np.squeeze(np.asarray(tifffile.imread(calib), dtype=np.float32))
+    from pycat.file_io.stack_access import to_unit_float32
+    ref_raw = np.squeeze(np.asarray(tifffile.imread(calib)))
+    # Normalise to the SAME [0, 1] dtype-max convention _load_image now applies to
+    # `img` below -- a raw-counts reference against a [0, 1] image would scale-
+    # mismatch the flatfield division / background subtraction (this file's own
+    # values would come out ~65535x off from what they should correct). Signed-
+    # integer sources are cast to uint16 first, same as _load_image -- see its
+    # docstring for why (a confirmed exact-2x reader-disagreement case).
+    if np.issubdtype(ref_raw.dtype, np.signedinteger):
+        ref_raw = ref_raw.astype(np.uint16)
+    ref = to_unit_float32(ref_raw, ref_raw.dtype)
     if ref.ndim == 3:
         ref = np.median(ref, axis=0)
     # RAW counts: the rolling ball's radius has an INTENSITY component (see _proc, above), and
