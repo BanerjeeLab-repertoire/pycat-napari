@@ -9,6 +9,8 @@ synthetic scene). Self-contained science, no napari/Qt.
 """
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import skimage as sk
 import scipy.ndimage as ndi
@@ -46,7 +48,16 @@ def estimate_object_size_px(image, workflow=None, min_area_px=4,
       2. Otsu threshold on the top-hat response → foreground objects.
       3. Label; keep objects >= min_area_px.
       4. object_size = median equivalent diameter over kept objects.
-      5. ball_radius = round(object_size / 2) (native px), clamped >= 1.
+      5. ball_radius = ceil(1.5 * (object_size / 2)) (native px), clamped >= 1
+         — the SAME formula the interactive GUI cellular-analysis pipeline uses
+         when the user hand-measures the object diameter with the Measure Line
+         tool (``BaseDataClass.calculate_sizes``, data_modules.py:462-463:
+         ``object_radius = object_size / 2; ball_radius =
+         math.ceil(1.5 * object_radius)``), so the batch auto-estimate lands on
+         the same ball_radius a human would get measuring the same object by
+         hand. (An earlier version halved object_size with no 1.5x factor —
+         object_size=6.86px -> ball_radius=3 — which disagreed with the GUI
+         formula's ball_radius=6 for the same measurement.)
 
     VALIDITY: this is only meaningful where discrete bright objects sit on a
     thresholdable background (fluorescence). If ``workflow`` is supplied and is
@@ -119,7 +130,7 @@ def estimate_object_size_px(image, workflow=None, min_area_px=4,
                 else {**result, 'diagnostics': {'tophat': tophat, 'fg': fg}})
 
     object_size = float(np.median(diams))
-    ball_radius = max(1, int(round(object_size / 2.0)))
+    ball_radius = max(1, math.ceil(1.5 * (object_size / 2.0)))
     result = {'object_size_px': object_size,
               'ball_radius': ball_radius,
               'n_objects': int(diams.size)}

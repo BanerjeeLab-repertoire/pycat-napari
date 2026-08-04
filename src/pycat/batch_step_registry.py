@@ -152,8 +152,16 @@ def replay_background_removal(state: dict, image_path: Path, params: dict, outpu
         return
 
     data_instance = state['data_instance']
-    ball_radius = math.ceil(int(params.get('ball_radius',
-                                _get_data(data_instance, 'ball_radius', 50))))
+    # ball_radius: same override as replay_preprocessing — when this batch has
+    # per-image auto-estimation active, the recorded params snapshot (captured
+    # once, on whichever image was active during the original GUI recording)
+    # must not override the LIVE per-image estimate already resolved onto
+    # data_instance. See replay_preprocessing for the full rationale.
+    if state.get('_auto_ball_radius'):
+        ball_radius = math.ceil(int(_get_data(data_instance, 'ball_radius', 50)))
+    else:
+        ball_radius = math.ceil(int(params.get('ball_radius',
+                                    _get_data(data_instance, 'ball_radius', 50))))
     sp = params.get('foreground_suppression_params', None) or {}
 
     active_name = str(params.get('active_layer')  # see _active_layer_channel_role

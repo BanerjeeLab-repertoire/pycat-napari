@@ -78,18 +78,39 @@ def replay_measure_line(state: dict, image_path: Path, params: dict, output_dir:
     place — after upscaling that produced an enormous rolling-ball structuring
     element and a MemoryError in condensate segmentation, and gave Cellpose the
     wrong cell diameter.)
+
+    EXCEPTION: ``ball_radius`` is skipped when this batch has per-image
+    auto-estimation active (``state['_auto_ball_radius']``) — Measure Line's
+    recorded value is a SINGLE measurement from whichever image the user
+    happened to be looking at during the original recording session, applied
+    identically to every file in the batch; blindly reapplying it here would
+    silently discard the per-image estimate that ``replay_open_image`` /
+    ``_finalize_ball_radius`` just computed for THIS file, for the exact reason
+    a recorded ``open_image.ball_radius`` isn't allowed to either (see
+    ``BatchWorker._auto_ball_radius_active``). ``cell_diameter``/``object_size``
+    have no competing per-image estimate, so they still apply unconditionally.
     """
     data_instance = state['data_instance']
     applied = []
+    skipped_ball_radius = False
     for key in ('cell_diameter', 'ball_radius', 'object_size'):
         val = params.get(key)
-        if val is not None:
-            data_instance.data_repository[key] = val
-            applied.append(f"{key}={val}")
+        if val is None:
+            continue
+        if key == 'ball_radius' and state.get('_auto_ball_radius'):
+            skipped_ball_radius = True
+            continue
+        data_instance.data_repository[key] = val
+        applied.append(f"{key}={val}")
 
     if applied:
         print(f"[PyCAT Batch]   Measure Line applied recorded measurements: "
-              f"{', '.join(applied)}.")
+              f"{', '.join(applied)}"
+              + ("  (ball_radius left at the per-image auto-estimate)."
+                 if skipped_ball_radius else "."))
+    elif skipped_ball_radius:
+        print("[PyCAT Batch]   Measure Line: ball_radius left at the per-image "
+              "auto-estimate; no other recorded measurements to apply.")
     else:
         print("[PyCAT Batch]   Measure Line: no recorded measurements to apply "
               "(using open_image values).")

@@ -257,29 +257,35 @@ class BatchWorker(QThread):
     def _auto_ball_radius_active(self) -> bool:
         """Whether to auto-estimate ball_radius for this batch.
 
-        True only when (a) the recorded workflow is a fluorescence one where
-        intensity-threshold object-size estimation is valid — inferred from the
-        recorded step names — AND (b) no explicit ball_radius was recorded on the
-        open_image step (an explicitly-set value always takes precedence).
-        Brightfield / time-series / z-stack workflows are excluded (top-hat +
-        Otsu size estimation is not valid there).
+        True only for the cellular-fluorescence analysis pipeline (recorded
+        ``segment_subcellular_objects`` / ``condensate_segmentation`` /
+        ``condensate_analysis`` step) — inferred from the recorded step names.
+
+        In-vitro fluorescence is deliberately excluded even though the top-hat +
+        Otsu estimator is scientifically valid on it too (see
+        ``AUTO_OBJECT_SIZE_VALID_WORKFLOWS``): its droplet segmentation
+        (``ivf_segmentation``) is a different pipeline from the cellular one this
+        estimator was tuned against, and Meet Raval wants ball_radius
+        auto-estimation scoped to cellular analysis only. Brightfield /
+        time-series / z-stack workflows were already excluded (top-hat + Otsu
+        size estimation is not valid there).
+
+        A recorded ``ball_radius`` on the ``open_image`` step does NOT disable
+        this: ``replay_open_image`` still computes the per-image estimate and
+        only falls back to the recorded value when it agrees with the estimate
+        (see its docstring) — a recorded value never silently overrides a
+        differing per-image estimate. (Previously an explicit recorded value
+        disabled auto-estimation outright; but ``open_image`` recording always
+        writes SOME ball_radius — usually just the untouched 75-px repository
+        default — so that check was true for essentially every batch and the
+        estimator never ran.)
         """
         steps = self.config.get("steps", [])
         step_names = {s.get("step", "") for s in steps}
         # Cellular-fluorescence tell: subcellular/condensate segmentation.
-        cellular = bool(step_names & {
+        return bool(step_names & {
             'segment_subcellular_objects', 'condensate_segmentation',
             'condensate_analysis'})
-        # In-vitro-fluorescence tell: the ivf_* segmentation step.
-        invitro = 'ivf_segmentation' in step_names
-        if not (cellular or invitro):
-            return False
-        # An explicit ball_radius recorded on open_image wins — don't override.
-        for s in steps:
-            if s.get("step") in ("open_image", "open_stack", "open_image_stack"):
-                if 'ball_radius' in (s.get("params") or {}):
-                    return False
-        return True
 
     def run(self):
         output_dir = self.output_dir
@@ -287,16 +293,16 @@ class BatchWorker(QThread):
 
         # Decide whether automatic object-size → ball_radius estimation applies
         # to this batch, and tell the user up front (it's not a hidden step). It
-        # applies only for fluorescence workflows where intensity thresholding is
-        # valid, and only when the recorded workflow did NOT pin an explicit
-        # ball_radius (an explicit value always wins).
+        # applies only to the cellular-fluorescence analysis pipeline (not
+        # in-vitro fluorescence, whose droplet segmentation is a different
+        # pipeline); the per-image estimate wins over a recorded ball_radius
+        # whenever the two disagree (see replay_open_image).
         self._auto_ball_radius = self._auto_ball_radius_active()
         if self._auto_ball_radius:
             print("[PyCAT Batch] Automatic object-size estimation is ON: "
                   "ball_radius will be estimated per image from the fluorescence "
-                  "signal (top-hat + Otsu → median object size). This applies "
-                  "because this is a fluorescence workflow with no explicit "
-                  "ball_radius recorded. "
+                  "signal (top-hat + Otsu → median object size), and used whenever "
+                  "it differs from the recorded config value. "
                   "# TODO: optimize the estimator on a real dataset.")
 
         results = []

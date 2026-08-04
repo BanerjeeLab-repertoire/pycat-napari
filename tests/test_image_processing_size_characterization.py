@@ -31,7 +31,9 @@ def test_estimate_object_size_px_is_pinned():
     from pycat.toolbox.image_processing_tools import estimate_object_size_px
     r = estimate_object_size_px(_scene(), tophat_radius=15)
     assert r['n_objects'] == 7
-    assert r['ball_radius'] == 4
+    # ball_radius = ceil(1.5 * (object_size_px / 2)) — the same formula the GUI's
+    # Measure Line tool uses (BaseDataClass.calculate_sizes), not a plain halving.
+    assert r['ball_radius'] == 6
     assert r['object_size_px'] == pytest.approx(7.569397566060481, rel=0, abs=1e-9)
 
 

@@ -13,6 +13,60 @@ from pycat.batch.steps._common import (
     _get_data, _derive_split_companion_path, _source_path_for_recorded_channel, _load_image, _resolve_channel_for_layer, _save_array, _raw_counts, _normalize_to_float, _resolve_image_layer, _ivf_droplet_mask_and_image)
 
 
+def _finalize_ball_radius(state: dict, image_path: Path) -> None:
+    """Resolve the deferred ball_radius auto-estimate once the TRUE fluorescence
+    channel is known, and write it to ``data_instance.data_repository``.
+
+    ``replay_open_image`` cannot estimate ball_radius from the fluorescence
+    signal until ``state['fluorescence_image']`` actually holds it. For a
+    single/multi-channel file that resolves immediately; for a split-file
+    recording (separate 'open_image' steps, no channel_assignment —
+    see ``_replay_split_file_companion``), the real fluorescence channel only
+    arrives on a LATER companion call, so ``replay_open_image`` defers by
+    setting ``state['_ball_radius_pending']`` and this is called once the
+    companion (or the failure/no-op fallback) settles ``fluorescence_image``.
+
+    Estimating from the wrong channel is not a hypothetical: on a DAPI (seg) +
+    GFP (fluorescence) split recording, estimating on the still-placeholder
+    ``fluorescence_image`` (== the DAPI array, before the companion loads)
+    measured ~3px nuclear puncta -> ball_radius=1, when the real GFP
+    condensates the user hand-measured were ~4px. Reported by Meet Raval.
+    """
+    if not state.pop('_ball_radius_pending', False):
+        return
+    data_instance = state.get('data_instance')
+    if data_instance is None:
+        return
+    recorded = state.pop('_ball_radius_recorded', None)
+    ball_radius = recorded
+    fluor_image = state.get('fluorescence_image')
+    fluor_source = state.get('_fluorescence_source_name', '?')
+    if state.get('_auto_ball_radius') and fluor_image is not None:
+        try:
+            from pycat.toolbox.image_processing_tools import estimate_object_size_px
+            _est = estimate_object_size_px(fluor_image)
+            _estimated = _est.get('ball_radius')
+            if _estimated:
+                if recorded is not None and recorded == _estimated:
+                    print(f"[PyCAT Batch]   ball_radius = {_estimated} "
+                          f"(recorded value agrees with the estimate; measured on "
+                          f"'{fluor_source}') for {image_path.name}.")
+                else:
+                    ball_radius = _estimated
+                    print(f"[PyCAT Batch]   Auto ball_radius = {ball_radius} "
+                          f"(object_size {_est['object_size_px']:.1f}px from "
+                          f"{_est['n_objects']} objects, measured on '{fluor_source}') "
+                          f"for {image_path.name}"
+                          + (f" — overriding recorded {recorded}."
+                             if recorded is not None else "."))
+        except Exception as _e:  # broad-ok: optional_probe — auto ball_radius estimation is best-effort; on failure the recorded/default value is used
+            print(f"[PyCAT Batch]   Auto ball_radius estimation failed "
+                  f"({_e}); using recorded/default.")
+    if ball_radius is None:
+        ball_radius = 50
+    data_instance.data_repository['ball_radius'] = ball_radius
+
+
 def _replay_split_file_companion(state: dict, image_path: Path, params: dict) -> bool:
     """Handle split-file recordings (multiple SEPARATE 'open_image' steps -- e.g. two
     single-channel files opened as separate layers, so channel_assignment is empty on
@@ -39,6 +93,7 @@ def _replay_split_file_companion(state: dict, image_path: Path, params: dict) ->
     recorded_stem = Path(params.get('file_path', '') or '').stem
     layer_name = params.get('_active_layer_at_record') or recorded_stem or 'companion'
     if not recorded_stem or recorded_stem == primary_stem:
+        _finalize_ball_radius(state, image_path)
         return True                        # no recorded path, or same file as the primary
     try:
         companion_path = _derive_split_companion_path(image_path, primary_stem, recorded_stem)
@@ -46,6 +101,7 @@ def _replay_split_file_companion(state: dict, image_path: Path, params: dict) ->
     except Exception as _e:  # broad-ok: batch_step — companion load failure is logged and the layer left unavailable to later steps, not silently swallowed
         print(f"[PyCAT Batch]   Companion file for layer '{layer_name}' could not be "
               f"loaded ({_e}) — this layer will be unavailable to later steps.")
+        _finalize_ball_radius(state, image_path)
         return True
     state.setdefault('channels_by_name', {})[layer_name] = companion_image
     # ── This companion is also the FLUORESCENCE role, if no other channel claimed it ──
@@ -62,8 +118,10 @@ def _replay_split_file_companion(state: dict, image_path: Path, params: dict) ->
     # channel, not a second "the" fluorescence channel.
     if state.get('fluorescence_image') is state.get('image'):
         state['fluorescence_image'] = companion_image
+        state['_fluorescence_source_name'] = companion_path.name
     print(f"[PyCAT Batch]   Loaded companion file {companion_path.name} "
           f"as layer '{layer_name}'  shape={companion_image.shape}")
+    _finalize_ball_radius(state, image_path)
     return True
 
 
@@ -105,28 +163,10 @@ def replay_open_image(state: dict, image_path: Path, params: dict, output_dir: P
     data_instance.data_repository['microns_per_pixel'] = microns_per_pixel
     data_instance.data_repository['microns_per_pixel_sq'] = microns_per_pixel ** 2
     data_instance.data_repository['cell_diameter'] = params.get('cell_diameter', 100)
-
-    # ball_radius: use the recorded value if present; otherwise, when the batch
-    # enabled automatic object-size estimation (valid fluorescence workflow, no
-    # explicit ball_radius), estimate it per image from the fluorescence signal
-    # (top-hat + Otsu → median object diameter). Falls back to 50 if estimation
-    # finds no objects. The user was told at batch start that this is applying.
-    _ball_radius = params.get('ball_radius', None)
-    if _ball_radius is None and state.get('_auto_ball_radius'):
-        try:
-            from pycat.toolbox.image_processing_tools import estimate_object_size_px
-            _est = estimate_object_size_px(image)   # seg image = fluorescence here
-            if _est.get('ball_radius'):
-                _ball_radius = _est['ball_radius']
-                print(f"[PyCAT Batch]   Auto ball_radius = {_ball_radius} "
-                      f"(object_size {_est['object_size_px']:.1f}px from "
-                      f"{_est['n_objects']} objects) for {image_path.name}.")
-        except Exception as _e:  # broad-ok: optional_probe — auto ball_radius estimation is best-effort; on failure the grounded default is used
-            print(f"[PyCAT Batch]   Auto ball_radius estimation failed "
-                  f"({_e}); using default.")
-    if _ball_radius is None:
-        _ball_radius = 50
-    data_instance.data_repository['ball_radius'] = _ball_radius
+    # Placeholder until _finalize_ball_radius resolves the real value below —
+    # covers the (should-never-happen) case where something reads ball_radius
+    # before finalize runs.
+    data_instance.data_repository['ball_radius'] = params.get('ball_radius', 50)
 
     state['image'] = image
     state['preprocessed'] = image.copy()
@@ -138,8 +178,26 @@ def replay_open_image(state: dict, image_path: Path, params: dict, output_dir: P
         fluor_path = _source_path_for_recorded_channel(image_path, channel_assignment, fluor_channel)
         fluor_image, _ = _load_image(fluor_path, channel=fluor_channel if fluor_path == image_path else 0)
         state['fluorescence_image'] = fluor_image
+        state['_fluorescence_source_name'] = f"{fluor_path.name} (channel {fluor_channel})"
     else:
         state['fluorescence_image'] = image
+        state['_fluorescence_source_name'] = f"{seg_path.name} (channel {seg_channel}, same as segmentation)"
+
+    # ball_radius: when the batch enabled automatic object-size estimation (valid
+    # fluorescence workflow — see BatchWorker._auto_ball_radius_active), estimate
+    # it from the FLUORESCENCE signal (top-hat + Otsu → median object diameter),
+    # not the segmentation channel — they can be entirely different stains (e.g.
+    # DAPI segmentation + GFP condensate marker). For a split-file recording (no
+    # channel_assignment; see _replay_split_file_companion) the true fluorescence
+    # channel is still just this call's placeholder (== the segmentation image)
+    # until the companion file loads on a LATER open_image step, so estimating
+    # now would measure the wrong channel's objects — defer to
+    # _finalize_ball_radius, which _replay_split_file_companion calls once the
+    # companion (or its failure/no-op fallback) settles fluorescence_image.
+    state['_ball_radius_recorded'] = params.get('ball_radius', None)
+    state['_ball_radius_pending'] = True
+    if state.get('_primary_open_image_stem') is None:
+        _finalize_ball_radius(state, image_path)
 
     # Load every recorded channel (covers 3+ fluorophore files) and store
     # by its assigned layer name so any channel can be referenced later,

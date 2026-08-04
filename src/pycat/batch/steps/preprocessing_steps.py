@@ -25,9 +25,22 @@ def replay_preprocessing(state: dict, image_path: Path, params: dict, output_dir
     from pycat.toolbox.image_processing_tools import pre_process_image
 
     data_instance = state['data_instance']
-    # Prefer recorded params; fall back to data_instance for legacy configs
-    ball_radius = int(params.get('ball_radius',
-                      _get_data(data_instance, 'ball_radius', 50)))
+    # ball_radius: when this batch has per-image auto-estimation active, the
+    # LIVE data_instance value must win over the recorded params snapshot — it
+    # was captured once, on whichever image was active during the original GUI
+    # recording, and replaying it unchanged for every file would silently
+    # discard the per-image estimate replay_open_image/_finalize_ball_radius
+    # (and its subsequent replay_upscaling doubling) just computed for THIS
+    # file — the exact reason a recorded ball_radius isn't allowed to win over
+    # the estimate anywhere else in the batch pipeline (see
+    # BatchWorker._auto_ball_radius_active, replay_measure_line). Outside
+    # auto-estimation, prefer the recorded params as before (legacy configs
+    # fall back to data_instance).
+    if state.get('_auto_ball_radius'):
+        ball_radius = int(_get_data(data_instance, 'ball_radius', 50))
+    else:
+        ball_radius = int(params.get('ball_radius',
+                          _get_data(data_instance, 'ball_radius', 50)))
     window_size = int(params.get('window_size',
                       _get_data(data_instance, 'cell_diameter', 100) // 2))
 
@@ -129,6 +142,20 @@ def replay_upscaling(state: dict, image_path: Path, params: dict, output_dir: Pa
     in the GUI, doubling resolution (capped at 2048x2048). Updates both the
     raw image and preprocessed image in state, and the relevant data_instance
     fields, mirroring what the GUI does for every selected layer.
+
+    Does NOT reproduce run_upscaling_func's dtype/range "correction" (clip or
+    rescale toward [0, 1] / [0, 65535]) -- that logic is calibrated for the
+    GUI's load-time convention (the interactive 2-D loader divides every pixel
+    by the dtype max, so `run_upscaling_func` sees e.g. 4000 counts as ~0.06 and
+    its `> 1.0` check never fires on a real image). Batch's `_load_image` keeps
+    RAW counts (needed elsewhere -- see `_proc`'s "BATCH MUST PASS RAW COUNTS"
+    comment below), so at THIS scale the identical `> 1.0` check would always
+    fire and hard-clip every pixel above 1 count to 1.0, destroying the image.
+    Applying GUI code to data at a different absolute scale doesn't reproduce
+    GUI behaviour, it breaks batch -- confirmed: Cellpose count and cell_analysis
+    both broke the one time this was tried. Since the GUI's correction is a
+    no-op for any non-saturated real image, a plain floor-at-zero already
+    matches the GUI's real-world numbers.
     """
     from pycat.toolbox.image_processing_tools import upscale_image_interp
 
