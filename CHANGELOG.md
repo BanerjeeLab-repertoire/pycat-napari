@@ -1,3 +1,39 @@
+## [1.6.458] - 2026-08-06
+### Fixed — **Batch replay parity with the GUI: intensity scale, auto ball-radius, subcellular puncta gating, and large-condensate rim recovery.**
+A week of debugging traced several batch-vs-GUI discrepancies and a persistent hollow/broken-rim segmentation bug in
+subcellular condensate detection, each isolated and fixed independently rather than patched over.
+
+- **Batch intensity scale bugs** (`batch/steps/_common.py`) — batch-loaded images were off from the GUI's by up to
+  65535x (raw-counts vs dtype-normalized loading) and, separately, by an exact 2x factor from signed/unsigned int16
+  dtype interpretation differing between readers. Both fixed at the load boundary so `cell_df`/`puncta_df` intensity
+  measurements now match the interactive session bit-for-bit.
+- **Automatic ball-radius estimation for batch** (`batch/steps/{analysis,io,preprocessing}_steps.py`,
+  `batch_processor.py`, `batch_step_registry.py`, `image_processing/size_estimation.py`) — the auto-estimation gate
+  was silently always off; fixed to match the GUI's exact Measure Line formula (`ceil(1.5*object_size/2)`), scoped to
+  only the cellular pipeline (not in-vitro fluorescence), corrected to read the right channel, and stopped a stale
+  recorded value from overriding the live per-image estimate in later steps.
+- **Subcellular punctate gate** (`toolbox/segmentation/subcellular.py`, `batch/steps/analysis_steps.py`) —
+  `punctate_gate`/`punctate_gate_sigma`/`punctate_gate_abs_sigma` weren't threaded through batch replay, silently
+  dropping cells with real-but-weak raw signal with no visible knob to loosen; the "0 objects" warning also pointed
+  at per-object thresholds that never ran for a cell this whole-cell gate had already skipped. Both fixed.
+- **Puncta ring-mask background contamination** (`toolbox/segmentation/puncta_refinement.py`) — a punctum's
+  local-background ring could be contaminated by a neighboring punctum's own pixels in a dense field (past the ~50%
+  a robust median can resist); neighbors are now excluded outright, growing the ring outward (capped at 4x) if that
+  leaves too little clean background to measure.
+- **Large-condensate rim bridging** (`toolbox/segmentation/fz.py`) — `_bridge_fragmented_rims` reconnects a large
+  condensate's rim when upstream enhancement fragments it into disconnected arcs (a "necklace" instead of one solid
+  ring), verified by area-recovery so a cluster of genuinely separate small puncta is never wrongly glued into one
+  object. Extended with a raw-image-verified path for the case where a condensate splits into a small number of
+  SOLID pieces with no enclosed hole between them.
+- **Scale bar calibration** (`file_io/file_io.py`) — a single-TIFF (non-stack) load with valid resolution metadata
+  kept showing a pixel scale bar; the 2-D load path now pushes the same real µm/px calibration onto the napari layer
+  the stack loader already did.
+- Batch pipeline debugging across the cellular and in-vitro fluorescence workflows (`batch/steps/_common.py`,
+  `io_steps.py`, `preprocessing_steps.py`, `batch_processor.py`, `batch_step_registry.py`, `ui/menu_manager.py`).
+
+Extensive characterization/regression testing throughout (batch-vs-GUI parity checks, synthetic rim-fragmentation
+and puncta-density scenarios); pre-existing, unrelated `qtbot`-fixture and Python 3.9 f-string failures unaffected.
+
 ## [1.6.457] - 2026-07-30
 ### Added — **Kernel mask/label family: the first ops that consume a mask/label, not raw intensity (Spec 6).**
 The execution kernel (`OperationService.execute`) migrated 23 ops across enhance / segment / measure — but every
