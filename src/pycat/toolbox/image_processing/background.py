@@ -22,6 +22,15 @@ from pycat.utils.notify import show_warning as napari_show_warning
 from pycat.toolbox.image_processing._base import _safe_equalize_adapthist, _add_image, _napari
 from pycat.toolbox.image_processing.filters import peak_and_edge_enhancement_func
 
+# Sentinel distinguishing "caller didn't pass a precomputed split" (derive it
+# from `image` as usual) from "caller explicitly passed a split" (even None,
+# meaning "already decided this image isn't bimodal") -- see
+# run_scale_aware_cascade's `precomputed_split` docstring in cascade.py for why
+# this exists (this step reusing pre_process_image's split instead of
+# re-deriving a different, more-aggressive one from its own already-processed
+# input -- see soft_foreground_suppression's precomputed_bimodal_split docstring).
+_SPLIT_UNSET = object()
+
 
 @tags_layer('inpaint', role='preprocessed',
             summary='Biharmonic inpainting of a masked region')
@@ -291,10 +300,11 @@ def run_rb_gaussian_background_removal(eq_int_input, data_instance, viewer):
         pass
 
 
-def rb_gaussian_bg_removal_with_edge_enhancement(image, ball_radius, roi_mask=None):
+def rb_gaussian_bg_removal_with_edge_enhancement(image, ball_radius, roi_mask=None,
+                                                 cascade_large_small=False):
     """
     Applies background removal and edge enhancement to an image using a combination of processing techniques.
-    The method involves rolling ball and Gaussian background subtraction followed by edge enhancement 
+    The method involves rolling ball and Gaussian background subtraction followed by edge enhancement
     through Gabor filtering and adaptive histogram equalization to improve feature visibility, particularly
     useful in microscopic image analysis.
 
@@ -306,6 +316,15 @@ def rb_gaussian_bg_removal_with_edge_enhancement(image, ball_radius, roi_mask=No
         The radius of the rolling ball filter, used in the initial background removal step.
     roi_mask : numpy.ndarray, optional
         A binary mask defining the region of interest (ROI); processing is confined to this region if provided.
+    cascade_large_small : bool, optional
+        Default False (byte-for-byte the single-scale path below, unchanged).
+        If True, runs the same large/small cascade as ``pre_process_image``'s
+        ``cascade_large_small`` (see that docstring): a single ``ball_radius``
+        drives ``rb_gaussian_background_removal``'s rolling-ball estimate, which
+        is exactly as scale-sensitive as Step 1's LoG -- feeding it a
+        ball_radius sized to the small population under-models the background
+        beneath a large condensate, collapsing its center the same way. Not
+        bimodal -> falls through to this single-scale path unchanged.
 
     Returns
     -------
@@ -314,10 +333,27 @@ def rb_gaussian_bg_removal_with_edge_enhancement(image, ball_radius, roi_mask=No
 
     Note
     ----
-    The sequence of image processing steps integrates background subtraction with texture and edge enhancement 
+    The sequence of image processing steps integrates background subtraction with texture and edge enhancement
     to enhance microscopic images or similar detailed visual data.
     """
-    
+    if cascade_large_small:
+        from pycat.toolbox.image_processing.cascade import run_scale_aware_cascade
+
+        def _single_pass(im, br, small_pass=False):
+            # This path has no foreground-suppression noise gate to tighten
+            # (rolling-ball + Gabor edge enhancement, not LoG-blob-based) --
+            # small_pass is accepted for a uniform calling convention and
+            # otherwise ignored. See tighten_noise_gates for the pass that does.
+            return _rb_gaussian_bg_removal_with_edge_enhancement_single_pass(im, br, roi_mask=roi_mask)
+
+        return run_scale_aware_cascade(image, ball_radius, _single_pass,
+                                       log_label='background removal cascade')
+    return _rb_gaussian_bg_removal_with_edge_enhancement_single_pass(image, ball_radius, roi_mask=roi_mask)
+
+
+def _rb_gaussian_bg_removal_with_edge_enhancement_single_pass(image, ball_radius, roi_mask=None):
+    """The single-scale body -- exactly ``rb_gaussian_bg_removal_with_edge_enhancement``'s
+    implementation before the cascade option was added (1.6.460)."""
     input_dtype = str(image.dtype) # Store the input image's data type for later conversion back
     img = dtype_conversion_func(image, 'float32') # Convert the image data type to float32 for processing
 
@@ -498,7 +534,9 @@ def _realness_weight(pp, ball_radius, log_p=10.0, con_p=4.0, min_area=3,
             summary='Soft attenuation of bright foreground')
 def soft_foreground_suppression(image, ball_radius, strength=None,
                                 log_p=None, con_p=None, min_area=None,
-                                border_grow=None, large_object_min_area=None):
+                                border_grow=None, large_object_min_area=None,
+                                cascade_large_small=False,
+                                precomputed_bimodal_split=_SPLIT_UNSET):
     """
     Refine a preprocessed condensate image by attenuating noise-like foreground
     (diffuse texture and single-pixel fluctuations) while preserving the
@@ -540,6 +578,32 @@ def soft_foreground_suppression(image, ball_radius, strength=None,
         regardless of local peakiness, rescuing large condensates that the
         puncta-scale gates would otherwise dim or erase. Defaults to
         ``FOREGROUND_SUPPRESSION_DEFAULTS['large_object_min_area']``.
+    cascade_large_small : bool, optional
+        Default False (byte-for-byte the single-scale path below, unchanged).
+        If True, runs the same large/small cascade as ``pre_process_image``'s
+        ``cascade_large_small`` (see that docstring). ``_realness_weight``'s own
+        ``large_object_min_area`` gate already rescues a SOLID large-bright
+        region regardless of ball_radius, but it works on connected-component
+        AREA -- a large condensate that reaches this function still necklaced
+        (e.g. this step ran on a raw/never-cascaded image) is a set of thin,
+        individually-small rim fragments that never clears that area floor, so
+        the size rescue does not fire and the blob-shape/contrast gates dim it
+        same as noise. The cascade fixes the shape itself (filled, not
+        fragmented) before this function's own gates ever see it. Not bimodal
+        -> falls through to this single-scale path unchanged.
+    precomputed_bimodal_split : dict or None, optional
+        Reuse an ALREADY-COMPUTED bimodal split (e.g. ``pre_process_image``'s)
+        instead of deriving one from ``image`` here -- passed straight through
+        to ``run_scale_aware_cascade`` (see its ``precomputed_split`` docstring
+        in cascade.py). Left unset (the default), this call derives its own
+        split from ``image`` as before. This matters because this function's
+        usual input IS ``pre_process_image``'s output -- already through LoG
+        blob enhancement, which sharpens diffuse intensity peaks into tighter
+        blob responses, so re-estimating on it measures systematically
+        smaller/more-aggressive r_small/r_large than the split derived from
+        the original raw image (confirmed on real data: r_small=6 on the raw
+        image vs. r_small=3 re-derived here -- roughly half). Ignored if
+        ``cascade_large_small`` is False.
 
     Returns
     -------
@@ -548,6 +612,43 @@ def soft_foreground_suppression(image, ball_radius, strength=None,
         IQR of in-tissue pixels) is preserved; noise fluctuations are suppressed;
         real puncta are retained.
     """
+    if cascade_large_small:
+        from pycat.toolbox.image_processing.cascade import run_scale_aware_cascade, tighten_noise_gates
+
+        def _single_pass(im, br, small_pass=False):
+            p_log, p_con, p_area, p_strength = log_p, con_p, min_area, strength
+            if small_pass:
+                # The small pass's LoG is more sensitive to noise than the
+                # large pass's or a single compromise ball_radius's -- tighten
+                # this pass's own gates to compensate. See tighten_noise_gates.
+                base_log = FOREGROUND_SUPPRESSION_DEFAULTS['log_p'] if p_log is None else p_log
+                base_con = FOREGROUND_SUPPRESSION_DEFAULTS['con_p'] if p_con is None else p_con
+                base_area = FOREGROUND_SUPPRESSION_DEFAULTS['min_area'] if p_area is None else p_area
+                base_strength = FOREGROUND_SUPPRESSION_DEFAULTS['strength'] if p_strength is None else p_strength
+                p_log, p_con, p_area, p_strength = tighten_noise_gates(
+                    base_log, base_con, base_area, base_strength)
+            return _soft_foreground_suppression_single_pass(
+                im, br, strength=p_strength, log_p=p_log, con_p=p_con,
+                min_area=p_area, border_grow=border_grow,
+                large_object_min_area=large_object_min_area)
+
+        kwargs = {}
+        if precomputed_bimodal_split is not _SPLIT_UNSET:
+            kwargs['precomputed_split'] = precomputed_bimodal_split
+        return run_scale_aware_cascade(image, ball_radius, _single_pass,
+                                       log_label='soft foreground suppression cascade',
+                                       **kwargs)
+    return _soft_foreground_suppression_single_pass(
+        image, ball_radius, strength=strength, log_p=log_p, con_p=con_p,
+        min_area=min_area, border_grow=border_grow,
+        large_object_min_area=large_object_min_area)
+
+
+def _soft_foreground_suppression_single_pass(image, ball_radius, strength=None,
+                                             log_p=None, con_p=None, min_area=None,
+                                             border_grow=None, large_object_min_area=None):
+    """The single-scale body -- exactly ``soft_foreground_suppression``'s
+    implementation before the cascade option was added (1.6.460)."""
     # Resolve defaults (None -> tuned default) so callers can override any subset.
     if strength is None:
         strength = FOREGROUND_SUPPRESSION_DEFAULTS['strength']
@@ -624,6 +725,12 @@ def run_enhanced_rb_gaussian_bg_removal(data_instance, viewer):
     # Retrieve the active layer and the ball radius from the data instance
     active_layer = viewer.layers.selection.active
     ball_radius = math.ceil(data_instance.data_repository['ball_radius'])
+    # Same key/checkbox as Step 1 (pre_process_image) -- one "Cascade large/small
+    # preprocessing" checkbox governs both halves of the "Pre-process Image"
+    # button's one-click pipeline. See pre_process_image's cascade_large_small
+    # docstring; rb_gaussian_bg_removal_with_edge_enhancement's and
+    # soft_foreground_suppression's docstrings for why Step 2 needs it too.
+    cascade_large_small = data_instance.data_repository.get('cascade_large_small', False)
 
     # Validate the active layer
     if active_layer is None or not isinstance(active_layer, _napari().layers.Image):
@@ -654,14 +761,28 @@ def run_enhanced_rb_gaussian_bg_removal(data_instance, viewer):
         # freshly-preprocessed layer this button is largely redundant; running it
         # with the same params is near-idempotent rather than double-destructive.)
         sp = data_instance.data_repository.get('foreground_suppression_params', None) or {}
+        # Reuse Step 1's (pre_process_image's) large/small split if it stored
+        # one -- this layer IS pre_process_image's output, so re-deriving a
+        # split here would measure the LoG-sharpened version of the same
+        # objects and come back smaller/more-aggressive (see
+        # soft_foreground_suppression's precomputed_bimodal_split docstring).
+        # Absent (e.g. this step run standalone on a layer Step 1 never
+        # touched) -> _SPLIT_UNSET, so soft_foreground_suppression derives its
+        # own split from `image` exactly as before.
+        split_kwargs = {}
+        if cascade_large_small and 'cascade_bimodal_split' in data_instance.data_repository:
+            split_kwargs['precomputed_bimodal_split'] = data_instance.data_repository['cascade_bimodal_split']
         enhanced_image = soft_foreground_suppression(
             image, ball_radius,
             strength=sp.get('strength'), log_p=sp.get('log_p'),
             con_p=sp.get('con_p'), min_area=sp.get('min_area'),
-            border_grow=sp.get('border_grow'))
+            border_grow=sp.get('border_grow'),
+            cascade_large_small=cascade_large_small,
+            **split_kwargs)
     else:
         # Genuinely raw input: retain the original enhancement behaviour.
-        enhanced_image = rb_gaussian_bg_removal_with_edge_enhancement(image, ball_radius)
+        enhanced_image = rb_gaussian_bg_removal_with_edge_enhancement(
+            image, ball_radius, cascade_large_small=cascade_large_small)
 
     # Add the processed image as a new layer with an indicative name
     _add_image(enhanced_image, viewer, name=f'Enhanced Background Removed {active_layer.name}')

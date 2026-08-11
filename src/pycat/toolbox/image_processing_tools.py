@@ -217,5 +217,6 @@ from pycat.toolbox.image_processing.preprocessing import (  # noqa: E402,F401
 # Automatic object-size estimation (top-hat/Otsu + brightfield variant) + validity gate  ->  moved to size_estimation.py (1.6.248)
 # ---------------------------------------------------------------------------
 from pycat.toolbox.image_processing.size_estimation import (  # noqa: E402,F401
-    AUTO_OBJECT_SIZE_VALID_WORKFLOWS, auto_object_size_valid, estimate_object_size_px, estimate_object_size_px_brightfield)
+    AUTO_OBJECT_SIZE_VALID_WORKFLOWS, auto_object_size_valid, estimate_object_size_px,
+    estimate_object_size_px_brightfield, estimate_bimodal_object_sizes)
 

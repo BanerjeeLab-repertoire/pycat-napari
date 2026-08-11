@@ -163,6 +163,11 @@ def replay_background_removal(state: dict, image_path: Path, params: dict, outpu
         ball_radius = math.ceil(int(params.get('ball_radius',
                                     _get_data(data_instance, 'ball_radius', 50))))
     sp = params.get('foreground_suppression_params', None) or {}
+    # Same key as replay_preprocessing -- one recorded value covers both halves
+    # of the GUI's one-click "Pre-process Image" button (preprocessing +
+    # background_removal both read 'cascade_large_small').
+    cascade_large_small = bool(params.get('cascade_large_small',
+                               _get_data(data_instance, 'cascade_large_small', False)))
 
     active_name = str(params.get('active_layer')  # see _active_layer_channel_role
                       or params.get('active_image_layer') or '').lower()
@@ -195,12 +200,25 @@ def replay_background_removal(state: dict, image_path: Path, params: dict, outpu
         nz = n[n > 0.001]
         already = (nz.size > 10 and float(np.median(nz)) < 0.05)
         if already:
+            # Reuse replay_preprocessing's split if it stored one -- this
+            # image IS that step's output, so re-deriving a split here would
+            # measure the LoG-sharpened version of the same objects and come
+            # back smaller/more-aggressive (see soft_foreground_suppression's
+            # precomputed_bimodal_split docstring). Absent (e.g. background
+            # removal replayed without a preceding preprocessing step) ->
+            # falls through to soft_foreground_suppression deriving its own.
+            _split_kwargs = {}
+            if cascade_large_small and 'cascade_bimodal_split' in data_instance.data_repository:
+                _split_kwargs['precomputed_bimodal_split'] = data_instance.data_repository['cascade_bimodal_split']
             return soft_foreground_suppression(
                 img, ball_radius,
                 strength=sp.get('strength'), log_p=sp.get('log_p'),
                 con_p=sp.get('con_p'), min_area=sp.get('min_area'),
-                border_grow=sp.get('border_grow')).astype(np.float32)
-        return rb_gaussian_bg_removal_with_edge_enhancement(img, ball_radius).astype(np.float32)
+                border_grow=sp.get('border_grow'),
+                cascade_large_small=cascade_large_small,
+                **_split_kwargs).astype(np.float32)
+        return rb_gaussian_bg_removal_with_edge_enhancement(
+            img, ball_radius, cascade_large_small=cascade_large_small).astype(np.float32)
 
     if on_fluor:
         fluor_proc = state.get('preprocessed_fluorescence',

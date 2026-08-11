@@ -49,6 +49,11 @@ def replay_preprocessing(state: dict, image_path: Path, params: dict, output_dir
     # interactive default behaviour.
     suppress_foreground = bool(params.get('suppress_foreground', True))
     suppression_params = params.get('foreground_suppression_params', None)
+    # Scale-aware large/small cascade (see pre_process_image's cascade_large_small
+    # docstring). Legacy configs (no key recorded) default to False -- unchanged
+    # single-pass behavior, matching the interactive default.
+    cascade_large_small = bool(params.get('cascade_large_small',
+                               _get_data(data_instance, 'cascade_large_small', False)))
 
     # Which layer was active when preprocessing was clicked? Keyword match for generic-
     # named configs, or a channels_by_name match for split-file / sample-identity-named
@@ -74,6 +79,24 @@ def replay_preprocessing(state: dict, image_path: Path, params: dict, output_dir
         _max_radius = max(4, int(min(np.asarray(arr).shape[-2:]) * 0.05))
         _br = min(ball_radius, _max_radius)
         _ws = min(window_size, _max_radius * 2)
+
+        # In cascade mode, compute the large/small split ONCE here, from the
+        # raw input, and store it so replay_background_removal can reuse it
+        # instead of re-deriving a more-aggressive one from THIS step's
+        # LoG-enhanced output -- mirrors run_pre_process_image's GUI-side fix
+        # (see its 'cascade_bimodal_split' comment in preprocessing.py).
+        _bimodal_split = None
+        _split_kwargs = {}
+        if cascade_large_small:
+            try:
+                from pycat.toolbox.image_processing.size_estimation import estimate_bimodal_object_sizes
+                _bimodal_split = estimate_bimodal_object_sizes(_raw_counts(arr))
+            except Exception as e:  # broad-ok: optional_probe -- fall back to pre_process_image's own estimate
+                print(f"[PyCAT Batch]   bimodal split precompute failed ({e}); "
+                      f"pre_process_image will derive its own.")
+                _bimodal_split = None
+            data_instance.data_repository['cascade_bimodal_split'] = _bimodal_split
+            _split_kwargs['precomputed_bimodal_split'] = _bimodal_split
         # ── BATCH MUST PASS RAW COUNTS. It was pre-normalising, and that is the bug. ──
         #
         # **Gable's report: batch segments the same image differently from the recording.**
@@ -105,7 +128,9 @@ def replay_preprocessing(state: dict, image_path: Path, params: dict, output_dir
         return np.asarray(pre_process_image(
             _raw_counts(arr), _br, _ws,
             suppress_foreground=suppress_foreground,
-            suppression_params=suppression_params)).astype(np.float32)
+            suppression_params=suppression_params,
+            cascade_large_small=cascade_large_small,
+            **_split_kwargs)).astype(np.float32)
 
     if on_fluor:
         fluor = state.get('fluorescence_image', state['image'])
