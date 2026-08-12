@@ -1,11 +1,16 @@
 """Automatic object-size estimation - split out of image_processing_tools (1.6.248).
 
-estimate_object_size_px is the headless/batch top-hat + Otsu estimator (median equivalent diameter ->
+estimate_object_size_px is the headless/batch top-hat + multi-Otsu estimator (median equivalent diameter ->
 ball_radius) that feeds downstream segmentation; auto_object_size_valid + AUTO_OBJECT_SIZE_VALID_WORKFLOWS
 gate WHICH workflows it is valid for; estimate_object_size_px_brightfield is the experimental edge-based
-variant. Moved VERBATIM - no threshold or measurement change; pinned BEFORE the move by
-test_image_processing_size_characterization (exact object_size_px / ball_radius / n_objects on a fixed
-synthetic scene). Self-contained science, no napari/Qt.
+variant. Originally moved VERBATIM (pinned BEFORE the move by test_image_processing_size_characterization);
+the threshold step was later switched from plain 2-class Otsu to 3-class multi-Otsu (keep-brightest-class)
+after Meet Raval confirmed on real low-contrast nuclear-condensate data that plain Otsu fuses dim background
+texture with real puncta into oversized blobs where multi-Otsu correctly isolates the individual objects --
+see estimate_object_size_px's WHY MULTI-OTSU docstring section. Every existing characterization pin (the
+clean 7-disk scene, its brightfield variant, and the 2048x2048 genuinely-bimodal scene) still passes
+UNCHANGED under multi-Otsu -- the two methods agree exactly wherever there's no ambiguous middle-brightness
+class to split off, i.e. every scene this suite covers so far. Self-contained science, no napari/Qt.
 """
 from __future__ import annotations
 
@@ -45,7 +50,8 @@ def estimate_object_size_px(image, workflow=None, min_area_px=4,
 
     Pipeline (Meet Raval's validated approach):
       1. White top-hat to isolate small bright objects from background.
-      2. Otsu threshold on the top-hat response → foreground objects.
+      2. Multi-Otsu (3-class) threshold on the top-hat response, KEEPING ONLY
+         THE BRIGHTEST CLASS → foreground objects.
       3. Label; keep objects >= min_area_px.
       4. object_size = median equivalent diameter over kept objects.
       5. ball_radius = ceil(1.5 * (object_size / 2)) (native px), clamped >= 1
@@ -64,9 +70,38 @@ def estimate_object_size_px(image, workflow=None, min_area_px=4,
     not in AUTO_OBJECT_SIZE_VALID_WORKFLOWS, this raises ValueError — the caller
     must not apply it to brightfield / time-series / z-stack data.
 
-    # TODO(optimize-on-real-data): the top-hat radius, Otsu vs multi-Otsu choice,
-    # and min_area cutoff are first-pass defaults. Validate/tune against a real
-    # cellular- and in-vitro-fluorescence batch (see Meet's STEP 2 diagnostic).
+    WHY MULTI-OTSU, NOT PLAIN 2-CLASS OTSU: on a high-SNR image the top-hat
+    response is genuinely bimodal — background collapses to ~0, real puncta
+    pop out as sharp peaks — and plain 2-class Otsu finds that valley cleanly.
+    On a low-contrast image with small features, the SAME top-hat response
+    instead has a widespread band of dim mid-brightness texture between
+    background and the real puncta, with NO clean valley. 2-class Otsu still
+    forces a single global cut (it minimizes intra-class variance regardless
+    of whether a valley exists), and lands well below the real-punctum floor —
+    admitting most of that texture, which is spatially contiguous and so
+    fuses with real objects into a handful of giant blobs instead of the
+    individual puncta the top-hat clearly resolved (reported by Meet Raval on
+    real nuclear-condensate data: the resulting mask was large amoeba-shaped
+    multi-object blobs, not discrete puncta). This corrupted more than the
+    visual mask -- a fused blob's equivalent diameter is a huge outlier, so it
+    skewed object_size_px's median directly and, worse, could land in
+    ``estimate_bimodal_object_sizes``'s top-decile bucket and contaminate
+    r_large with spurious fused-texture mass rather than a real large
+    condensate. 3-class Otsu, keeping only the brightest class, discards that
+    middle "ambiguous texture" class instead of forcing one hard 2-class
+    boundary through it -- confirmed by Meet on real low-contrast data to
+    recover the individual puncta the top-hat already resolved, where 2-class
+    Otsu produced fused blobs. On the clean/high-SNR case the two methods
+    agree exactly (the top class IS the whole foreground population when
+    there's no middle texture class to split off), so this is not a
+    trade-off against the already-working case. Falls back to plain 2-class
+    Otsu only if there aren't enough distinct top-hat values to support 3
+    classes (a robustness net for a degenerate/near-empty top-hat response,
+    not a user-facing choice).
+
+    # TODO(optimize-on-real-data): the top-hat radius and min_area cutoff are
+    # still first-pass defaults. Validate/tune against a real cellular- and
+    # in-vitro-fluorescence batch (see Meet's STEP 2 diagnostic).
 
     Parameters
     ----------
@@ -95,7 +130,7 @@ def estimate_object_size_px(image, workflow=None, min_area_px=4,
         # Reduce to 2D defensively (take max projection over leading axes).
         arr = np.max(arr, axis=tuple(range(arr.ndim - 2)))
 
-    # Normalise to [0, 1] for a stable Otsu.
+    # Normalise to [0, 1] for a stable threshold.
     mn, mx = float(arr.min()), float(arr.max())
     norm = (arr - mn) / (mx - mn) if mx > mn else np.zeros_like(arr)
 
@@ -110,9 +145,18 @@ def estimate_object_size_px(image, workflow=None, min_area_px=4,
                 else {**result, 'diagnostics': {'tophat': tophat}})
 
     try:
-        thr = sk.filters.threshold_otsu(tophat[tophat > 0])
-    except Exception:
-        thr = sk.filters.threshold_otsu(tophat)
+        positive = tophat[tophat > 0]
+        if positive.size < 10:
+            raise ValueError('too few positive top-hat pixels for multi-Otsu')
+        # 3 classes: background / ambiguous texture / real objects -- keep
+        # only the brightest class, discarding the middle one instead of
+        # forcing a single 2-class cut through it (see WHY MULTI-OTSU above).
+        thr = sk.filters.threshold_multiotsu(positive, classes=3)[-1]
+    except Exception:  # broad-ok: robustness_net -- too few/uniform values for 3 classes
+        try:
+            thr = sk.filters.threshold_otsu(tophat[tophat > 0])
+        except Exception:
+            thr = sk.filters.threshold_otsu(tophat)
     fg = tophat > thr
 
     labels = sk.measure.label(fg)

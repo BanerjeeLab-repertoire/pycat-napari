@@ -275,21 +275,41 @@ def _pre_process_cascade(image, ball_radius, window_size,
 # ON, so over-detection / bogus-r_large questions can be answered by looking
 # directly at what the estimator counts as an object. A SINGLE native-
 # resolution pass (the two-pass downsampled-probe design was retired -- see
-# estimate_bimodal_object_sizes's docstring for why), so one threshold layer.
+# estimate_bimodal_object_sizes's docstring for why), so one top-hat layer
+# and one threshold layer. The threshold step is multi-Otsu (keep-brightest-
+# class) -- see estimate_object_size_px's WHY MULTI-OTSU docstring section
+# for why plain 2-class Otsu was replaced: on low-contrast data it fused
+# background texture with real puncta into oversized blobs.
 # Meet has asked for this before and had it removed; keep it easy to delete
 # again (single function, single call site below).
 def _debug_add_size_estimator_threshold_layer(image, viewer, source_name):
-    """Add a Labels layer showing the top-hat + Otsu foreground mask
-    (estimate_object_size_px, native resolution -- the only pass
-    estimate_bimodal_object_sizes now uses internally), plus the resulting
-    mean-of-halves split. Best-effort: never raises, never blocks the real
-    pre-processing pipeline."""
+    """Add the two intermediate images ``estimate_object_size_px`` actually
+    measures on (native resolution -- the only pass ``estimate_bimodal_
+    object_sizes`` now uses internally), plus the resulting mean-of-halves
+    split, so over-detection / bogus-r_large questions can be answered by
+    looking directly at what the estimator saw:
+
+    - an Image layer of the white-top-hat response (what gets thresholded --
+      tagged ``operation='white_tophat'`` so intensity-semantics knows this
+      layer's values are not the raw sample).
+    - a Labels layer of the multi-Otsu-thresholded foreground, already
+      connected-component labelled (so individual objects, not just one
+      blob, are visible -- this is what ``regionprops`` measures diameters
+      from).
+
+    Best-effort: never raises, never blocks the real pre-processing
+    pipeline."""
     try:
         from pycat.toolbox.image_processing.size_estimation import (
             estimate_object_size_px, estimate_bimodal_object_sizes)
 
         est = estimate_object_size_px(image, return_diagnostics=True)
-        fg = (est.get('diagnostics') or {}).get('fg')
+        diagnostics = est.get('diagnostics') or {}
+        tophat = diagnostics.get('tophat')
+        if tophat is not None:
+            _add_image(tophat, viewer, name=f"Size-Estimator Top-Hat {source_name}",
+                      operation='white_tophat')
+        fg = diagnostics.get('fg')
         if fg is not None:
             viewer.add_labels(sk.measure.label(fg),
                               name=f"Size-Estimator Threshold {source_name}")
@@ -418,12 +438,12 @@ def run_pre_process_image(data_instance, viewer):
     # only in cascade mode, since that's the path using the bimodality router.
     if cascade_large_small:
         _debug_add_size_estimator_threshold_layer(image, viewer, active_layer.name)
-        # viewer.add_labels() auto-selects the new Labels layer as active,
-        # stealing the selection away from _pre_layer (the same class of bug
-        # fixed once before for _add_image's own auto-select behaviour) --
-        # every downstream step (e.g. Enhanced Background Removal) expects
-        # the ACTIVE layer to be the pre-processed IMAGE, not this debug
-        # Labels layer, so restore it.
+        # Both add_image and viewer.add_labels() auto-select the newly-added
+        # layer as active, stealing the selection away from _pre_layer (the
+        # same class of bug fixed once before for _add_image's own auto-
+        # select behaviour) -- every downstream step (e.g. Enhanced
+        # Background Removal) expects the ACTIVE layer to be the pre-
+        # processed IMAGE, not one of these debug layers, so restore it.
         viewer.layers.selection.active = _pre_layer
 
 

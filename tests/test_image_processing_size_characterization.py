@@ -1,10 +1,17 @@
 """**Characterization pins for the object-size estimators — written BEFORE they move.**
 
-`estimate_object_size_px` (top-hat + Otsu → median equivalent diameter → ball_radius) feeds the batch
-auto-object-size path that drives downstream segmentation, so a silent change propagates. Its coverage is
-thin, so — per the image_processing decomposition discipline (**no characterization test, no move**) — this
-pins its exact output on a fixed synthetic scene before `size_estimation.py` is split out. The brightfield
-variant and the workflow-validity gate are pinned alongside.
+`estimate_object_size_px` (top-hat + multi-Otsu, keep-brightest-class → median equivalent diameter →
+ball_radius) feeds the batch auto-object-size path that drives downstream segmentation, so a silent change
+propagates. Its coverage is thin, so — per the image_processing decomposition discipline (**no
+characterization test, no move**) — this pins its exact output on a fixed synthetic scene before
+`size_estimation.py` is split out. The brightfield variant and the workflow-validity gate are pinned
+alongside.
+
+The threshold step was originally plain 2-class Otsu, later switched to 3-class multi-Otsu (see
+`estimate_object_size_px`'s WHY MULTI-OTSU docstring section) after it was confirmed on real low-contrast
+data to fuse background texture with real puncta where multi-Otsu correctly separates them. Every pin below
+is unchanged by that switch — the two methods agree exactly wherever there's no ambiguous middle-brightness
+class to split off, which is true of every scene here.
 
 The scene is deterministic and headless: seven bright radius-4 disks on a flat noisy background.
 
