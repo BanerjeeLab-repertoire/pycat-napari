@@ -166,11 +166,6 @@ def replay_background_removal(state: dict, image_path: Path, params: dict, outpu
     else:
         ball_radius = math.ceil(int(params.get('ball_radius',
                                     _get_data(data_instance, 'ball_radius', 50))))
-    # Same key as replay_preprocessing -- one recorded value covers both halves
-    # of the GUI's one-click "Pre-process Image" button (preprocessing +
-    # background_removal both read 'cascade_large_small').
-    cascade_large_small = bool(params.get('cascade_large_small',
-                               _get_data(data_instance, 'cascade_large_small', False)))
 
     active_name = str(params.get('active_layer')  # see _active_layer_channel_role
                       or params.get('active_image_layer') or '').lower()
@@ -180,8 +175,7 @@ def replay_background_removal(state: dict, image_path: Path, params: dict, outpu
         # Raw counts, matching what the GUI hands active_layer.data as -- see
         # replay_preprocessing for why batch must not pre-normalise here.
         img = _raw_counts(img)
-        return rb_gaussian_bg_removal_with_edge_enhancement(
-            img, ball_radius, cascade_large_small=cascade_large_small).astype(np.float32)
+        return rb_gaussian_bg_removal_with_edge_enhancement(img, ball_radius).astype(np.float32)
 
     if on_fluor:
         fluor_proc = state.get('preprocessed_fluorescence',

@@ -8,9 +8,9 @@ the threshold step was later switched from plain 2-class Otsu to 3-class multi-O
 after Meet Raval confirmed on real low-contrast nuclear-condensate data that plain Otsu fuses dim background
 texture with real puncta into oversized blobs where multi-Otsu correctly isolates the individual objects --
 see estimate_object_size_px's WHY MULTI-OTSU docstring section. Every existing characterization pin (the
-clean 7-disk scene, its brightfield variant, and the 2048x2048 genuinely-bimodal scene) still passes
-UNCHANGED under multi-Otsu -- the two methods agree exactly wherever there's no ambiguous middle-brightness
-class to split off, i.e. every scene this suite covers so far. Self-contained science, no napari/Qt.
+clean 7-disk scene and its brightfield variant) still passes UNCHANGED under multi-Otsu -- the two methods
+agree exactly wherever there's no ambiguous middle-brightness class to split off, i.e. every scene this
+suite covers so far. Self-contained science, no napari/Qt.
 """
 from __future__ import annotations
 
@@ -84,10 +84,7 @@ def estimate_object_size_px(image, workflow=None, min_area_px=4,
     real nuclear-condensate data: the resulting mask was large amoeba-shaped
     multi-object blobs, not discrete puncta). This corrupted more than the
     visual mask -- a fused blob's equivalent diameter is a huge outlier, so it
-    skewed object_size_px's median directly and, worse, could land in
-    ``estimate_bimodal_object_sizes``'s top-decile bucket and contaminate
-    r_large with spurious fused-texture mass rather than a real large
-    condensate. 3-class Otsu, keeping only the brightest class, discards that
+    skewed object_size_px's median directly. 3-class Otsu, keeping only the brightest class, discards that
     middle "ambiguous texture" class instead of forcing one hard 2-class
     boundary through it -- confirmed by Meet on real low-contrast data to
     recover the individual puncta the top-hat already resolved, where 2-class
@@ -180,148 +177,6 @@ def estimate_object_size_px(image, workflow=None, min_area_px=4,
               'n_objects': int(diams.size)}
     if return_diagnostics:
         result['diagnostics'] = {'tophat': tophat, 'fg': fg, 'diameters': diams}
-    return result
-
-
-def estimate_bimodal_object_sizes(image, workflow=None, min_area_px=4,
-                                  min_objects_per_cluster=3,
-                                  return_diagnostics=False):
-    """Large/small size ROUTER for the preprocessing cascade
-    (``pre_process_image``'s ``cascade_large_small=True`` path).
-
-    ONE call to ``estimate_object_size_px``, at native resolution with its
-    default (small) ``tophat_radius`` -- not a second, separately-scaled
-    probe. This replaces an earlier two-pass design (a second call at a
-    deliberately large ``tophat_radius``, on a DOWNSAMPLED copy of the image
-    so the big structuring element stayed affordable) that was retired after
-    real-world testing: dense puncta populations, under that pass's
-    decimation, produced a smooth CONTINUUM of apparent object sizes from
-    progressive merging (nearby puncta blending together at coarse
-    resolution) rather than two discrete populations -- confirmed on real
-    data reporting r_large=90 from a raw diameter histogram that climbed
-    smoothly from 7.9 to 198.4px with no gap anywhere to split at, and
-    reproduced synthetically with a dense puncta population confined to
-    nucleus-sized clusters.
-
-    Why a single native-resolution pass can work at all: white top-hat's
-    blind spot is objects LARGER than its structuring element (the opening
-    reconstructs them almost exactly, so their top-hat response is near
-    zero -- see ``estimate_object_size_px``), not "small" as an absolute
-    label. The default ``tophat_radius`` is ``clip(min(image_dims)//50, 3,
-    25)`` -- for a realistically large image that caps at 25, which stays
-    visible to objects up to roughly 50px diameter. Real condensate images
-    where the "large" population isn't dramatically bigger than the small
-    one (confirmed on real data: small_scale=25px) can have BOTH populations
-    within reach of one call, with no downsampling and therefore no
-    decimation-driven merging at all.
-
-    NOT a bimodality test. Earlier versions tried to first PROVE the image
-    genuinely has two separate populations (Otsu-vs-bootstrap-null
-    significance testing, then a GMM-based version of the same idea) before
-    deriving r_small/r_large from the resulting split. Both were retired:
-    every statistically rigorous version, when pointed at a real image with
-    a visually-obvious handful of larger condensates among many smaller
-    ones, found that tail statistically indistinguishable from the natural
-    upper tail of one continuous (right-skewed / lognormal-shaped)
-    population -- correctly, by the standards of that test, but useless in
-    practice, since it meant a real second population went undetected and
-    the necklace-hollowing failure this whole cascade feature exists to
-    prevent went unfixed.
-
-    This version doesn't try to decide whether the image IS bimodal at all.
-    It sorts the diameters, and unconditionally takes the MEAN of the lower
-    half as the "small" scale. If the image only has one real population,
-    this stays close to the population's overall mean (a mild, low-risk
-    scale); if there's a genuine wide spread or a real second population, it
-    tracks the small end specifically. This deliberately always produces a
-    two-scale cascade (given enough objects) rather than gating on
-    statistical significance -- the trade-off, made explicitly here rather
-    than left implicit, is recall over precision: no image is treated as a
-    single clean population anymore, in exchange for never missing a real
-    one.
-
-    r_large is derived differently: the MEAN diameter of only the objects
-    ABOVE the 90th percentile of the full diameter distribution (the same
-    ball_radius formula is then applied to that mean, exactly as for
-    r_small -- see ``estimate_object_size_px``). Earlier versions derived
-    r_large from the mean (then mean+0.5*std) of the upper HALF of the
-    sorted diameters, but the upper half is mostly mid-sized objects --
-    averaging over it dilutes r_large toward the population's overall scale
-    rather than the genuinely large tail, and a ball_radius sized to that
-    diluted average still undersizes the largest condensates: top-hat with a
-    too-small structuring element hollows a large condensate into a
-    "necklace" (bright rim, dim or empty core) instead of a filled disk --
-    observed on real data at the mean-of-upper-half r_large, and still
-    observed at mean-of-upper-half+0.5*std. Restricting the mean to the top
-    decile targets the actual large-object subpopulation directly instead of
-    trying to nudge a blended average toward it.
-
-    Returns ``None`` when there are too few objects to trust a split (either
-    half has fewer than ``min_objects_per_cluster`` objects), or the
-    resulting r_large does not exceed r_small (a degenerate case, e.g. every
-    detected object is nearly identical in size) -- the caller should fall
-    back to the existing single-pass preprocessing unchanged.
-
-    Returns ``{'r_large', 'r_small', 'n_large', 'n_small'}`` otherwise: the
-    standard ball_radius formula (see ``estimate_object_size_px``) applied
-    to r_small's lower-half mean diameter and r_large's above-90th-percentile
-    mean diameter.
-
-    Parameters
-    ----------
-    image : 2D array (a single fluorescence frame/channel).
-    workflow : optional workflow id for the validity guard (see
-        ``auto_object_size_valid``).
-    min_area_px : passed through to ``estimate_object_size_px``.
-    min_objects_per_cluster : the lower half (r_small) and the above-90th-
-        percentile tail (r_large) must each have at least this many objects,
-        or the split is not trusted.
-    return_diagnostics : if True, also return the full diameter array (for
-        a diagnostic figure / audit log).
-
-    Returns
-    -------
-    dict or None. See above.
-    """
-    if workflow is not None and not auto_object_size_valid(workflow):
-        raise ValueError(
-            f"Automatic object-size estimation is not valid for workflow "
-            f"'{workflow}'. Valid: {sorted(AUTO_OBJECT_SIZE_VALID_WORKFLOWS)}.")
-
-    est = estimate_object_size_px(image, min_area_px=min_area_px, return_diagnostics=True)
-    diams = (est.get('diagnostics') or {}).get('diameters')
-    if diams is None or diams.size < 2 * min_objects_per_cluster:
-        return None
-
-    d = np.sort(diams)
-    mid = d.size // 2
-    lower = d[:mid]
-    if lower.size < min_objects_per_cluster:
-        return None
-
-    # r_large comes from only the objects ABOVE the 90th percentile of the
-    # full diameter distribution, not the upper half -- the upper half is
-    # mostly mid-sized objects, and averaging over it (even with a +std
-    # bias, tried and still insufficient) undersizes the genuinely large
-    # tail, leaving big condensates "necklaced" (hollow rim, no filled core)
-    # by a too-small top-hat structuring element. Restricting to the top
-    # decile targets that tail directly.
-    p90 = np.percentile(d, 90)
-    upper = d[d > p90]
-    if upper.size < min_objects_per_cluster:
-        return None
-
-    small_diam = float(np.mean(lower))
-    large_diam = float(np.mean(upper))
-    r_small = max(1, math.ceil(1.5 * (small_diam / 2.0)))
-    r_large = max(1, math.ceil(1.5 * (large_diam / 2.0)))
-    if r_large <= r_small:
-        return None
-
-    result = {'r_large': int(r_large), 'r_small': int(r_small),
-              'n_large': int(upper.size), 'n_small': int(lower.size)}
-    if return_diagnostics:
-        result['diagnostics'] = {'diameters': diams}
     return result
 
 

@@ -516,6 +516,7 @@ class FileIOClass(_LoadingMixin, _SessionActionsMixin, _DialogsMixin, _ProgressM
             bp.record('open_image', {
                 'file_path': self.filePath,
                 'source_files': list(file_paths),
+                'object_size': self.central_manager.active_data_class.data_repository.get('object_size', 50),
                 'cell_diameter': self.central_manager.active_data_class.data_repository.get('cell_diameter', 100),
                 'ball_radius': self.central_manager.active_data_class.data_repository.get('ball_radius', 50),
                 'channel_assignment': getattr(self, '_last_channel_assignment', None),

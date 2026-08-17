@@ -6,7 +6,7 @@ correction / apply_background_subtraction are the calibration-frame shading fixe
 (pinned by test_image_processing_preprocessing_characterization); the blob-enhancement block was later
 restored to v1.0.0's White Top-Hat + fixed-sigma(3) LoG-mask recipe (Meet Raval: measurably better large-
 condensate preservation than the separable-LoG-direct-image approach it replaced) -- see
-_pre_process_single_pass's inline comment for the full rationale and the characterization pins updated
+pre_process_image's inline comment for the full rationale and the characterization pins updated
 alongside. Composes the background family (soft_foreground_suppression, wbns_func), the filters family
 (apply_laplace_of_gauss_enhancement), and the _base primitives.
 """
@@ -22,21 +22,12 @@ from pycat.toolbox.image_processing._base import _safe_equalize_adapthist, _add_
 from pycat.toolbox.image_processing.background import soft_foreground_suppression, wbns_func
 from pycat.toolbox.image_processing.filters import apply_laplace_of_gauss_enhancement
 
-# Sentinel distinguishing "caller didn't pass a precomputed split" (derive it
-# from `image` as usual) from "caller explicitly passed a split" (even None,
-# meaning "already decided this image isn't bimodal") -- see
-# run_scale_aware_cascade's `precomputed_split` docstring in cascade.py for
-# why this exists (Step 2 reusing Step 1's split instead of re-deriving a
-# different one from already-processed data).
-_SPLIT_UNSET = object()
-
 
 @tags_layer('preprocess', role='preprocessed',
             summary='The standard preprocessing cascade')
 def pre_process_image(image, ball_radius, window_size,
                       suppress_foreground=True, suppression_params=None,
-                      norm_max=None, cascade_large_small=False,
-                      precomputed_bimodal_split=_SPLIT_UNSET):
+                      norm_max=None):
     """
     Enhances features in an image through a comprehensive pre-processing pipeline that includes noise reduction,
     feature enhancement, and contrast improvement. This function is tailored for images where maintaining
@@ -62,27 +53,6 @@ def pre_process_image(image, ball_radius, window_size,
         `min_area`). Any key omitted falls back to
         ``FOREGROUND_SUPPRESSION_DEFAULTS``. Ignored if ``suppress_foreground`` is
         False.
-    cascade_large_small : bool, optional
-        Default False (byte-for-byte the single-scale pipeline below, unchanged).
-        If True, first checks whether the image's object-size distribution is
-        BIMODAL (see ``estimate_bimodal_object_sizes``): a single ``ball_radius``
-        sizes the LoG step for the whole image, so when an image mixes small and
-        large condensates, that one scale is dragged toward whichever population
-        has more objects and is wrong for the other -- for large objects this
-        collapses the LoG response in their flat interior, leaving only a broken
-        rim ("necklace" morphology) that a fill_holes cannot repair because the
-        rim isn't closed. When the distribution is NOT bimodal this is a no-op
-        (falls through to the single-scale path with the ``ball_radius`` given
-        above, exactly as if this flag were False). When it IS bimodal, runs the
-        large/small cascade (see ``_pre_process_cascade``) instead, using radii
-        the estimator derives from the image rather than the ``ball_radius``
-        argument. Off by default so this is an opt-in A/B, not a behavior change.
-    precomputed_bimodal_split : dict or None, optional
-        Reuse an ALREADY-COMPUTED bimodal split instead of deriving one from
-        ``image`` -- passed straight through to ``run_scale_aware_cascade``
-        (see its ``precomputed_split`` docstring in cascade.py). Left unset
-        (the default), this call derives its own split from ``image`` as
-        always. Ignored if ``cascade_large_small`` is False.
 
     Returns
     -------
@@ -100,30 +70,6 @@ def pre_process_image(image, ball_radius, window_size,
     - Applying Gaussian filter for smoothing.
     - Enhancing contrast using CLAHE (Contrast Limited Adaptive Histogram Equalization).
     """
-    if cascade_large_small:
-        return _pre_process_cascade(image, ball_radius, window_size,
-                                    suppress_foreground=suppress_foreground,
-                                    suppression_params=suppression_params,
-                                    norm_max=norm_max,
-                                    precomputed_bimodal_split=precomputed_bimodal_split)
-    return _pre_process_single_pass(image, ball_radius, window_size,
-                                    suppress_foreground=suppress_foreground,
-                                    suppression_params=suppression_params,
-                                    norm_max=norm_max)
-
-
-def _pre_process_single_pass(image, ball_radius, window_size,
-                             suppress_foreground=True, suppression_params=None,
-                             norm_max=None):
-    """The single-scale pipeline -- ``pre_process_image``'s body before the
-    cascade option was added (1.6.459); both the top-level non-cascade path
-    AND each pass of ``_pre_process_cascade`` call this (so the cascade's
-    large AND small passes both get the v1.0.0-restored blob enhancement
-    below, each at its own pass's ball_radius). The blob-enhancement block
-    (White Top-Hat + fixed-sigma LoG mask) was restored to v1.0.0's exact
-    recipe -- see that block's inline comment -- everything else (normalise,
-    WBNS, morph, CLAHE, foreground suppression) is unchanged."""
-
     # ── CPU path ─────────────────────────────────────────────────────────
     input_dtype = str(image.dtype)  # Store original image data type for conversion back after processing
     img = dtype_conversion_func(image, output_bit_depth='float32') # Convert image data type to float32 for processing
@@ -231,127 +177,6 @@ def _pre_process_single_pass(image, ball_radius, window_size,
     return output_image
 
 
-# ---------------------------------------------------------------------------
-# Scale-aware large/small cascade (cascade_large_small=True path, 1.6.459)
-# ---------------------------------------------------------------------------
-# Router + two-pass cascade for images whose object-size distribution is
-# bimodal: a single ball_radius/LoG scale sizes the whole image, so when small
-# and large condensates coexist, that one scale is dragged toward whichever
-# population has more objects. For large objects this collapses the LoG
-# response in their flat interior, leaving a broken rim ("necklace") that a
-# fill_holes cannot repair because the rim isn't closed. See
-# ``estimate_bimodal_object_sizes`` for the router and
-# ``pre_process_image``'s ``cascade_large_small`` docstring for the contract:
-# not bimodal -> single-pass, unchanged. The router/detect/erase/dedup/merge
-# MECHANISM lives in ``cascade.py`` (shared with background.py's Step 2 --
-# see that module's docstring for why, and for the two correctness fixes baked
-# into it); this is a thin binding of it to the single-scale preprocessing pass.
-
-def _pre_process_cascade(image, ball_radius, window_size,
-                         suppress_foreground=True, suppression_params=None,
-                         norm_max=None, precomputed_bimodal_split=_SPLIT_UNSET):
-    """The ``cascade_large_small=True`` implementation (see
-    ``pre_process_image``'s docstring for the contract). Binds
-    ``run_scale_aware_cascade`` to ``_pre_process_single_pass`` at fixed
-    ``window_size``/``suppress_foreground``/``suppression_params``/``norm_max``
-    (only ``ball_radius`` varies pass to pass)."""
-    from pycat.toolbox.image_processing.cascade import run_scale_aware_cascade, tighten_noise_gates
-    from pycat.toolbox.image_processing.background import FOREGROUND_SUPPRESSION_DEFAULTS
-
-    def _single_pass(im, br, small_pass=False):
-        sp = suppression_params
-        if small_pass and suppress_foreground:
-            # The small pass's LoG is more sensitive to noise than the large
-            # pass's or a single compromise ball_radius's -- tighten its own
-            # suppression gates to compensate. See tighten_noise_gates.
-            base = dict(FOREGROUND_SUPPRESSION_DEFAULTS)
-            if suppression_params:
-                base.update({k: v for k, v in suppression_params.items() if v is not None})
-            log_p, con_p, min_area, strength = tighten_noise_gates(
-                base['log_p'], base['con_p'], base['min_area'], base['strength'])
-            sp = {**base, 'log_p': log_p, 'con_p': con_p, 'min_area': min_area, 'strength': strength}
-        return _pre_process_single_pass(im, br, window_size,
-                                        suppress_foreground=suppress_foreground,
-                                        suppression_params=sp,
-                                        norm_max=norm_max)
-
-    # Only pass precomputed_split through when the caller actually gave one --
-    # otherwise let run_scale_aware_cascade's own default (derive it from
-    # `image`) apply, rather than forwarding OUR unset-sentinel as if it were
-    # a real value.
-    kwargs = {}
-    if precomputed_bimodal_split is not _SPLIT_UNSET:
-        kwargs['precomputed_split'] = precomputed_bimodal_split
-    return run_scale_aware_cascade(image, ball_radius, _single_pass,
-                                   log_label='preprocess cascade', **kwargs)
-
-
-# ---------------------------------------------------------------------------
-# TEMPORARY debug layer: size-estimator threshold visualization.
-# Requested by Meet to see what the large/small router (estimate_object_size_px
-# + estimate_bimodal_object_sizes's mean-of-halves split) actually thresholds
-# ON, so over-detection / bogus-r_large questions can be answered by looking
-# directly at what the estimator counts as an object. A SINGLE native-
-# resolution pass (the two-pass downsampled-probe design was retired -- see
-# estimate_bimodal_object_sizes's docstring for why), so one top-hat layer
-# and one threshold layer. The threshold step is multi-Otsu (keep-brightest-
-# class) -- see estimate_object_size_px's WHY MULTI-OTSU docstring section
-# for why plain 2-class Otsu was replaced: on low-contrast data it fused
-# background texture with real puncta into oversized blobs.
-# Meet has asked for this before and had it removed; keep it easy to delete
-# again (single function, single call site below).
-def _debug_add_size_estimator_threshold_layer(image, viewer, source_name):
-    """Add the two intermediate images ``estimate_object_size_px`` actually
-    measures on (native resolution -- the only pass ``estimate_bimodal_
-    object_sizes`` now uses internally), plus the resulting mean-of-halves
-    split, so over-detection / bogus-r_large questions can be answered by
-    looking directly at what the estimator saw:
-
-    - an Image layer of the white-top-hat response (what gets thresholded --
-      tagged ``operation='white_tophat'`` so intensity-semantics knows this
-      layer's values are not the raw sample).
-    - a Labels layer of the multi-Otsu-thresholded foreground, already
-      connected-component labelled (so individual objects, not just one
-      blob, are visible -- this is what ``regionprops`` measures diameters
-      from).
-
-    Best-effort: never raises, never blocks the real pre-processing
-    pipeline."""
-    try:
-        from pycat.toolbox.image_processing.size_estimation import (
-            estimate_object_size_px, estimate_bimodal_object_sizes)
-
-        est = estimate_object_size_px(image, return_diagnostics=True)
-        diagnostics = est.get('diagnostics') or {}
-        tophat = diagnostics.get('tophat')
-        if tophat is not None:
-            _add_image(tophat, viewer, name=f"Size-Estimator Top-Hat {source_name}",
-                      operation='white_tophat')
-        fg = diagnostics.get('fg')
-        if fg is not None:
-            viewer.add_labels(sk.measure.label(fg),
-                              name=f"Size-Estimator Threshold {source_name}")
-        print(f"[PyCAT] size-estimator debug: n_objects={est.get('n_objects')} "
-              f"ball_radius={est.get('ball_radius')} object_size_px={est.get('object_size_px')}")
-        raw = (est.get('diagnostics') or {}).get('diameters')
-        if raw is not None and raw.size:
-            print(f"[PyCAT] size-estimator debug: raw diameters sorted = {sorted(raw.round(1).tolist())}")
-
-        bimodal = estimate_bimodal_object_sizes(image, return_diagnostics=True)
-        if bimodal is None:
-            # Only happens with too few objects, or a degenerate split
-            # (r_large <= r_small, e.g. every detected object is nearly
-            # identical in size) -- estimate_bimodal_object_sizes no longer
-            # does any significance testing, it always splits when it can.
-            print("[PyCAT] size-estimator debug: too few objects or a degenerate split -- single-pass fallback.")
-            return
-        print(f"[PyCAT] size-estimator debug (mean-of-halves split): r_large={bimodal.get('r_large')} "
-              f"n_large={bimodal.get('n_large')} r_small={bimodal.get('r_small')} "
-              f"n_small={bimodal.get('n_small')}")
-    except Exception as e:  # broad-ok: debug_visualization -- must never block real preprocessing
-        print(f"[PyCAT] size-estimator debug layer failed ({e}); skipping.")
-
-
 def run_pre_process_image(data_instance, viewer):
     """
     Run the pre-processing function on an image selected in a viewer interface. This function handles the selection 
@@ -404,42 +229,12 @@ def run_pre_process_image(data_instance, viewer):
         'foreground_suppression_params', None)
     suppress_foreground = data_instance.data_repository.get(
         'suppress_foreground', True)
-    # Scale-aware large/small cascade (see pre_process_image's docstring).
-    # Default False -- opt-in A/B, matches the batch replay default.
-    cascade_large_small = data_instance.data_repository.get(
-        'cascade_large_small', False)
-
-    # In cascade mode, compute the large/small split ONCE here, from the
-    # original raw image, and reuse it for both this step AND Step 2
-    # (Enhanced Background Removal). Step 2 used to independently re-run
-    # estimate_bimodal_object_sizes on ITS OWN input -- which is this step's
-    # OUTPUT, already LoG-blob-enhanced. LoG sharpens diffuse intensity peaks
-    # into tighter blob responses, so top-hat+Otsu on that transformed image
-    # systematically measures smaller apparent object sizes than on the raw
-    # data (confirmed on real data: r_small=6 from the raw image vs. r_small=3
-    # re-derived from this step's own output -- roughly half, and plausibly
-    # the cause of small-kernel noise under-suppression). Storing the split
-    # here and threading it through means both steps agree on one answer.
-    bimodal_split = None
-    if cascade_large_small:
-        try:
-            from pycat.toolbox.image_processing.size_estimation import estimate_bimodal_object_sizes
-            bimodal_split = estimate_bimodal_object_sizes(image)
-        except Exception as e:  # broad-ok: optional_probe -- fall back to pre_process_image's own estimate
-            print(f"[PyCAT] pre-process: bimodal split precompute failed ({e}); "
-                  f"pre_process_image will derive its own.")
-            bimodal_split = None
-        # Make Step 2 (Enhanced Background Removal) able to reuse this exact
-        # split instead of re-deriving a worse one from the preprocessed output.
-        data_instance.data_repository['cascade_bimodal_split'] = bimodal_split
 
     # Apply pre-processing to the selected image
     pre_processed_image = pre_process_image(
         image, ball_radius, window_size,
         suppress_foreground=suppress_foreground,
-        suppression_params=suppression_params,
-        cascade_large_small=cascade_large_small,
-        precomputed_bimodal_split=bimodal_split if cascade_large_small else _SPLIT_UNSET)
+        suppression_params=suppression_params)
 
     # Add the pre-processed image to the viewer with a default colormap
     _pre_layer = _add_image(pre_processed_image, viewer, name=f"Pre-Processed {active_layer.name}",
@@ -451,18 +246,6 @@ def run_pre_process_image(data_instance, viewer):
         tag_from_operation(_pre_layer, pre_process_image, source_layer=active_layer)
     except Exception:  # broad-ok: optional_probe — lineage metadata is auxiliary; never block the result
         pass
-
-    # TEMPORARY (see _debug_add_size_estimator_threshold_layer docstring):
-    # only in cascade mode, since that's the path using the bimodality router.
-    if cascade_large_small:
-        _debug_add_size_estimator_threshold_layer(image, viewer, active_layer.name)
-        # Both add_image and viewer.add_labels() auto-select the newly-added
-        # layer as active, stealing the selection away from _pre_layer (the
-        # same class of bug fixed once before for _add_image's own auto-
-        # select behaviour) -- every downstream step (e.g. Enhanced
-        # Background Removal) expects the ACTIVE layer to be the pre-
-        # processed IMAGE, not one of these debug layers, so restore it.
-        viewer.layers.selection.active = _pre_layer
 
 
 # ---------------------------------------------------------------------------

@@ -163,6 +163,16 @@ def replay_open_image(state: dict, image_path: Path, params: dict, output_dir: P
     data_instance.data_repository['microns_per_pixel'] = microns_per_pixel
     data_instance.data_repository['microns_per_pixel_sq'] = microns_per_pixel ** 2
     data_instance.data_repository['cell_diameter'] = params.get('cell_diameter', 100)
+    # object_size: falls back to the SAME image-size-based formula the GUI uses
+    # as its own default at load time (file_io.py: `_last_channel.shape[0] //
+    # 20`) rather than BaseDataClass's flat placeholder of 50 -- a config
+    # recorded before this key existed (or a session where the user never
+    # touched Measure Line, which is not gated and can be skipped) must still
+    # land on the GUI's actual default, not an arbitrary constant that can be
+    # off by 2x+ for images far from ~1000px. Superseded by replay_measure_line
+    # if that step was recorded, exactly like the GUI's own Measure Line click.
+    data_instance.data_repository['object_size'] = params.get(
+        'object_size', image.shape[-2] // 20)
     # Placeholder until _finalize_ball_radius resolves the real value below —
     # covers the (should-never-happen) case where something reads ball_radius
     # before finalize runs.

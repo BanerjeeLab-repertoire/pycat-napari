@@ -8,7 +8,7 @@ pins their exact output on the fixed background-field scene.
 The blob-enhancement step inside `pre_process_image` was later restored to v1.0.0's White Top-Hat +
 fixed-sigma(3) LoG-mask recipe, replacing the separable-LoG-direct-image approach it had been changed to —
 Meet Raval reported v1.0.0's recipe measurably preserves large condensates better (see
-`_pre_process_single_pass`'s inline comment in `image_processing/preprocessing.py` for the full mechanism).
+`pre_process_image`'s inline comment in `image_processing/preprocessing.py` for the full mechanism).
 `pre_process_image`'s pin below was updated for that switch (123.062 -> 187.017 on this scene); the
 flatfield/background-subtraction pins are untouched, unrelated functions.
 """

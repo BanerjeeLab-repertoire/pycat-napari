@@ -460,16 +460,6 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
         adjust_cb = QCheckBox("Adjust foreground suppression")
         adjust_cb.setChecked(False)
 
-        # ── Scale-aware large/small cascade (opt-in A/B, off by default) ─────
-        # When the image's object-size distribution is bimodal (small + large
-        # condensates mixed), a single ball_radius/LoG scale collapses large
-        # condensates into a broken-rim "necklace". Checking this runs a
-        # large/small cascade instead; unchecked (default) is byte-for-byte
-        # today's single-scale pre_process_image. See pre_process_image's
-        # ``cascade_large_small`` docstring for the full algorithm.
-        cascade_cb = QCheckBox("Cascade large/small preprocessing (A/B)")
-        cascade_cb.setChecked(False)
-
         # Container holding the four sliders; hidden until the box is checked.
         params_container = _QWidget()
         params_form = QFormLayout(params_container)
@@ -524,7 +514,6 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
                 # Unchecked -> use defaults (clear any override).
                 dr['foreground_suppression_params'] = None
             dr['suppress_foreground'] = True
-            dr['cascade_large_small'] = bool(cascade_cb.isChecked())
 
         def _on_slider():
             strength_lbl.setText(f"{strength_sl.value()/100.0:.2f}")
@@ -542,7 +531,6 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
             _store_params()
 
         adjust_cb.toggled.connect(_on_toggle)
-        cascade_cb.toggled.connect(lambda _checked: _store_params())
 
         def _on_preprocess():
             # Capture the active layer BEFORE running — the operation adds a
@@ -552,23 +540,7 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
             active = self.viewer.layers.selection.active
             active_name = active.name if active is not None else ''
 
-            # Single source of truth for CASCADE on THIS click, read directly off
-            # the checkbox rather than round-tripped through data_repository.
-            # data_repository['cascade_large_small'] is shared, persistent session
-            # state -- it can be left over from a different Pre-process Image
-            # panel instance (this widget is built more than once, once per
-            # analysis-method dock, each with its own checkbox) or from the
-            # separate standalone "Remove Background" button
-            # (_add_run_enhanced_rb_gaussian_bg_removal), which calls Step 2
-            # directly and never touches this flag. Re-affirming it from THIS
-            # checkbox immediately before EACH of the two steps below closes
-            # that staleness window instead of trusting a single write-then-
-            # read-later round trip to still be current several calls later.
-            cascade_on = bool(cascade_cb.isChecked())
-
             # Step 1: pre-processing → adds "Pre-Processed {name}" (suppression baked in).
-            dr = self.central_manager.active_data_class.data_repository
-            dr['cascade_large_small'] = cascade_on
             self.on_general_button_clicked(
                 run_pre_process_image, None, self.central_manager.active_data_class, self.viewer)
 
@@ -576,16 +548,13 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
             # just created as active -- capture THAT layer object directly rather
             # than reconstructing its name and looking it up by name afterward.
             # ``f"Pre-Processed {active_name}"`` is a FIXED string: on a re-run
-            # against the same source image (e.g. A/B'ing the cascade checkbox --
-            # exactly this workflow), that name still belongs to the FIRST run's
-            # layer, because napari auto-suffixes a newly added layer whose name
-            # collides with an existing one (" [1]", " [2]", ...) rather than
-            # replacing it. Looking the name up again here would silently
-            # re-select that stale first-run layer every time this button runs
-            # again on the same image, so Step 2 always processes whichever run
-            # happened to go first -- regardless of the cascade checkbox's
-            # CURRENT state. Using the just-created layer object sidesteps the
-            # naming collision entirely.
+            # against the same source image, that name still belongs to the
+            # FIRST run's layer, because napari auto-suffixes a newly added
+            # layer whose name collides with an existing one (" [1]", " [2]",
+            # ...) rather than replacing it. Looking the name up again here
+            # would silently re-select that stale first-run layer every time
+            # this button runs again on the same image. Using the just-created
+            # layer object sidesteps the naming collision entirely.
             pre_processed_layer = self.viewer.layers.selection.active
             pp_name = pre_processed_layer.name if pre_processed_layer is not None else None
 
@@ -595,7 +564,6 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
                 'ball_radius':  int(dr.get('ball_radius', 50)),
                 'window_size':  int(dr.get('cell_diameter', 100)) // 2,
                 'suppress_foreground': bool(dr.get('suppress_foreground', True)),
-                'cascade_large_small': cascade_on,
             }
             # Record suppression params only when the user overrode defaults (keeps clean configs clean).
             sp = dr.get('foreground_suppression_params', None)
@@ -608,15 +576,12 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
             try:
                 if pre_processed_layer is not None:
                     self.viewer.layers.selection.active = pre_processed_layer  # defensive re-affirm; already true
-                dr = self.central_manager.active_data_class.data_repository
-                dr['cascade_large_small'] = cascade_on  # re-affirm -- see comment above
                 self.on_general_button_clicked(
                     run_enhanced_rb_gaussian_bg_removal, None,
                     self.central_manager.active_data_class, self.viewer)
                 self._record('background_removal', {
                     'active_layer': pp_name or active_name,
                     'ball_radius': int(dr.get('ball_radius', 50)),
-                    'cascade_large_small': cascade_on,
                     **({'foreground_suppression_params': dict(sp)} if sp else {}),  # replay needs the recorded override, else defaults
                 })
             except Exception as e:
@@ -631,7 +596,6 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
             pre_process_layout.addWidget(pre_process_button) # Add the button to the layout
         pre_process_layout.addWidget(adjust_cb)
         pre_process_layout.addWidget(params_container)
-        pre_process_layout.addWidget(cascade_cb)
         pre_process_widget = QWidget()
         pre_process_widget.setLayout(pre_process_layout)
         self._add_widget_to_layout_or_dock(pre_process_widget, layout, separate_widget, "Pre-process Image Dock")
