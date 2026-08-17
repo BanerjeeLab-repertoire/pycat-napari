@@ -1,10 +1,14 @@
 """Preprocessing pipeline + shading corrections - split out of image_processing_tools (1.6.253).
 
-pre_process_image is the composite pre-segmentation pipeline (optional soft foreground suppression -> WBNS
-wavelet denoise -> CLAHE -> normalisation); apply_flatfield_correction / apply_background_subtraction are
-the calibration-frame shading fixes. Moved VERBATIM - no step reordered, no parameter changed; pinned by
-test_image_processing_preprocessing_characterization. Composes the background family (soft_foreground_
-suppression, wbns_func) and the _base primitives.
+pre_process_image is the composite pre-segmentation pipeline: normalise -> White Top-Hat -> fixed-sigma LoG
+mask -> WBNS wavelet denoise -> morph -> CLAHE -> optional soft foreground suppression; apply_flatfield_
+correction / apply_background_subtraction are the calibration-frame shading fixes. Originally moved VERBATIM
+(pinned by test_image_processing_preprocessing_characterization); the blob-enhancement block was later
+restored to v1.0.0's White Top-Hat + fixed-sigma(3) LoG-mask recipe (Meet Raval: measurably better large-
+condensate preservation than the separable-LoG-direct-image approach it replaced) -- see
+_pre_process_single_pass's inline comment for the full rationale and the characterization pins updated
+alongside. Composes the background family (soft_foreground_suppression, wbns_func), the filters family
+(apply_laplace_of_gauss_enhancement), and the _base primitives.
 """
 from __future__ import annotations
 
@@ -14,8 +18,9 @@ import skimage as sk
 import scipy.ndimage as ndi
 from pycat.utils.tag_registry import tags_layer
 from pycat.utils.general_utils import dtype_conversion_func
-from pycat.toolbox.image_processing._base import _safe_equalize_adapthist, _add_image, _napari
+from pycat.toolbox.image_processing._base import _safe_equalize_adapthist, _add_image, _napari, apply_rescale_intensity
 from pycat.toolbox.image_processing.background import soft_foreground_suppression, wbns_func
+from pycat.toolbox.image_processing.filters import apply_laplace_of_gauss_enhancement
 
 # Sentinel distinguishing "caller didn't pass a precomputed split" (derive it
 # from `image` as usual) from "caller explicitly passed a split" (even None,
@@ -110,9 +115,14 @@ def pre_process_image(image, ball_radius, window_size,
 def _pre_process_single_pass(image, ball_radius, window_size,
                              suppress_foreground=True, suppression_params=None,
                              norm_max=None):
-    """The single-scale pipeline -- exactly ``pre_process_image``'s body before
-    the cascade option was added (1.6.459). Unchanged; both the top-level
-    non-cascade path AND each pass of ``_pre_process_cascade`` call this."""
+    """The single-scale pipeline -- ``pre_process_image``'s body before the
+    cascade option was added (1.6.459); both the top-level non-cascade path
+    AND each pass of ``_pre_process_cascade`` call this (so the cascade's
+    large AND small passes both get the v1.0.0-restored blob enhancement
+    below, each at its own pass's ball_radius). The blob-enhancement block
+    (White Top-Hat + fixed-sigma LoG mask) was restored to v1.0.0's exact
+    recipe -- see that block's inline comment -- everything else (normalise,
+    WBNS, morph, CLAHE, foreground suppression) is unchanged."""
 
     # ── CPU path ─────────────────────────────────────────────────────────
     input_dtype = str(image.dtype)  # Store original image data type for conversion back after processing
@@ -134,37 +144,45 @@ def _pre_process_single_pass(image, ball_radius, window_size,
     if _pp_max > 0:
         img = img / _pp_max
 
-    # Blob enhancement via separable LoG (Laplacian of Gaussian) with sigma
-    # scaled to ball_radius.
+    # Blob enhancement: v1.0.0's White Top-Hat -> fixed-sigma LoG-mask recipe,
+    # restored VERBATIM (Meet Raval: v1.0.0's Step 1 preserves large condensates
+    # noticeably better than the separable-LoG-direct-image approach this
+    # replaced -- see preprocessing.py's git history / the 1.0.0 vs current
+    # comparison discussion for the measured difference). Three pieces, in the
+    # v1.0.0 order:
     #
-    # Quantitative SNR analysis on real condensate data (GFP channel):
-    #   raw /max:              within-nucleus SNR =     8
-    #   LoG(σ=ball_radius×0.27): within-nucleus SNR = 2917  (×360 gain)
+    #   1. White Top-Hat: isolate bright elements smaller than disk(ball_radius),
+    #      rescale to [0.3, 1.0], multiply into img -- so a pixel is attenuated
+    #      to AT MOST 70% of itself, never fully removed, which is exactly what
+    #      keeps a large condensate's flat interior from being erased even
+    #      though the top-hat response there is near zero.
+    #   2. LoG at a FIXED sigma=3 (not scaled to ball_radius, unlike the
+    #      separable-LoG replacement this restores) -- `apply_laplace_of_gauss_
+    #      enhancement` (filters.py) returns the inverted LoG response as a
+    #      [~0.9, 1.0]-ish attenuation MASK, not a direct image.
+    #   3. That mask multiplies `top_hat_enhanced_img` (not the raw `img`) to
+    #      produce LoG_enhanced_img -- WBNS below sees top-hat AND LoG AND the
+    #      (normalised) original image all multiplied together, exactly as
+    #      v1.0.0's WBNS input was, not the LoG response alone.
     #
-    # Speed optimisations validated against the float64 gaussian_laplace
-    # reference on 2048×2048 images at ball_radius=15 and ball_radius=50:
-    #
-    #   gaussian_laplace f64 (old)   1.00×  corr=1.000  SNR=430  ← reference
-    #   gaussian_laplace f32         1.15×  corr=1.000  SNR=430  ← safe
-    #   separable LoG f32 (this)     1.54×  corr=0.9999 SNR=429  ← adopted
-    #   DoG fixed σ=2.0,3.2 (old)   1.37×  corr=0.904  SNR=224  ← DO NOT USE
-    #   DoG scaled (0.15,0.25)       1.43×  corr=0.948  SNR=268  ← DO NOT USE
-    #
-    # Separable LoG: Gaussian(σ) then discrete Laplacian in each axis.
-    # 1.54× faster than gaussian_laplace, corr=0.9999 on real data, SNR
-    # within 0.1% of reference at both ball_radius=15 and ball_radius=50.
-    # All arithmetic in float32 — precision is sufficient for this application.
-    #
-    # Rule: sigma = ball_radius × 0.27 (matches v1.0.0 LoG(σ=3) at br≈11px).
-    _log_sigma = max(1.0, ball_radius * 0.27)
-    _g = ndi.gaussian_filter(img.astype(np.float32), sigma=_log_sigma)
-    _lap = np.zeros_like(_g)
-    for _ax in range(img.ndim):
-        _lap += ndi.uniform_filter1d(_g, size=3, axis=_ax, mode='reflect') * 2 - 2 * _g
-    inverted_LoG_img = np.clip(-_lap, 0, None).astype(np.float32)
-    if inverted_LoG_img.max() > 0:
-        inverted_LoG_img /= inverted_LoG_img.max()
-    LoG_enhanced_img = inverted_LoG_img  # direct LoG, no multiplicative suppression
+    # `_tophat_radius` guards against a real, confirmed failure: ndi.white_tophat
+    # with a large disk footprint has the identical catastrophic scaling as the
+    # binary morphology MemoryError already found and fixed this session in
+    # _bridge_fragmented_rims (fz.py) -- measured directly: disk(90) on an
+    # 800x800 array did not return in 40s. GUI (run_pre_process_image) and
+    # batch-condensate-replay (preprocessing_steps.py) already cap ball_radius
+    # to 5% of the image's smaller dimension before it reaches here, so this is
+    # a no-op there; it closes the same gap for callers that don't pre-cap
+    # (in-vitro batch/GUI, time-series) without altering ball_radius for
+    # anything else in this function (soft_foreground_suppression's own LoG
+    # sigma below still scales off the UNCAPPED ball_radius, as before).
+    _tophat_radius = min(int(ball_radius), max(4, int(min(img.shape[-2:]) * 0.05)))
+    white_top_hat_img = ndi.white_tophat(img, footprint=sk.morphology.disk(_tophat_radius))
+    rescaled_top_hat = apply_rescale_intensity(white_top_hat_img, out_min=0.3, out_max=1.0)
+    top_hat_enhanced_img = rescaled_top_hat * img
+
+    _, inverted_LoG_img = apply_laplace_of_gauss_enhancement(img, sigma=3)
+    LoG_enhanced_img = inverted_LoG_img * top_hat_enhanced_img
 
     # Parameters for background and noise removal
     psf_res = 4  # Point Spread Function resolution

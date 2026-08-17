@@ -1,9 +1,16 @@
 """**Characterization pins for the preprocessing + flatfield science — written BEFORE they move.**
 
-`pre_process_image` is the composite preprocessing pipeline (background suppression → WBNS → CLAHE →
-normalisation) that most workflows run before segmentation; the flatfield/background corrections are the
-simpler shading fixes. They move to `image_processing/preprocessing.py` last. Per the discipline (**no
-characterization test, no move**) this pins their exact output on the fixed background-field scene.
+`pre_process_image` is the composite preprocessing pipeline (blob enhancement → WBNS → CLAHE → background
+suppression → normalisation) that most workflows run before segmentation; the flatfield/background
+corrections are the simpler shading fixes. Per the discipline (**no characterization test, no move**) this
+pins their exact output on the fixed background-field scene.
+
+The blob-enhancement step inside `pre_process_image` was later restored to v1.0.0's White Top-Hat +
+fixed-sigma(3) LoG-mask recipe, replacing the separable-LoG-direct-image approach it had been changed to —
+Meet Raval reported v1.0.0's recipe measurably preserves large condensates better (see
+`_pre_process_single_pass`'s inline comment in `image_processing/preprocessing.py` for the full mechanism).
+`pre_process_image`'s pin below was updated for that switch (123.062 -> 187.017 on this scene); the
+flatfield/background-subtraction pins are untouched, unrelated functions.
 """
 import warnings
 
@@ -37,7 +44,7 @@ def test_preprocessing_science_is_pinned():
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
         im = _scene()
-        _c(ip.pre_process_image(im, 6, 15), (64, 64), 123.062, 0.0, 1.0)
+        _c(ip.pre_process_image(im, 6, 15), (64, 64), 187.017, 0.0, 1.0)
         flat = np.linspace(0.8, 1.2, 64 * 64).reshape(64, 64).astype(np.float32)
         _c(ip.apply_flatfield_correction(im, flat), (64, 64), 286343.969, 45.7702, 265.6617)
         _c(ip.apply_background_subtraction(im, np.full_like(im, 45)), (64, 64), 102403.078, 0.0, 212.5509)

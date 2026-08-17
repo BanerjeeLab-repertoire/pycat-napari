@@ -269,7 +269,21 @@ def _bridge_fragmented_rims(segmented_mask, rim_close_radius=5, rim_close_min_re
     to the pre-closing (unbridged) pixels.
     """
     close_radius = max(1, int(rim_close_radius))
-    closed = ndi.binary_closing(segmented_mask, structure=sk.morphology.disk(close_radius))
+    # isotropic_closing, NOT ndi.binary_closing(structure=sk.morphology.disk(close_radius)).
+    # The two are mathematically the same operation (isotropic_closing IS documented to return
+    # the same result, just via an exact Euclidean distance-map threshold instead of a raw
+    # structuring-element convolution -- see its docstring), but scipy's non-separable
+    # binary_erosion scales catastrophically with a large disk footprint: measured directly on
+    # an 800x800 mask, r=70 took 13.6s, r=90 took 1996s (33 min), and r=110 raised MemoryError
+    # outright. A caller-supplied rim_close_radius of only 4*ball_radius=124 (ball_radius=31,
+    # an entirely ordinary hand-measured value, not a degenerate one) already exceeds that --
+    # confirmed to reproduce the exact MemoryError this comment is next to. isotropic_closing
+    # is a distance-transform algorithm, so its cost is O(image size), independent of radius --
+    # the same r=124 case completes in ~0.07s, as does r=300. This removes the failure mode at
+    # its root instead of capping close_radius (which was tried and reverted: any cap tight
+    # enough to actually be safe under the OLD algorithm would silently under-bridge exactly the
+    # generous-large-condensate case this function's raw-image-verified design exists to allow).
+    closed = sk.morphology.isotropic_closing(segmented_mask, close_radius)
     filled_closed = ndi.binary_fill_holes(closed)
     raw = dtype_conversion_func(raw_img, 'float32') if raw_img is not None else None
 

@@ -136,14 +136,18 @@ from pycat.batch.steps._common import _get_data, _save_array, _raw_counts, _norm
 def replay_background_removal(state: dict, image_path: Path, params: dict, output_dir: Path):
     """Replay enhanced RB-Gaussian background removal on the preprocessed image.
 
-    Matches the interactive `run_enhanced_rb_gaussian_bg_removal`: if the input is
-    already preprocessed (sparse, peaked distribution), it applies the
-    non-destructive `soft_foreground_suppression` using the session's suppression
-    params rather than the destructive rolling-ball subtraction, so batch and GUI
-    produce the same 'Enhanced Background Removed' result.
+    Matches the interactive `run_enhanced_rb_gaussian_bg_removal`: always the
+    destructive rolling-ball + Gaussian + Gabor chain, on whatever image is in
+    state -- no "does this already look preprocessed" branch. See
+    `run_enhanced_rb_gaussian_bg_removal`'s docstring (background.py) for why
+    the old auto-detect-and-route-to-soft_foreground_suppression behaviour was
+    removed. Kept in lock-step with the GUI runner deliberately: an earlier
+    version of this heuristic was found to pick a DIFFERENT branch than the GUI
+    on the same image because batch's `_raw_counts`/`_normalize_to_float`
+    handling moved the intensity scale the heuristic keyed on -- removing the
+    branch entirely also removes that whole class of GUI/batch mismatch.
     """
-    from pycat.toolbox.image_processing_tools import (
-        rb_gaussian_bg_removal_with_edge_enhancement, soft_foreground_suppression)
+    from pycat.toolbox.image_processing_tools import rb_gaussian_bg_removal_with_edge_enhancement
     import math
 
     preprocessed = state.get('preprocessed')
@@ -162,7 +166,6 @@ def replay_background_removal(state: dict, image_path: Path, params: dict, outpu
     else:
         ball_radius = math.ceil(int(params.get('ball_radius',
                                     _get_data(data_instance, 'ball_radius', 50))))
-    sp = params.get('foreground_suppression_params', None) or {}
     # Same key as replay_preprocessing -- one recorded value covers both halves
     # of the GUI's one-click "Pre-process Image" button (preprocessing +
     # background_removal both read 'cascade_large_small').
@@ -174,49 +177,9 @@ def replay_background_removal(state: dict, image_path: Path, params: dict, outpu
     on_fluor, _fluor_key = _active_layer_channel_role(state, active_name)
 
     def _enhance(img):
-        # ── The "already enhanced" HEURISTIC IS SCALE-DEPENDENT, and batch changed the scale ──
-        #
-        # ``_already_enhanced = median(nonzero) < 0.05`` — and ``_normalize_to_float`` maps the
-        # image minimum to **zero**, which **moves the median.**
-        #
-        # Measured, on a **high-contrast image — a bright spot on a dim background, i.e. exactly a
-        # condensate image**:
-        #
-        #     path            median          verdict              processing applied
-        #     INTERACTIVE     **403 counts**  not enhanced         **full rolling-ball removal**
-        #     BATCH           **0.030**       **"already enhanced"**  **soft suppression only**
-        #
-        # ***The two paths take DIFFERENT BRANCHES and apply COMPLETELY DIFFERENT PROCESSING.***
-        # This is not a scale shift in one number — it is a different algorithm.
-        #
-        # The GUI hands ``active_layer.data`` — **raw counts** — to the same heuristic. Batch must
-        # do the same, or the branch it takes is decided by a normalisation the GUI never applied.
+        # Raw counts, matching what the GUI hands active_layer.data as -- see
+        # replay_preprocessing for why batch must not pre-normalise here.
         img = _raw_counts(img)
-        # Detect already-preprocessed input (same heuristic as the GUI runner).
-        n = img.astype(np.float32)
-        m = float(n.max())
-        if m > 0:
-            n = n / m
-        nz = n[n > 0.001]
-        already = (nz.size > 10 and float(np.median(nz)) < 0.05)
-        if already:
-            # Reuse replay_preprocessing's split if it stored one -- this
-            # image IS that step's output, so re-deriving a split here would
-            # measure the LoG-sharpened version of the same objects and come
-            # back smaller/more-aggressive (see soft_foreground_suppression's
-            # precomputed_bimodal_split docstring). Absent (e.g. background
-            # removal replayed without a preceding preprocessing step) ->
-            # falls through to soft_foreground_suppression deriving its own.
-            _split_kwargs = {}
-            if cascade_large_small and 'cascade_bimodal_split' in data_instance.data_repository:
-                _split_kwargs['precomputed_bimodal_split'] = data_instance.data_repository['cascade_bimodal_split']
-            return soft_foreground_suppression(
-                img, ball_radius,
-                strength=sp.get('strength'), log_p=sp.get('log_p'),
-                con_p=sp.get('con_p'), min_area=sp.get('min_area'),
-                border_grow=sp.get('border_grow'),
-                cascade_large_small=cascade_large_small,
-                **_split_kwargs).astype(np.float32)
         return rb_gaussian_bg_removal_with_edge_enhancement(
             img, ball_radius, cascade_large_small=cascade_large_small).astype(np.float32)
 

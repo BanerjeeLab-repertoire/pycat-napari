@@ -1447,6 +1447,21 @@ _DELIBERATE = {
     # helper moved with it; the UI `_task` remains as a thin call to the extracted op. Behaviour is pinned by
     # test_ivf_droplet_segmentation (exact per-method output on a fixed scene).
     'invitro_fluor_ui.py::_postfilter',
+
+    # Meet Raval, testing: the "already enhanced -> soft_foreground_suppression"
+    # auto-detect branch was removed from replay_background_removal's `_enhance`
+    # (and from the interactive run_enhanced_rb_gaussian_bg_removal it mirrors,
+    # background.py) -- Step 2 now always runs the destructive rolling-ball +
+    # Gaussian + Gabor chain (rb_gaussian_bg_removal_with_edge_enhancement)
+    # unconditionally, on every input, including Step 1's own just-created
+    # output. The removed branch's rationale (an earlier GUI/batch mismatch
+    # bug, where batch's own normalisation moved the intensity scale the
+    # heuristic keyed on and made batch take a DIFFERENT branch than the GUI on
+    # the same image) is preserved in `_enhance`'s docstring/comment, not lost
+    # -- it no longer applies because the branch it was warning about no longer
+    # exists. soft_foreground_suppression itself is untouched and still used by
+    # pre_process_image's own foreground-suppression step.
+    'batch_step_registry.py::_enhance',
 }
 
 # Qt widget plumbing. A `__init__` losing `parent`, or a callback losing an index, is a Qt idiom
