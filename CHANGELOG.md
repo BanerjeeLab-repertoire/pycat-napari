@@ -1,3 +1,47 @@
+## [1.6.459] - 2026-08-25
+### Fixed — **Large-condensate preprocessing restored to v1.0.0's recipe, a real closing-operation MemoryError, and batch-replay upscale/object-size parity.**
+Two weeks of iteration on the preprocessing/segmentation cascade ended in reverting the experiment and restoring
+the prior recipe with two confirmed fixes riding along, plus a set of batch-replay correctness bugs found and
+fixed independently.
+
+- **Blob enhancement restored to v1.0.0's recipe** (`toolbox/image_processing/preprocessing.py`) — `pre_process_image`
+  now uses v1.0.0's White Top-Hat (isolate bright elements, rescale to [0.3, 1.0], multiply — never fully zeroing a
+  pixel) followed by a fixed-sigma(3) LoG mask, replacing a separable-LoG-direct-image approach that measurably
+  preserved large condensates worse.
+- **A real closing-operation MemoryError, fixed at the root** (`toolbox/segmentation/fz.py`) — `_bridge_fragmented_rims`
+  switched from `ndi.binary_closing` (scales catastrophically with radius: r=70 took 13.6s, r=90 took 33 min, r=110
+  raised MemoryError outright) to `sk.morphology.isotropic_closing` (O(image size), independent of radius — the same
+  r=124 case now completes in ~0.07s).
+- **Enhanced background removal no longer silently branches** (`toolbox/image_processing/background.py`,
+  `batch_step_registry.py`) — removed an "already looks preprocessed?" auto-detect heuristic that took a *different*
+  branch in batch than in the GUI on the identical image (batch's own normalization moved the intensity scale the
+  heuristic keyed on). Both paths now always run the same destructive rolling-ball + Gaussian + Gabor chain.
+- **Multi-Otsu (3-class) thresholding in the size estimator** (`toolbox/image_processing/size_estimation.py`) —
+  `estimate_object_size_px` keeps only the brightest of three Otsu classes instead of forcing a single 2-class cut,
+  recovering individual puncta on low-contrast images where 2-class Otsu previously fused them into large amoeba-shaped
+  blobs and skewed the median object-size estimate.
+- **Batch `object_size` fallback corrected** (`batch/steps/io_steps.py`, `file_io/file_io.py`) — replay now falls
+  back to the GUI's own image-size-based default (`shape[0] // 20`) instead of a flat placeholder of 50, which could
+  be off by 2x+ on images far from ~1000px.
+- **`replay_upscaling` now honors the recorded layer selection** (`batch/steps/preprocessing_steps.py`) — batch
+  previously upscaled the segmentation image, the fluorescence image, and every named channel unconditionally,
+  regardless of what the user had actually selected in the GUI, silently upscaling channels deliberately left at
+  native resolution.
+- **Two bugs in that rework fixed same-day** (`batch/steps/preprocessing_steps.py`) — a bidirectional substring
+  match let a split-file recording's longer companion-channel name (e.g. `"In_Cell [1]"`) win over the primary
+  channel's own bare name (`"In_Cell"`), silently losing the primary channel's selection; and a stale-alias bug left
+  `state['fluorescence_image']` pointing at the pre-upscale array after its `channels_by_name` entry was replaced,
+  producing a shape-mismatch crash in later steps (reported: Cellpose/cell_analysis crashing on a 512 vs 1024
+  boolean-index mismatch on a split-file recording).
+- A large/small-scale "cascade" preprocessing experiment (`toolbox/image_processing/cascade.py`, plus supporting
+  changes across `preprocessing.py`/`background.py`/`size_estimation.py`/`toolbox_functions_ui.py`) was added,
+  extended, and then fully reverted after evaluation — no trace remains in this release.
+- **New: standalone "Enhanced RB-Gauss Background Removal" button** in the Cellular Analysis Pipeline
+  (`ui/analysis_methods_ui.py`), below Steps 4-5 (Pre-process Image). Runs rolling-ball + Gaussian background
+  removal with edge enhancement directly against whichever layer is active, without ever routing through
+  `pre_process_image`'s soft-foreground-suppression step — an alternate path for cases where suppression is
+  suspected of attenuating real diffuse condensate signal.
+
 ## [1.6.458] - 2026-08-06
 ### Fixed — **Batch replay parity with the GUI: intensity scale, auto ball-radius, subcellular puncta gating, and large-condensate rim recovery.**
 A week of debugging traced several batch-vs-GUI discrepancies and a persistent hollow/broken-rim segmentation bug in
