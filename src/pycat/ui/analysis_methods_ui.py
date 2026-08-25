@@ -305,6 +305,18 @@ class CondensateAnalysisUI(AnalysisMethodsUI):
         self._stage_step("Steps 4–5 — ")
         self.central_manager.toolbox_functions_ui._add_pre_process(layout=self.condensate_layout)
         # (Enhanced BG removal is now produced by the Pre-process Image button — merged in 1.5.136)
+        #
+        # Optional standalone alternative, requested by Meet Raval: the merged button above always
+        # runs enhanced background removal CHAINED AFTER `pre_process_image`'s soft-foreground-
+        # suppression step (suppress_foreground=True), on the resulting "Pre-Processed" layer. This
+        # reuses the same underlying widget (`_add_run_enhanced_rb_gaussian_bg_removal` /
+        # `rb_gaussian_bg_removal_with_edge_enhancement` — rolling-ball + Gaussian background removal,
+        # then Gabor peak/edge enhancement) but run directly against whichever layer is active, so it
+        # can be pointed at the raw/upscaled image instead and never passes through suppression at
+        # all. No `_stage_step` call: this doesn't replace or renumber Steps 4-5, it's an extra,
+        # optional entry point for when foreground suppression is suspected of attenuating real
+        # diffuse signal (see the puncta-refinement diffuse-object investigation).
+        self.central_manager.toolbox_functions_ui._add_run_enhanced_rb_gaussian_bg_removal(layout=self.condensate_layout)
         self._stage_step("Step 6 — ")
         self.central_manager.toolbox_functions_ui._add_run_cellpose_segmentation(layout=self.condensate_layout)
         self._stage_step("Step 7 — ")
