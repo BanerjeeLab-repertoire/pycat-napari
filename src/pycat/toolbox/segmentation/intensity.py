@@ -110,6 +110,93 @@ def compute_image_intensity_stats(image, labeled_cells=None, smooth_sigma=1.0,
             'smooth_sigma': float(smooth_sigma)}
 
 
+def robust_cell_background(values, n_sigma=3.0, iterations=3, min_keep_fraction=0.10):
+    """A cell's OWN background level and noise, with its objects clipped off.
+
+    ── Why a plain median/MAD is not this ──────────────────────────────────────────
+    ``cell_has_punctate_signal`` used ``median(cell)`` and ``1.4826 * MAD(cell)``, on
+    the stated assumption that *"puncta are a small area fraction and barely move the
+    MAD"*. That assumption is true for puncta and **false for condensates**, and it
+    fails in exactly the direction that hides them.
+
+    The mechanism is a threshold, not a gradient. Both the median and the MAD hold up
+    while the bright population is the MINORITY of the cell's pixels — the median
+    stays in the background, and the 50th percentile of |deviation| still lands
+    inside it. Once the objects pass about half the cell, both cross over together:
+    the median moves INTO the bright population, and the MAD stops describing the
+    noise and starts describing the distance BETWEEN the two populations. Puncta
+    never get near that; large condensates in a small nucleus do.
+
+    Measured on the constructed-truth large-object scenes
+    (``benchmarks/condensate_scale.py``, 18 cells across 3 seeds): the six cells whose
+    object footprint was 0.40 of the cell or more — which after the PSF and this
+    function's own smoothing is more than half its pixels — reported a sigma of
+    0.0080-0.0101 against a true background noise of ~0.0001, an overestimate of
+    roughly 80x, and a background of 0.0145 against a true nucleoplasm of 0.0080. The
+    gate's floor is ``background + 5 * sigma``, so it landed **above the condensates
+    themselves**, and all six cells were declared to contain no punctate signal and
+    skipped before any per-object check could run. No cell below 0.39 was affected.
+
+    ── Sigma clipping, seeded from the lower half ─────────────────────────────────
+    So estimate the background from the background: iteratively drop pixels more than
+    ``n_sigma`` above the current estimate and re-measure, until what remains is the
+    nucleoplasm.
+
+    Two details are what make it work here rather than merely sound right:
+
+    * **The seed comes from the LOWER HALF of the cell, not from the whole of it.**
+      Seeded from the whole-cell median/MAD the iteration cannot start at all in the
+      case it exists for: at 44% object area the first clip level
+      (``median + 3 * MAD``) already sits above the condensates, so nothing is
+      removed, the estimate never moves, and the cell is skipped exactly as before.
+      Measured across the same 18 cells, the lower-half seed recovers the true
+      background (0.00796-0.00798 against a true 0.00800) in every one; the
+      whole-cell seed fails outright on the densest.
+    * **Each iteration re-clips the ORIGINAL values**, not the previous iteration's
+      survivors, so an over-aggressive early cut is recoverable rather than
+      permanent.
+
+    On a cell that is mostly background this is a no-op to four decimal places — the
+    lower-half seed introduces no bias on clean Gaussian noise (measured:
+    ``(0.00800, 0.000201)`` from all three of median, whole-cell-seeded clip and
+    lower-half-seeded clip on the same 20 000 samples), and the gate's noise-only
+    rejection fixture is bit-for-bit unaffected. That is the point: it corrects the
+    case the old estimator got wrong without disturbing the case it got right.
+
+    Clipping is ONE-SIDED — only bright pixels are removed. A dark nucleolus is part
+    of the background as far as this is concerned, exactly as it was before.
+
+    Returns ``(base, sigma)``.
+    """
+    values = np.asarray(values, dtype=np.float64).ravel()
+    if values.size < 8:
+        return (float(np.median(values)) if values.size else 0.0,
+                float(np.std(values)) if values.size else 1e-6)
+
+    lower = values[values <= np.median(values)]
+    base = float(np.median(lower))
+    sigma = 1.4826 * float(np.median(np.abs(lower - base)))
+    minimum_keep = max(16, int(min_keep_fraction * values.size))
+    for _ in range(int(iterations)):
+        if sigma <= 0:
+            break
+        kept = values[values <= base + n_sigma * sigma]
+        if kept.size < minimum_keep:
+            break
+        new_base = float(np.median(kept))
+        new_sigma = 1.4826 * float(np.median(np.abs(kept - new_base)))
+        if new_sigma <= 0:
+            break
+        converged = (abs(new_sigma - sigma) < 1e-3 * sigma
+                     and abs(new_base - base) < 1e-3 * max(sigma, 1e-12))
+        base, sigma = new_base, new_sigma
+        if converged:
+            break
+    if sigma <= 0:
+        sigma = float(np.std(values)) or 1e-6
+    return base, sigma
+
+
 def cell_has_punctate_signal(original_crop, cell_mask, image_stats=None,
                              n_sigma=5.0, abs_n_sigma=3.0, min_spot_radius=2,
                              min_area_px=None, smooth_sigma=None):
@@ -119,11 +206,14 @@ def cell_has_punctate_signal(original_crop, cell_mask, image_stats=None,
     This is a hypothesis test, not a contrast heuristic. A pixel counts as
     evidence only if it clears BOTH:
 
-      1. a LOCAL floor  -- `median(cell) + n_sigma * MAD_sigma(cell)`. For pure
-         Gaussian noise the 99.9th percentile sits near +3.1 sigma, so a 5-sigma
-         floor is essentially never crossed by noise alone. `MAD_sigma` is taken
-         over the whole cell, so it reflects the nucleoplasm's own fluctuation
-         (puncta are a small area fraction and barely move the MAD).
+      1. a LOCAL floor  -- `base + n_sigma * sigma` from `robust_cell_background`,
+         which is the cell's own nucleoplasm level and fluctuation with its objects
+         sigma-clipped off. For pure Gaussian noise the 99.9th percentile sits near
+         +3.1 sigma, so a 5-sigma floor is essentially never crossed by noise alone.
+         The clipping is what makes that still true when the objects are
+         CONDENSATES rather than puncta: a plain whole-cell MAD is measuring the gap
+         between nucleoplasm and condensates once they occupy ~40% of the cell, and
+         put this floor above the objects it exists to detect.
 
       2. an ABSOLUTE floor -- `bg_median + abs_n_sigma * bg_sigma` from
          `compute_image_intensity_stats`. This is what a dim, out-of-focus cell
@@ -187,9 +277,12 @@ def cell_has_punctate_signal(original_crop, cell_mask, image_stats=None,
     if vals.size < 10:
         return False, info
 
-    base = float(np.median(vals))
-    mad = float(np.median(np.abs(vals - base)))
-    sigma_cell = 1.4826 * mad
+    # The cell's own background, with its objects clipped off. A plain median/MAD
+    # here measures the gap between nucleoplasm and condensates rather than the
+    # noise as soon as the objects stop being a small area fraction, and the floor
+    # below then sits above the objects it is meant to find — see
+    # `robust_cell_background` for the measurement.
+    base, sigma_cell = robust_cell_background(vals)
     if sigma_cell <= 0:
         sigma_cell = float(np.std(vals)) or 1e-6
     if image_stats is not None:

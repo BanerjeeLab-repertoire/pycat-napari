@@ -29,3 +29,24 @@ worse direction. This is **not** a per-commit CI gate — the value is the cross
   failure.
 
 The machinery is unit-tested in `tests/test_validation_suite.py` (marked `core`).
+
+## The scale benchmark
+
+`benchmarks/condensate_scale.py` answers a different question again: **does segmentation quality
+depend on how big the objects are?** It matters because every scale in the condensate path descends
+from `ball_radius`, and `ball_radius` descends from one line the user drew across one object — so the
+whole chain is a single band-pass centred on a single hand-measured scale.
+
+```
+python -m benchmarks.condensate_scale
+```
+
+Four regimes — `small` (radii 3-8 px), `irregular` (major axis 3-20 px), `large` (radii 10-20 px) and
+`mixed` (small AND large in the same field) — each with CONSTRUCTED ground truth placed before the PSF
+blur, on the same terms as `cases.py`. Results are reported per true-radius bin and split three ways
+(**detected**, **coverage**, **area ratio**) rather than as one false-negative number, because a single
+figure mixes "missed the object" with "found it and drew it too small" — different causes, different
+fixes, and in the `mixed` regime the first dominates while the headline number hides it.
+
+This is what `toolbox/segmentation/object_scale.py` and `boundary_refit.py` were built against; the
+numbers quoted in their docstrings come from here.

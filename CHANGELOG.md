@@ -1,3 +1,63 @@
+## [1.6.460] - 2026-09-08
+### Fixed — **The condensate pipeline is no longer blind to object scale.** Three measured failures, one benchmark.
+Every scale in the condensate path descends from `ball_radius`, and `ball_radius` descends from ONE line the user
+draws across ONE object (`DataClass.update_sizes`: `ball_radius = ceil(1.5 * object_radius)`). That single number
+sets the rolling-ball radius, the Gaussian-division sigma, the white-top-hat footprint, the CLAHE tile and the
+Niblack/Sauvola window — so the whole chain is a single band-pass centred on a single hand-measured scale, and
+nothing in it notices when the objects are not that size.
+
+- **New benchmark: `benchmarks/condensate_scale.py`** — four regimes (`small`, `irregular`, `large`, and `mixed`,
+  which puts small AND large objects in the SAME field) with CONSTRUCTED ground truth placed before the PSF blur,
+  on the same terms as `cases.py`. It reports detection, coverage and area ratio SEPARATELY per true-radius bin,
+  because one false-negative number mixes "missed the object" with "found it and drew it too small" — different
+  causes, different fixes, and in `mixed` the first dominates while the headline number hides it. Everything below
+  was found with it and is measured against it.
+- **New: multi-scale detection** (`toolbox/segmentation/object_scale.py`) — `object_scale_spectrum` measures which
+  object sizes are actually in each cell, by granulometry (opening by increasing disc radius) on the raw image.
+  Measured in the `mixed` regime at the `ball_radius` a user would derive from the dominant small population,
+  objects of radius 8-21 px were detected **0-18%** of the time — they were not mis-sized, they were absent, while
+  small objects scored 95-99%. `recommend_working_scales` now adds a SECOND segmentation pass at the larger scale
+  when the image says a large population is there, and says so in the log. It is purely ADDITIVE: the primary pass
+  still runs at the user's own `ball_radius`, so it can only recover objects, never remove one, and a result stays
+  reproducible from the drawn annotation. Granulometry rather than a Laplacian-of-Gaussian scale-space, because a
+  LoG bank measured on a real cell reports the CELL as the dominant object — a nucleus is a far better blob than
+  anything inside it.
+- **New: raw-image boundary re-fit** (`toolbox/segmentation/boundary_refit.py`) — each object's EDGE is re-placed at
+  its own half-maximum contour in the PRE-enhancement image, instead of wherever the band-pass happened to cross a
+  local threshold. This is what makes a 4 px punctum and a 20 px condensate in the same field measured by the same
+  ruler; before it, the identical settings over-covered elongated objects by 63% while under-covering large round
+  ones by half. Object counts are unchanged — the step only moves boundaries, and it is bounded in both directions
+  so a runaway flood or a vanishing contour keeps the original detection.
+- **Fixed: the punctate gate dropped whole cells full of condensates** (`toolbox/segmentation/intensity.py`) —
+  `cell_has_punctate_signal` took its background level and noise from the median and MAD of the WHOLE cell, on the
+  stated assumption that *"puncta are a small area fraction and barely move the MAD"*. True for puncta; false for
+  condensates. Once the objects pass about half the cell's pixels the median crosses INTO the bright population and
+  the MAD starts measuring the gap between nucleoplasm and condensate rather than the noise — measured at **80x**
+  the true noise — so the gate's `background + 5 sigma` floor landed **above the condensates themselves** and the
+  cell was skipped before any per-object check ran. Six of eighteen cells in the `large` regime, every one of them
+  at an object footprint of 0.40 or more. `robust_cell_background` sigma-clips the objects off first; it is a no-op
+  to four decimal places on a clean cell and leaves the noise-only rejection fixture bit-for-bit unchanged.
+- **Two UI controls**, under "Show refinement parameters": *Detect large objects* and *Re-fit object boundaries*
+  (both on by default), plus a *Boundary level* spinbox. They sit apart from the existing controls because they
+  answer a different question — every other control there decides whether a detection SURVIVES; these decide
+  whether it can be made at all, and how big it is.
+- Tests: `tests/test_object_scale_and_refit.py` (13 cases) and three additions to
+  `tests/test_spurious_puncta_gate.py`, including a fixture verified to fail on the old estimator.
+
+Measured on `benchmarks/condensate_scale.py`, three seeds per regime, IoU against constructed ground truth:
+
+| regime | before | after |
+|---|---|---|
+| small (radii 3-8 px) | FN 16.4% FP 4.9% **IoU 0.787** | FN 10.4% FP 0.0% **IoU 0.896** |
+| irregular (major axis 3-20 px) | FN 3.6% FP 31.6% **IoU 0.647** | FN 8.2% FP 7.1% **IoU 0.847** |
+| large (radii 10-20 px) | FN 45.1% FP 2.2% **IoU 0.527** | FN 2.6% FP 0.0% **IoU 0.974** |
+| mixed (both, one field) | FN 38.4% FP 8.1% **IoU 0.535** | FN 3.4% FP 0.0% **IoU 0.966** |
+| **mean** | FN 25.9% FP 11.7% **IoU 0.624** | FN 6.2% FP 1.8% **IoU 0.921** |
+
+In `mixed`, objects of true radius 11-21 px went from **0-18% detected at 0.06 coverage** to **100% detected at
+1.00 coverage**. Runtime on a 512x512 field went from ~11 s to ~15 s; the second pass runs only in cells whose
+measured spectrum says large objects are there.
+
 ## [1.6.459] - 2026-08-25
 ### Fixed — **Large-condensate preprocessing restored to v1.0.0's recipe, a real closing-operation MemoryError, and batch-replay upscale/object-size parity.**
 Two weeks of iteration on the preprocessing/segmentation cascade ended in reverting the experiment and restoring

@@ -25,6 +25,46 @@ from pycat.toolbox.segmentation_tools import (
     run_segment_subcellular_objects)
 
 
+def _add_object_scale_controls(params_layout, widgets, make_spinbox):
+    """The two SCALE controls, which answer a different question from the rest of the box.
+
+    Every other control there decides whether a detection SURVIVES. These decide whether it
+    can be made at all, and how big it is — the two failure modes no per-object threshold can
+    reach, because both descend from `ball_radius` (one hand-drawn line) rather than from any
+    threshold. See toolbox/segmentation/object_scale.py and boundary_refit.py for the
+    measurements behind the defaults. Split into its own builder to keep
+    ``_build_condensate_refinement_params_group`` under the per-function length ratchet.
+    """
+    from PyQt5.QtWidgets import QCheckBox
+
+    widgets['multiscale'] = QCheckBox("Detect large objects (extra pass at their own scale)")
+    widgets['multiscale'].setChecked(True)
+    widgets['multiscale'].setToolTip(
+        "Measures which object sizes are actually in each cell and, when large objects are "
+        "present alongside small ones, segments again at the larger scale and adds what it "
+        "finds. Additive — it never removes an object the normal pass found. Leave on unless "
+        "you need the older single-scale behaviour; costs roughly one extra pass per cell "
+        "that has large objects.")
+    params_layout.addRow(widgets['multiscale'])
+
+    widgets['boundary_refit'] = QCheckBox("Re-fit object boundaries on the raw image")
+    widgets['boundary_refit'].setChecked(True)
+    widgets['boundary_refit'].setToolTip(
+        "Places each object's edge at its own half-maximum contour in the RAW image instead "
+        "of wherever the enhancement happened to cross a local threshold. This is what makes "
+        "a 4 px punctum and a 20 px condensate in the same field measured the same way. "
+        "Object counts are unchanged — only boundaries move.")
+    params_layout.addRow(widgets['boundary_refit'])
+
+    widgets['refit_level'] = make_spinbox(0.1, 0.9, 0.5, 0.05)
+    widgets['refit_level'].setToolTip(
+        "Contour level for the re-fit, as a fraction of the way from an object's local "
+        "background to its own peak. 0.5 = half maximum (default, and the convention used "
+        "to size a fluorescent object). Lower traces further out into the object's skirt; "
+        "higher cuts closer to its core.")
+    params_layout.addRow("Boundary level (fraction of peak):", widgets['refit_level'])
+
+
 def _build_condensate_refinement_params_group():
     """Build the (initially hidden) 'Refinement Parameters' box for condensate segmentation.
 
@@ -120,6 +160,8 @@ def _build_condensate_refinement_params_group():
         "per-cell CLAHE; the two thresholds above are the intended way to tune it for a "
         "faint-but-real cell instead.")
     params_layout.addRow(w['punctate_gate'])
+
+    _add_object_scale_controls(params_layout, w, _make_spinbox)
 
     return params_group, w
 
@@ -447,6 +489,9 @@ class _SegmentationWidgetsMixin:
         punctate_local_spin = _rp['punctate_gate_sigma']
         punctate_abs_spin = _rp['punctate_gate_abs_sigma']
         punctate_gate_cb = _rp['punctate_gate']
+        multiscale_cb = _rp['multiscale']
+        boundary_refit_cb = _rp['boundary_refit']
+        refit_level_spin = _rp['refit_level']
 
         # Refinement parameters are hidden behind an off-by-default reveal
         # checkbox (advanced tuning; sensible defaults are used otherwise).
@@ -477,6 +522,9 @@ class _SegmentationWidgetsMixin:
                 punctate_gate=punctate_gate_cb.isChecked(),
                 punctate_gate_sigma=punctate_local_spin.value(),
                 punctate_gate_abs_sigma=punctate_abs_spin.value(),
+                multiscale=multiscale_cb.isChecked(),
+                boundary_refit=boundary_refit_cb.isChecked(),
+                refit_level=refit_level_spin.value(),
             )
             fn.__name__ = 'run_segment_subcellular_objects'
             self.on_general_button_clicked(
@@ -495,6 +543,9 @@ class _SegmentationWidgetsMixin:
                 'punctate_gate': punctate_gate_cb.isChecked(),
                 'punctate_gate_sigma': punctate_local_spin.value(),
                 'punctate_gate_abs_sigma': punctate_abs_spin.value(),
+                'multiscale': multiscale_cb.isChecked(),
+                'boundary_refit': boundary_refit_cb.isChecked(),
+                'refit_level': refit_level_spin.value(),
             })
         process_cells_button.clicked.connect(_on_condensate_seg)
         try:

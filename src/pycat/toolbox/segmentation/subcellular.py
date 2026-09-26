@@ -22,6 +22,47 @@ from pycat.toolbox.segmentation.puncta_refinement import puncta_refinement_func
 from pycat.toolbox.segmentation.fz import fz_segmentation_and_binarization
 from pycat.toolbox.segmentation.intensity import cell_has_punctate_signal, compute_image_intensity_stats
 from pycat.toolbox.segmentation.morphology import cell_mask_stretching
+from pycat.toolbox.segmentation.object_scale import (
+    object_scale_spectrum, recommend_working_scales)
+from pycat.toolbox.segmentation.boundary_refit import refit_object_boundaries
+
+
+def _segment_one_scale(enhanced_crop, orig_crop, proc_crop, mask_crop, ball_radius,
+                       min_spot_radius, refine_fast, refinement_kwargs):
+    """One band-pass scale, start to finish: FZ binarisation then the refinement gate.
+
+    Split out so the SECOND (large-object) pass runs the identical code path as the
+    first rather than a parallel copy of it — the divergence that let the CNR fix
+    live in one refinement filter and not the other (see `puncta_refinement`) is
+    exactly what a second hand-written pass would reintroduce.
+    """
+    puncta_mask = fz_segmentation_and_binarization(
+        enhanced_crop, mask_crop, ball_radius,
+        rim_close_radius=4 * ball_radius, raw_img=orig_crop)
+    refined = puncta_refinement_func(
+        orig_crop, proc_crop, puncta_mask, mask_crop,
+        min_spot_radius=min_spot_radius, fast=refine_fast, **refinement_kwargs)
+    return puncta_mask, refined
+
+
+def _large_object_pass(orig_crop, proc_crop, mask_crop, ball_radius,
+                       min_spot_radius, refine_fast, refinement_kwargs):
+    """The added pass for objects the primary scale cannot see.
+
+    It re-derives its OWN enhanced image from the RAW crop at the larger radius
+    rather than reusing the primary pass's `bg_removed_crop`. That is the whole
+    point: `bg_removed_crop` is the band-pass that suppressed these objects, so
+    re-thresholding it at a different radius would not bring them back. Running
+    `rb_gaussian_bg_removal_with_edge_enhancement` again at the large radius puts
+    the pass-band around the large objects instead.
+    """
+    enhanced = rb_gaussian_bg_removal_with_edge_enhancement(
+        orig_crop, ball_radius, mask_crop)
+    if check_contrast_func(enhanced):
+        empty = np.zeros(mask_crop.shape, dtype=bool)
+        return empty, empty
+    return _segment_one_scale(enhanced, orig_crop, proc_crop, mask_crop, ball_radius,
+                              min_spot_radius, refine_fast, refinement_kwargs)
 
 
 @tags_layer('subcellular_segment', role='labels', inputs=('image',),
@@ -31,7 +72,8 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
                                 intensity_hwhm_scale=1.17, max_area_fraction=0.25, min_spot_radius=2,
                                 crop_to_cell=True, refine_fast=None,
                                 image_stats=None, punctate_gate=True,
-                                punctate_gate_sigma=5.0, punctate_gate_abs_sigma=3.0):
+                                punctate_gate_sigma=5.0, punctate_gate_abs_sigma=3.0,
+                                multiscale=True, boundary_refit=True, refit_level=0.5):
     """
     Segments and refines subcellular objects within a specified cell mask from microscopy images.
     The function uses pre-processed images and cell-specific metrics to remove background, enhance
@@ -52,6 +94,20 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
         The radius used in background removal and edge enhancement algorithms.
     cell_df : pandas.DataFrame, optional
         A DataFrame containing cell-specific metrics such as kurtosis and SNR. Default is None.
+    multiscale : bool, optional
+        Measure which object scales are actually in this cell (`object_scale`) and, when the
+        image says large objects are present alongside small ones, run a SECOND segmentation
+        pass at the larger scale and add its objects. Default True. This is ADDITIVE — the
+        primary pass still runs at the caller's `ball_radius`, unchanged — so it can only
+        recover objects, never remove one. Set False for the single-scale behaviour.
+    boundary_refit : bool, optional
+        Re-place each surviving object's edge at its own half-maximum contour in the RAW
+        image (`boundary_refit`), instead of leaving it wherever the band-pass happened to
+        cross a local threshold. Default True. See that module for why the un-refitted size
+        is a property of `ball_radius` rather than of the object.
+    refit_level : float, optional
+        Contour level for the re-fit, as a fraction from an object's local background to its
+        own peak. Default 0.5 (half maximum).
 
     Returns
     -------
@@ -65,6 +121,16 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
     This function applies background removal and edge enhancement before segmenting objects.
     It assesses the quality of segmentation using contrast checks and refines the segmentation
     through a separate refinement function to ensure accurate object detection.
+
+    ── Why there is more than one scale ────────────────────────────────────────────────
+    Every scale in this path descends from `ball_radius`, which descends from ONE line the
+    user drew across ONE object. Measured against constructed ground truth
+    (`benchmarks/condensate_scale.py`), a field mixing 3-8 px and 11-20 px objects segmented
+    at the `ball_radius` a user would derive from the small population detects 95-99% of the
+    small objects and **0-18% of the large ones** — they are not mis-sized, they are absent.
+    `multiscale` is the fix for that, and `boundary_refit` is the fix for the sizes of what
+    is found. Both are measurements the pipeline makes for itself rather than parameters the
+    user has to get right.
     """
     # Convert images to float32 for consistent processing
     original_img = dtype_conversion_func(original_image, 'float32')
@@ -203,15 +269,43 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
         # Same class as the dead SNR gate (1.5.416): a consequential decision made
         # without telling anyone. A UI control that does not reach the code it names
         # is worse than no control, because it looks like it worked.
-        refined_puncta_mask_crop = puncta_refinement_func(
-            orig_crop, proc_crop, puncta_mask_crop, mask_crop,
-            min_spot_radius=min_spot_radius,
+        _refinement_kwargs = dict(
             kurtosis_threshold=kurtosis_threshold,
             local_snr_threshold=local_snr_threshold,
             global_snr_threshold=global_snr_threshold,
             intensity_hwhm_scale=intensity_hwhm_scale,
-            max_area_fraction=max_area_fraction,
-            fast=refine_fast)
+            max_area_fraction=max_area_fraction)
+        refined_puncta_mask_crop = puncta_refinement_func(
+            orig_crop, proc_crop, puncta_mask_crop, mask_crop,
+            min_spot_radius=min_spot_radius, fast=refine_fast,
+            **_refinement_kwargs)
+
+        # ── The scales the IMAGE says are here, not the one line the user drew ──
+        #
+        # Purely ADDITIVE: the primary pass above already ran at the caller's
+        # `ball_radius` and its result is untouched. A second pass is added only
+        # when the measured spectrum says there is a large population the primary
+        # band-pass cannot see — which is a detection failure, not a sizing one
+        # (see this function's Notes and `object_scale`).
+        if multiscale:
+            _plan = recommend_working_scales(
+                object_scale_spectrum(orig_crop, mask_crop),
+                measured_object_radius=ball_radius / 1.5)
+            if _plan['multiscale'] or _plan['disagreement']:
+                napari_show_info(f"Cell {cell_label}: {_plan['reason']}")
+            for _br in _plan['ball_radii'][1:]:
+                _p2, _r2 = _large_object_pass(
+                    orig_crop, proc_crop, mask_crop, _br, min_spot_radius,
+                    refine_fast, _refinement_kwargs)
+                puncta_mask_crop = puncta_mask_crop.astype(bool) | _p2.astype(bool)
+                refined_puncta_mask_crop = (refined_puncta_mask_crop.astype(bool)
+                                            | _r2.astype(bool))
+
+        # ── The EDGE, measured on the raw image rather than inherited from the
+        # band-pass. Identity is already decided above; this only moves boundaries.
+        if boundary_refit:
+            refined_puncta_mask_crop = refit_object_boundaries(
+                orig_crop, refined_puncta_mask_crop, mask_crop, level=refit_level)
 
         # Paste cropped results back into full-size output arrays
         puncta_mask = np.zeros_like(cell_mask)
@@ -225,7 +319,8 @@ def run_segment_subcellular_objects(pre_processed_image_layer, original_image_la
                                     kurtosis_threshold=-3.0, local_snr_threshold=1.0, global_snr_threshold=1.0,
                                     intensity_hwhm_scale=1.17, max_area_fraction=0.25, min_spot_radius=2,
                                     punctate_gate=True, punctate_gate_sigma=5.0,
-                                    punctate_gate_abs_sigma=3.0):
+                                    punctate_gate_abs_sigma=3.0,
+                                    multiscale=True, boundary_refit=True, refit_level=0.5):
     """
     Orchestrates the segmentation and refinement of subcellular objects across all cells
     in an image. It utilizes the napari viewer for visualization and operates on pre-processed
@@ -327,7 +422,9 @@ def run_segment_subcellular_objects(pre_processed_image_layer, original_image_la
             max_area_fraction=max_area_fraction, min_spot_radius=min_spot_radius,
                 image_stats=image_stats, punctate_gate=punctate_gate,
                 punctate_gate_sigma=punctate_gate_sigma,
-                punctate_gate_abs_sigma=punctate_gate_abs_sigma)
+                punctate_gate_abs_sigma=punctate_gate_abs_sigma,
+                multiscale=multiscale, boundary_refit=boundary_refit,
+                refit_level=refit_level)
 
         # Add the segmented mask to the total mask
         total_puncta_mask += puncta_mask 
@@ -389,6 +486,11 @@ def _segment_core(pre_processed_image, original_image, cell_masks, cell_df, ball
     Viewer-free core of the per-cell condensate segmentation loop. Returns
     (labeled_total_puncta, labeled_total_refined). Used both by the interactive
     runner and by the speed-comparison helper so the two never drift.
+
+    `multiscale` and `boundary_refit` are OFF here: this core exists to time and
+    compare the two refinement-filter implementations against each other, and both
+    of those stages run identically either way, so including them would only add
+    the same constant to both timings while diluting the ratio being measured.
     """
     CMS_img = cell_mask_stretching(pre_processed_image, cell_masks)
     unique_labels = np.unique(cell_masks)[1:]
@@ -405,7 +507,7 @@ def _segment_core(pre_processed_image, original_image, cell_masks, cell_df, ball
             kurtosis_threshold=kurtosis_threshold, local_snr_threshold=local_snr_threshold,
             global_snr_threshold=global_snr_threshold, intensity_hwhm_scale=intensity_hwhm_scale,
             max_area_fraction=max_area_fraction, min_spot_radius=min_spot_radius,
-            refine_fast=fast)
+            refine_fast=fast, multiscale=False, boundary_refit=False)
         total_puncta_mask += puncta_mask
         total_refined_puncta_mask += refined_puncta_mask
     return (sk.measure.label(total_puncta_mask.astype(bool)),
