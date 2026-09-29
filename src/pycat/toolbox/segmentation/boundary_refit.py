@@ -113,6 +113,20 @@ def _local_background(sub, seed, cell, others, ring_px,
     return float(np.percentile(sub[ring], percentile))
 
 
+def _resolve_level(level, current):
+    """The level for this pass: a constant, or a function of the object's CURRENT size.
+
+    Humans trace larger objects further out along their profile (measured on 5,581
+    annotated in-cell objects: best-fit level falls from ~0.69 at r = 1-2 px to ~0.28
+    at r >= 8 px; `benchmarks/mask_level_calibration.py`). A callable receives the
+    equivalent radius, in px of THIS image, of the boundary the pass starts from — so
+    an under-covering seed is re-measured once the first pass has grown it.
+    """
+    if callable(level):
+        return float(level(float(np.sqrt(max(int(current.sum()), 1) / np.pi))))
+    return float(level)
+
+
 def _fit_one_object(sub, seed, sub_cell, sub_basin, others, radius, level,
                     percentile, peak_percentile, passes):
     """The level contour for ONE object, refined over `passes` iterations.
@@ -133,7 +147,7 @@ def _fit_one_object(sub, seed, sub_cell, sub_basin, others, radius, level,
         peak = float(np.percentile(sub[seed], peak_percentile))
         if background is None or peak <= background:
             return fitted
-        threshold = background + float(level) * (peak - background)
+        threshold = background + _resolve_level(level, current) * (peak - background)
         # NOT unioned with the seed: the contour has to be free to come inside it,
         # or the over-covered half of the problem can never be corrected. The
         # growth/shrink bounds in the caller are what keep that safe.
@@ -169,10 +183,13 @@ def refit_object_boundaries(raw_image, object_mask, cell_mask, level=0.5,
         creates an object and never deletes one.
     cell_mask : numpy.ndarray
         No object grows outside its cell.
-    level : float, optional
+    level : float or callable, optional
         Fraction of the way from an object's local background to its own peak.
         0.5 (default) is the half-maximum contour. Lower values trace further
-        out into the object's skirt, higher values cut closer to its core.
+        out into the object's skirt, higher values cut closer to its core. A
+        callable ``level(radius_px) -> float`` makes it size-dependent: it is
+        called per object and per pass with the equivalent radius of the current
+        boundary, in px of ``raw_image``.
     max_growth : float, optional
         Reject (and keep the original detection for) any object the re-fit would
         inflate by more than this factor.
