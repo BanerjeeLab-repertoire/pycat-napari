@@ -162,3 +162,38 @@ it risks fitting individual annotators.
   bites the dim half of the population. Phase 2 should keep a floor only as a leak guard, set low
   (~1.5–2σ), and show it doesn't move the scores.
 - No default has changed in this phase.
+
+## Follow-up (same day): perception, and why IoU moves less than the area ratio
+
+**Perceptual threshold — rejected.** Annotation was done on auto-contrasted (min–max) viridis.
+Converting every traced edge into viridis CIE L* above the object's background, humans stop at a
+median ΔL* = 9.3 (IQR 6.3–13.3), but that step still grows with object size (ρ = +0.66), and a
+constant-ΔL* rule is the worst rule tested (mean IoU 0.390, area ratio 0.25 for r < 2.5 px up to
+2.82 for r ≥ 6 px). The rank-based display test above is also unaffected by any monotonic
+lightness curve. Neither the display nor the eye's response explains the size trend.
+
+**Why mean IoU moves 0.500 → 0.571 while the median area ratio goes to 1.00.** The median balances
+over- against under-drawn objects; per object, A(r) is still spread widely (area-ratio IQR
+0.78–1.92, only 37% within ±25%), leaving a gap of ~0.18 IoU to the best single level in every size
+bin. That gap is **not annotator noise**: on 3,935 pairs of the same object traced by two
+annotators, their deviations from A(r) correlate at r = 0.80 (80% of the residual variance is a
+property of the object). It is mostly **leakage**: 30% of objects are drawn > 1.5× too large, and
+for 72% of those the contour more than doubles within one 0.01 level step — it has flooded into a
+neighbour or textured nucleoplasm. Over-drawing tracks crowding: 37% of objects with a neighbour
+within 4 radii, 9% beyond 10 radii.
+
+**Estimated Phase 2 effect** (human-mask seeds, each annotator's other objects as neighbours;
+freeze each object at the last level before its contour touches another object):
+
+| Rule | mean IoU | median area ratio (IQR) | within ±25% |
+|---|---|---|---|
+| FWHM 0.5 | 0.506 | 1.25 (0.74–2.83) | 21% |
+| A(r) | 0.575 | 1.00 (0.77–1.75) | 38% |
+| **A(r) + fusion freeze** | **0.641** | 0.85 (0.69–1.05) | 45% |
+| per-object best level | 0.747 | 0.97 (0.83–1.06) | 71% |
+
+25% of objects are fusion-capped. With leakage blocked, the target can sit slightly further out: the
+best of a coarse grid is A(r) = 0.815 − 0.324 ln r (IoU 0.652, area ratio 0.91–1.03 in every bin),
+only +0.011 over the approved curve and fitted on the same data — so Phase 2 keeps the approved
+A(r) and re-checks the slope leave-one-annotator-out once the real, detection-seeded ladder exists.
+These are optimistic (seeds are the human masks); the runtime numbers are Phase 2's to measure.
