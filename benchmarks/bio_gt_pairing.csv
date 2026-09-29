@@ -1,0 +1,109 @@
+size_class,field,annotator,image,annotation,status,content_best_field,content_verified,content_margin,tif_copy_identical,n_objects
+Small puncta,1,consensus,In Cell 1-GFP.tif,Small puncta\Concensus masks\Puncta Mask 1_consensus_labeled.tif,paired,1,True,5.56,,35
+Small puncta,2,consensus,In Cell 2-GFP.tif,Small puncta\Concensus masks\Puncta Mask 2_consensus_labeled.tif,paired,2,True,2.0,,44
+Small puncta,3,consensus,In Cell 3-GFP.tif,Small puncta\Concensus masks\Puncta Mask 3_consensus_labeled.tif,paired,3,True,5.95,,34
+Small puncta,4,consensus,In Cell 4-GFP.tif,Small puncta\Concensus masks\Puncta Mask 4_consensus_labeled.tif,paired,4,True,2.86,,209
+Small puncta,5,consensus,In Cell 5-GFP.tif,Small puncta\Concensus masks\Puncta Mask 5_consensus_labeled.tif,paired,5,True,2.54,,28
+Small puncta,6,consensus,In Cell 6-GFP.tif,Small puncta\Concensus masks\Puncta Mask 6_consensus_labeled.tif,paired,6,True,3.7,,43
+Small puncta,7,consensus,In Cell 7-GFP.tif,Small puncta\Concensus masks\Puncta Mask 7_consensus_labeled.tif,paired,7,True,2.81,,20
+Small puncta,8,consensus,In Cell 8-GFP.tif,Small puncta\Concensus masks\Puncta Mask 8_consensus_labeled.tif,paired,8,True,2.13,,22
+Small puncta,9,consensus,In Cell 9-GFP.tif,Small puncta\Concensus masks\Puncta Mask 9_consensus_labeled.tif,paired,9,True,2.63,,11
+Small puncta,1,gable,In Cell 1-GFP.tif,Small puncta\Ground Truth masks Gable\Puncta Mask 1.png,paired,1,True,6.44,True,46
+Small puncta,2,gable,In Cell 2-GFP.tif,Small puncta\Ground Truth masks Gable\Puncta Mask 2.png,paired,2,True,1.97,True,59
+Small puncta,3,gable,In Cell 3-GFP.tif,Small puncta\Ground Truth masks Gable\Puncta Mask 3.png,paired,3,True,5.68,True,39
+Small puncta,4,gable,In Cell 4-GFP.tif,Small puncta\Ground Truth masks Gable\Puncta Mask 4.png,paired,4,True,2.84,True,199
+Small puncta,5,gable,In Cell 5-GFP.tif,Small puncta\Ground Truth masks Gable\Puncta Mask 5.png,paired,5,True,2.52,True,35
+Small puncta,6,gable,In Cell 6-GFP.tif,Small puncta\Ground Truth masks Gable\Puncta Mask 6.png,paired,6,True,3.81,True,57
+Small puncta,7,gable,In Cell 7-GFP.tif,Small puncta\Ground Truth masks Gable\Puncta Mask 7.png,paired,7,True,2.48,True,28
+Small puncta,8,gable,In Cell 8-GFP.tif,Small puncta\Ground Truth masks Gable\Puncta Mask 8.png,paired,8,True,1.78,True,33
+Small puncta,9,gable,In Cell 9-GFP.tif,Small puncta\Ground Truth masks Gable\Puncta Mask 9.png,paired,9,True,2.09,True,26
+Small puncta,1,meet,In Cell 1-GFP.tif,Small puncta\Ground Truth masks\Puncta Mask 1.png,paired,1,True,5.23,True,32
+Small puncta,2,meet,In Cell 2-GFP.tif,Small puncta\Ground Truth masks\Puncta Mask 2.png,paired,2,True,1.92,True,38
+Small puncta,3,meet,In Cell 3-GFP.tif,Small puncta\Ground Truth masks\Puncta Mask 3.png,paired,3,True,5.36,True,29
+Small puncta,4,meet,In Cell 4-GFP.tif,Small puncta\Ground Truth masks\Puncta Mask 4.png,paired,4,True,2.62,True,184
+Small puncta,5,meet,In Cell 5-GFP.tif,Small puncta\Ground Truth masks\Puncta Mask 5.png,paired,5,True,2.44,True,24
+Small puncta,6,meet,In Cell 6-GFP.tif,Small puncta\Ground Truth masks\Puncta Mask 6.png,paired,6,True,3.89,True,35
+Small puncta,7,meet,In Cell 7-GFP.tif,Small puncta\Ground Truth masks\Puncta Mask 7.png,paired,7,True,2.43,True,20
+Small puncta,8,meet,In Cell 8-GFP.tif,Small puncta\Ground Truth masks\Puncta Mask 8.png,paired,8,True,2.03,True,17
+Small puncta,9,meet,In Cell 9-GFP.tif,Small puncta\Ground Truth masks\Puncta Mask 9.png,paired,9,True,2.61,True,11
+Small puncta,1,shamli,In Cell 1-GFP.tif,Small puncta\Ground Truth masks - SHAMLI\Ground Truth masks - SHAMLI\Puncta Mask 1.png,paired,1,True,5.51,True,36
+Small puncta,2,shamli,In Cell 2-GFP.tif,Small puncta\Ground Truth masks - SHAMLI\Ground Truth masks - SHAMLI\Puncta Mask 2.png,paired,2,True,2.07,True,44
+Small puncta,3,shamli,In Cell 3-GFP.tif,Small puncta\Ground Truth masks - SHAMLI\Ground Truth masks - SHAMLI\Puncta Mask 3.png,paired,3,True,6.17,True,37
+Small puncta,4,shamli,In Cell 4-GFP.tif,Small puncta\Ground Truth masks - SHAMLI\Ground Truth masks - SHAMLI\Puncta Mask 4.png,paired,4,True,2.87,True,248
+Small puncta,5,shamli,In Cell 5-GFP.tif,Small puncta\Ground Truth masks - SHAMLI\Ground Truth masks - SHAMLI\Puncta Mask 5.png,paired,5,True,2.64,True,27
+Small puncta,6,shamli,In Cell 6-GFP.tif,Small puncta\Ground Truth masks - SHAMLI\Ground Truth masks - SHAMLI\Puncta Mask 6.png,paired,6,True,3.38,True,39
+Small puncta,7,shamli,In Cell 7-GFP.tif,Small puncta\Ground Truth masks - SHAMLI\Ground Truth masks - SHAMLI\Puncta Mask 7.png,paired,7,True,2.38,True,23
+Small puncta,8,shamli,In Cell 8-GFP.tif,Small puncta\Ground Truth masks - SHAMLI\Ground Truth masks - SHAMLI\Puncta Mask 8.png,paired,8,True,2.35,True,21
+Small puncta,9,shamli,In Cell 9-GFP.tif,Small puncta\Ground Truth masks - SHAMLI\Ground Truth masks - SHAMLI\Puncta Mask 9.png,paired,9,True,2.68,True,10
+large puncta,1,consensus,In Cell 1-GFP.tif,large puncta\Concensus masks\Puncta Mask 1_consensus_labeled.tif,paired,1,True,4.89,,59
+large puncta,2,consensus,In Cell 2-GFP.tif,large puncta\Concensus masks\Puncta Mask 2_consensus_labeled.tif,paired,2,True,2.89,,102
+large puncta,3,consensus,In Cell 3-GFP.tif,large puncta\Concensus masks\Puncta Mask 3_consensus_labeled.tif,paired,3,True,9.71,,64
+large puncta,4,consensus,In Cell 4-GFP.tif,large puncta\Concensus masks\Puncta Mask 4_consensus_labeled.tif,paired,4,True,6.42,,114
+large puncta,5,consensus,In Cell 5-GFP.tif,large puncta\Concensus masks\Puncta Mask 5_consensus_labeled.tif,paired,5,True,3.64,,45
+large puncta,6,consensus,In Cell 6-GFP.tif,large puncta\Concensus masks\Puncta Mask 6_consensus_labeled.tif,paired,6,True,6.37,,26
+large puncta,7,consensus,In Cell 7-GFP.tif,large puncta\Concensus masks\Puncta Mask 7_consensus_labeled.tif,paired,7,True,8.7,,39
+large puncta,8,consensus,In Cell 8-GFP.tif,large puncta\Concensus masks\Puncta Mask 8_consensus_labeled.tif,paired,8,True,6.58,,132
+large puncta,9,consensus,In Cell 9-GFP.tif,large puncta\Concensus masks\Puncta Mask 9_consensus_labeled.tif,paired,9,True,5.45,,176
+large puncta,1,gable,In Cell 1-GFP.tif,large puncta\Ground Truth masks Gable\Puncta Mask 1.png,paired,1,True,4.48,True,52
+large puncta,2,gable,In Cell 2-GFP.tif,large puncta\Ground Truth masks Gable\Puncta Mask 2.png,paired,2,True,2.69,True,107
+large puncta,3,gable,In Cell 3-GFP.tif,large puncta\Ground Truth masks Gable\Puncta Mask 3.png,paired,3,True,9.61,True,70
+large puncta,4,gable,In Cell 4-GFP.tif,large puncta\Ground Truth masks Gable\Puncta Mask 4.png,paired,4,True,5.64,True,117
+large puncta,5,gable,In Cell 5-GFP.tif,large puncta\Ground Truth masks Gable\Puncta Mask 5.png,paired,5,True,3.46,True,47
+large puncta,6,gable,In Cell 6-GFP.tif,large puncta\Ground Truth masks Gable\Puncta Mask 6.png,paired,6,True,6.0,True,25
+large puncta,7,gable,In Cell 7-GFP.tif,large puncta\Ground Truth masks Gable\Puncta Mask 7.png,paired,7,True,8.5,True,36
+large puncta,8,gable,In Cell 8-GFP.tif,large puncta\Ground Truth masks Gable\Puncta Mask 8.png,paired,8,True,6.29,True,135
+large puncta,9,gable,In Cell 9-GFP.tif,large puncta\Ground Truth masks Gable\Puncta Mask 9.png,paired,9,True,5.31,True,173
+large puncta,1,meet,In Cell 1-GFP.tif,large puncta\Ground Truth masks\Puncta Mask 1.png,paired,1,True,5.36,True,55
+large puncta,2,meet,In Cell 2-GFP.tif,large puncta\Ground Truth masks\Puncta Mask 2.png,paired,2,True,2.92,True,97
+large puncta,3,meet,In Cell 3-GFP.tif,large puncta\Ground Truth masks\Puncta Mask 3.png,paired,3,True,10.35,True,52
+large puncta,4,meet,In Cell 4-GFP.tif,large puncta\Ground Truth masks\Puncta Mask 4.png,paired,4,True,7.2,True,108
+large puncta,5,meet,In Cell 5-GFP.tif,large puncta\Ground Truth masks\Puncta Mask 5.png,paired,5,True,3.96,True,40
+large puncta,6,meet,In Cell 6-GFP.tif,large puncta\Ground Truth masks\Puncta Mask 6.png,paired,6,True,7.06,True,24
+large puncta,7,meet,In Cell 7-GFP.tif,large puncta\Ground Truth masks\Puncta Mask 7.png,paired,7,True,9.19,True,41
+large puncta,8,meet,In Cell 8-GFP.tif,large puncta\Ground Truth masks\Puncta Mask 8.png,paired,8,True,7.03,True,115
+large puncta,9,meet,In Cell 9-GFP.tif,large puncta\Ground Truth masks\Puncta Mask 9.png,paired,9,True,5.55,True,167
+large puncta,1,shamli,In Cell 1-GFP.tif,large puncta\Ground Truth masks - SHAMLI\Ground Truth masks - SHAMLI\Puncta Mask 1.png,paired,1,True,4.64,True,65
+large puncta,2,shamli,In Cell 2-GFP.tif,large puncta\Ground Truth masks - SHAMLI\Ground Truth masks - SHAMLI\Puncta Mask 2.png,paired,2,True,2.93,True,108
+large puncta,3,shamli,In Cell 3-GFP.tif,large puncta\Ground Truth masks - SHAMLI\Ground Truth masks - SHAMLI\Puncta Mask 3.png,paired,3,True,9.31,True,68
+large puncta,4,shamli,In Cell 4-GFP.tif,large puncta\Ground Truth masks - SHAMLI\Ground Truth masks - SHAMLI\Puncta Mask 4.png,paired,4,True,6.05,True,126
+large puncta,5,shamli,In Cell 5-GFP.tif,large puncta\Ground Truth masks - SHAMLI\Ground Truth masks - SHAMLI\Puncta Mask 5.png,paired,5,True,3.5,True,53
+large puncta,6,shamli,In Cell 6-GFP.tif,large puncta\Ground Truth masks - SHAMLI\Ground Truth masks - SHAMLI\Puncta Mask 6.png,paired,6,True,6.04,True,31
+large puncta,7,shamli,In Cell 7-GFP.tif,large puncta\Ground Truth masks - SHAMLI\Ground Truth masks - SHAMLI\Puncta Mask 7.png,paired,7,True,7.62,True,38
+large puncta,8,shamli,In Cell 8-GFP.tif,large puncta\Ground Truth masks - SHAMLI\Ground Truth masks - SHAMLI\Puncta Mask 8.png,paired,8,True,6.01,True,141
+large puncta,9,shamli,In Cell 9-GFP.tif,large puncta\Ground Truth masks - SHAMLI\Ground Truth masks - SHAMLI\Puncta Mask 9.png,paired,9,True,5.19,True,192
+Irregular puncta,1,consensus,In Cell 1-GFP.tif,Irregular puncta\Concensus masks\Puncta Mask 1_consensus_labeled.tif,paired,1,True,4.79,,91
+Irregular puncta,2,consensus,In Cell 2-GFP.tif,Irregular puncta\Concensus masks\Puncta Mask 2_consensus_labeled.tif,paired,2,True,3.65,,34
+Irregular puncta,3,consensus,In Cell 3-GFP.tif,Irregular puncta\Concensus masks\Puncta Mask 3_consensus_labeled.tif,paired,3,True,9.87,,32
+Irregular puncta,4,consensus,In Cell 4-GFP.tif,Irregular puncta\Concensus masks\Puncta Mask 4_consensus_labeled.tif,paired,4,True,12.92,,60
+Irregular puncta,5,consensus,In Cell 5-GFP.tif,Irregular puncta\Concensus masks\Puncta Mask 5_consensus_labeled.tif,paired,5,True,4.13,,55
+Irregular puncta,6,consensus,In Cell 6-GFP.tif,Irregular puncta\Concensus masks\Puncta Mask 6_consensus_labeled.tif,paired,6,True,2.17,,31
+Irregular puncta,7,consensus,In Cell 7-GFP.tif,Irregular puncta\Concensus masks\Puncta Mask 7_consensus_labeled.tif,paired,7,True,8.15,,111
+Irregular puncta,8,consensus,In Cell 8-GFP.tif,Irregular puncta\Concensus masks\Puncta Mask 8_consensus_labeled.tif,paired,8,True,6.9,,88
+Irregular puncta,9,consensus,In Cell 9-GFP.tif,Irregular puncta\Concensus masks\Puncta Mask 9_consensus_labeled.tif,paired,9,True,5.92,,101
+Irregular puncta,1,gable,In Cell 1-GFP.tif,Irregular puncta\Ground truth Gable\Puncta Mask 1.png,paired,1,True,3.96,True,128
+Irregular puncta,2,gable,In Cell 2-GFP.tif,Irregular puncta\Ground truth Gable\Puncta Mask 2.png,paired,2,True,3.28,True,65
+Irregular puncta,3,gable,In Cell 3-GFP.tif,Irregular puncta\Ground truth Gable\Puncta Mask 3.png,paired,3,True,9.9,True,52
+Irregular puncta,4,gable,In Cell 4-GFP.tif,Irregular puncta\Ground truth Gable\Puncta Mask 4.png,paired,4,True,10.43,True,89
+Irregular puncta,5,gable,In Cell 5-GFP.tif,Irregular puncta\Ground truth Gable\Puncta Mask 5.png,paired,5,True,3.7,True,78
+Irregular puncta,6,gable,In Cell 6-GFP.tif,Irregular puncta\Ground truth Gable\Puncta Mask 6.png,paired,6,True,1.7,True,58
+Irregular puncta,7,gable,In Cell 7-GFP.tif,Irregular puncta\Ground truth Gable\Puncta Mask 7.png,paired,7,True,6.98,True,170
+Irregular puncta,8,gable,In Cell 8-GFP.tif,Irregular puncta\Ground truth Gable\Puncta Mask 8.png,paired,8,True,6.73,True,132
+Irregular puncta,9,gable,In Cell 9-GFP.tif,Irregular puncta\Ground truth Gable\Puncta Mask 9.png,paired,9,True,5.24,True,120
+Irregular puncta,1,meet,In Cell 1-GFP.tif,Irregular puncta\Ground truth\Puncta Mask 1.png,paired,1,True,4.96,True,73
+Irregular puncta,2,meet,In Cell 2-GFP.tif,Irregular puncta\Ground truth\Puncta Mask 2.png,paired,2,True,3.83,True,22
+Irregular puncta,3,meet,In Cell 3-GFP.tif,Irregular puncta\Ground truth\Puncta Mask 3.png,paired,3,True,8.9,True,19
+Irregular puncta,4,meet,In Cell 4-GFP.tif,Irregular puncta\Ground truth\Puncta Mask 4.png,paired,4,True,12.97,True,49
+Irregular puncta,5,meet,In Cell 5-GFP.tif,Irregular puncta\Ground truth\Puncta Mask 5.png,paired,5,True,4.15,True,42
+Irregular puncta,6,meet,In Cell 6-GFP.tif,Irregular puncta\Ground truth\Puncta Mask 6.png,paired,6,True,2.2,True,23
+Irregular puncta,7,meet,In Cell 7-GFP.tif,Irregular puncta\Ground truth\Puncta Mask 7.png,paired,7,True,8.42,True,76
+Irregular puncta,8,meet,In Cell 8-GFP.tif,Irregular puncta\Ground truth\Puncta Mask 8.png,paired,8,True,6.68,True,57
+Irregular puncta,9,meet,In Cell 9-GFP.tif,Irregular puncta\Ground truth\Puncta Mask 9.png,paired,9,True,5.86,True,76
+Irregular puncta,1,shamli,In Cell 1-GFP.tif,Irregular puncta\Ground Truth masks - SHAMLI\Ground Truth masks - SHAMLI\Puncta Mask 1.png,paired,1,True,4.27,True,85
+Irregular puncta,2,shamli,In Cell 2-GFP.tif,Irregular puncta\Ground Truth masks - SHAMLI\Ground Truth masks - SHAMLI\Puncta Mask 2.png,paired,2,True,3.61,True,33
+Irregular puncta,3,shamli,In Cell 3-GFP.tif,Irregular puncta\Ground Truth masks - SHAMLI\Ground Truth masks - SHAMLI\Puncta Mask 3.png,paired,3,True,9.95,True,34
+Irregular puncta,4,shamli,In Cell 4-GFP.tif,Irregular puncta\Ground Truth masks - SHAMLI\Ground Truth masks - SHAMLI\Puncta Mask 4.png,paired,4,True,14.31,True,55
+Irregular puncta,5,shamli,In Cell 5-GFP.tif,Irregular puncta\Ground Truth masks - SHAMLI\Ground Truth masks - SHAMLI\Puncta Mask 5.png,paired,5,True,4.17,True,52
+Irregular puncta,6,shamli,In Cell 6-GFP.tif,Irregular puncta\Ground Truth masks - SHAMLI\Ground Truth masks - SHAMLI\Puncta Mask 6.png,paired,6,True,2.08,True,31
+Irregular puncta,7,shamli,In Cell 7-GFP.tif,Irregular puncta\Ground Truth masks - SHAMLI\Ground Truth masks - SHAMLI\Puncta Mask 7.png,paired,7,True,8.15,True,109
+Irregular puncta,8,shamli,In Cell 8-GFP.tif,Irregular puncta\Ground Truth masks - SHAMLI\Ground Truth masks - SHAMLI\Puncta Mask 8.png,paired,8,True,6.98,True,90
+Irregular puncta,9,shamli,In Cell 9-GFP.tif,Irregular puncta\Ground Truth masks - SHAMLI\Ground Truth masks - SHAMLI\Puncta Mask 9.png,paired,9,True,6.28,True,100

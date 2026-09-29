@@ -171,3 +171,8 @@ Thumbs.db
 # Build metadata — generated into the sdist/wheel at build time; never hand-edited or committed.
 PKG-INFO
 *.egg-info/
+
+# Per-object calibration measurements from unpublished manuscript data (regenerate with
+# python -m benchmarks.mask_inventory / benchmarks.mask_level_calibration)
+benchmarks/bio_gt_objects.csv
+benchmarks/mask_level_objects.csv
