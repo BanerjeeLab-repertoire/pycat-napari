@@ -44,7 +44,8 @@ def replay_condensate_analysis(state: dict, image_path: Path, params: dict, outp
         labeled_cells[0:2, 0:2] = 0
 
     cell_labeled_puncta = puncta_analysis_func(
-        puncta_mask, image, labeled_cells, data_instance
+        puncta_mask, image, labeled_cells, data_instance,
+        filter_irregular=params.get('filter_irregular', True),
     )
 
     # Retrieve the DataFrames written into data_instance by puncta_analysis_func

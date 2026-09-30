@@ -693,7 +693,9 @@ def _store_cell_puncta_stats(data_instance, label, df, labeled_puncta, image,
     mpp = data_instance.data_repository['microns_per_pixel_sq']
 
     puncta_total_int = (df['intensity_mean'] * df['area']).sum()
-    num_puncta = np.max(labeled_puncta)
+    # One row per punctum, so this equals the label max -- and stays right when shape-filtered rows
+    # are left out of the summary (see `flag_irregular_puncta`).
+    num_puncta = len(df)
     puncta_int_dist_mean = df['intensity_mean'].mean()
 
     # Dilute phase (cell minus puncta)
@@ -727,7 +729,31 @@ def _store_cell_puncta_stats(data_instance, label, df, labeled_puncta, image,
     return cell_df
 
 
-def puncta_analysis_func(puncta_masks, image, labeled_cells, data_instance, progress_callback=None):
+# ── Large irregular objects (spec Phase 4) ──────────────────────────────────────────────
+# An object much larger than the measured object scale AND far from convex is an aggregate, a
+# nucleolus rim or two condensates bridged by nucleoplasm -- rarely what a user means by a
+# condensate. Measured on 5,581 traced objects: annotators DO trace moderately irregular puncta
+# (30% of the Irregular fields' objects have solidity < 0.9), but at these thresholds no object in
+# any annotated cell is flagged, and none that is flagged anywhere was traced by an annotator
+# (docs/audits/region_selection_phases2-3_2026-09-29.md). So the flag catches gross aggregates
+# only. Flagged rows are KEPT in puncta_df (`shape_filtered`); only the per-cell summaries leave
+# them out, and only when the filter is on.
+IRREGULAR_AREA_FACTOR = 4.0     # x the object area implied by the measure line
+IRREGULAR_MAX_SOLIDITY = 0.8    # area / convex-hull area
+
+
+def flag_irregular_puncta(df, data_instance):
+    """Add ``shape_filtered``: area > IRREGULAR_AREA_FACTOR x the measured object's area and
+    solidity < IRREGULAR_MAX_SOLIDITY. The object scale is ``ball_radius / 1.5`` (its definition)."""
+    ball_radius = float(data_instance.data_repository.get('ball_radius') or 0)
+    object_area = np.pi * (ball_radius / 1.5) ** 2
+    df['shape_filtered'] = ((df['area'] > IRREGULAR_AREA_FACTOR * object_area)
+                            & (df['solidity'] < IRREGULAR_MAX_SOLIDITY)) if object_area > 0 else False
+    return df
+
+
+def puncta_analysis_func(puncta_masks, image, labeled_cells, data_instance, progress_callback=None,
+                         filter_irregular=True):
     """
     Analyzes sub-cellular objects within segmented cells, calculating properties of puncta such as area, intensity,
     and shape metrics. It associates puncta with their respective cells, computes various statistics
@@ -743,6 +769,9 @@ def puncta_analysis_func(puncta_masks, image, labeled_cells, data_instance, prog
         An image with cells labeled by unique integers, used to associate puncta with specific cells.
     data_instance : object
         An object that provides access to a data repository for storing and retrieving analysis results.
+    filter_irregular : bool, optional
+        Leave large irregular objects (``shape_filtered``, see `flag_irregular_puncta`) out of the
+        per-cell summaries. They stay in ``puncta_df`` either way. Default True.
 
     Returns
     -------
@@ -766,7 +795,7 @@ def puncta_analysis_func(puncta_masks, image, labeled_cells, data_instance, prog
     global_labeled_puncta = np.zeros_like(labeled_cells)
     _global = 0
     # Define the properties to measure for each object and create an empty list to store additional properties
-    properties = ('label', 'area', 'intensity_mean', 'axis_major_length', 'axis_minor_length', 'eccentricity', 'perimeter', 'bbox')
+    properties = ('label', 'area', 'intensity_mean', 'axis_major_length', 'axis_minor_length', 'eccentricity', 'perimeter', 'solidity', 'bbox')
     puncta_prop_list = []
 
     # A determinate bar over the per-cell puncta loop (the countable work). `progress_callback(done,
@@ -818,8 +847,10 @@ def puncta_analysis_func(puncta_masks, image, labeled_cells, data_instance, prog
 
         # Compute this cell's puncta + dilute-phase statistics and write them onto its cell_df row.
         # Extracted to a helper so the per-cell loop stays within the review-length budget.
-        _store_cell_puncta_stats(data_instance, label, df, labeled_puncta, image,
-                                 cell_xor_puncta_mask, cell_mask_holder)
+        df = flag_irregular_puncta(df, data_instance)
+        _store_cell_puncta_stats(data_instance, label,
+                                 df[~df['shape_filtered']] if filter_irregular else df,
+                                 labeled_puncta, image, cell_xor_puncta_mask, cell_mask_holder)
 
         # Append the puncta properties DataFrame to a list for later concatenation
         puncta_prop_list.append(df)
@@ -835,7 +866,7 @@ def puncta_analysis_func(puncta_masks, image, labeled_cells, data_instance, prog
     return cell_labeled_puncta
 
 
-def run_puncta_analysis_func(puncta_mask_layer, image_layer, data_instance, viewer):
+def run_puncta_analysis_func(puncta_mask_layer, image_layer, data_instance, viewer, filter_irregular=True):
     """
     Orchestrates the workflow for analyzing puncta within labeled cells in an image. This function assumes
     that cell segmentation has been previously conducted and labeled cell masks are available. It utilizes
@@ -902,7 +933,8 @@ def run_puncta_analysis_func(puncta_mask_layer, image_layer, data_instance, view
     _parent = getattr(getattr(viewer, 'window', None), '_qt_window', None)
     cell_labeled_puncta = run_with_progress(
         lambda progress: puncta_analysis_func(puncta_masks, image, labeled_cells, data_instance,
-                                              progress_callback=progress),
+                                              progress_callback=progress,
+                                              filter_irregular=filter_irregular),
         title='Condensate Analysis', text='Analysing condensates…', parent=_parent)
 
     # Update the viewer with new layers showing the results of the puncta analysis

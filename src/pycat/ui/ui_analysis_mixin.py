@@ -104,16 +104,31 @@ class _AnalysisWidgetsMixin:
         puncta_measure_dropdown_images = self._layer_row(
             measure_puncta_layout, 'Select Image for Puncta Measurement:',
             napari.layers.Image, name_hint='Upscaled Fluorescence')
+        from PyQt5.QtWidgets import QCheckBox
+        filter_irregular_cb = QCheckBox("Filter irregular objects")
+        filter_irregular_cb.setChecked(True)
+        filter_irregular_cb.setToolTip(
+            "Leaves large irregular objects out of the per-cell results: area more than 4x the "
+            "measured object and solidity (area / convex area) below 0.8 -- aggregates, nucleolar "
+            "rims, condensates bridged by nucleoplasm. They are never deleted: every object stays in "
+            "the condensate table with shape_filtered = True/False. Uncheck to include aggregates and "
+            "nucleolus-like objects in the per-cell counts and means.")
+        measure_puncta_layout.addWidget(filter_irregular_cb)
         puncta_measure_button = QPushButton("Run Condensate Analyzer") # Create a button widget
         puncta_measure_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         def _on_puncta_analysis():
+            import functools
+            fn = functools.partial(run_puncta_analysis_func,
+                                   filter_irregular=filter_irregular_cb.isChecked())
+            fn.__name__ = 'run_puncta_analysis_func'
             self.on_general_button_clicked(
-                run_puncta_analysis_func, self.viewer,
+                fn, self.viewer,
                 puncta_measure_dropdown_labels, puncta_measure_dropdown_images,
                 self.central_manager.active_data_class, self.viewer)
             self._record('condensate_analysis', {
                 'labels_layer': puncta_measure_dropdown_labels.currentText(),
                 'image_layer': puncta_measure_dropdown_images.currentText(),
+                'filter_irregular': filter_irregular_cb.isChecked(),
             })
             # Mount the two-tier brushable panel (plots + cell/condensate tables + cell & punctum image
             # tiers). Done here because it needs central_manager.selection, which the science function cannot

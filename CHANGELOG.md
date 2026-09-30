@@ -1,3 +1,20 @@
+## [1.6.462] - 2026-09-30
+### Added — **Large irregular objects are flagged, never deleted** (region-selection spec, Phase 4).
+- **New `shape_filtered` and `solidity` columns in `puncta_df`.** An object is flagged when its area is more than
+  4× the object area implied by the measure line (`ball_radius / 1.5`) **and** its solidity (area / convex area)
+  is below 0.8 — aggregates, nucleolar rims, condensates bridged by nucleoplasm. Every object stays in the table.
+- **"Filter irregular objects" checkbox** on the condensate analyzer, default on: flagged objects are left out of
+  the per-cell summaries (`number_of_puncta`, mean areas, intensities, partition/SNR tests, spark score).
+  Unchecked, they are included. Recorded for batch replay (`filter_irregular`).
+- **Why these thresholds, and not a pure shape cut.** The annotators DO trace moderately irregular puncta — 30%
+  of the Irregular fields' consensus objects have solidity < 0.9 — so a shape-only filter would disagree with the
+  ground truth. What they essentially never trace is *large* irregular objects. At 4× / 0.8 nothing in any
+  annotated cell (27 fields, 1.6.461 output) is flagged and none of the objects flagged anywhere was traced by an
+  annotator; at 2× the filter starts removing traced area in the Irregular fields. The thresholds are conventional
+  values, checked against — not fitted to — the annotations.
+- `number_of_puncta` is now the row count of the objects summarised (identical to the label maximum when nothing
+  is filtered).
+
 ## [1.6.461] - 2026-09-30
 ### Changed — **Condensate boundaries: regional where an object is condensate-like, half-max otherwise, and objects are never fused.**
 Default changed, as a documented decision: `segment_subcellular_objects` / `run_segment_subcellular_objects`
