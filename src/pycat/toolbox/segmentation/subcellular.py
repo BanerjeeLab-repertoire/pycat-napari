@@ -24,7 +24,8 @@ from pycat.toolbox.segmentation.intensity import cell_has_punctate_signal, compu
 from pycat.toolbox.segmentation.morphology import cell_mask_stretching
 from pycat.toolbox.segmentation.object_scale import (
     object_scale_spectrum, recommend_working_scales)
-from pycat.toolbox.segmentation.boundary_refit import refit_object_boundaries
+from pycat.toolbox.segmentation.boundary_refit import (refit_object_boundaries,
+                                                       refit_regional_boundaries)
 
 
 def _segment_one_scale(enhanced_crop, orig_crop, proc_crop, mask_crop, ball_radius,
@@ -73,7 +74,8 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
                                 crop_to_cell=True, refine_fast=None,
                                 image_stats=None, punctate_gate=True,
                                 punctate_gate_sigma=5.0, punctate_gate_abs_sigma=3.0,
-                                multiscale=True, boundary_refit=True, refit_level=0.5):
+                                multiscale=True, boundary_refit=True, refit_level=0.5,
+                                boundary_mode='regional'):
     """
     Segments and refines subcellular objects within a specified cell mask from microscopy images.
     The function uses pre-processed images and cell-specific metrics to remove background, enhance
@@ -108,6 +110,11 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
     refit_level : float, optional
         Contour level for the re-fit, as a fraction from an object's local background to its
         own peak. Default 0.5 (half maximum).
+    boundary_mode : {'regional', 'level'}, optional
+        'regional' (default): each object keeps a regional boundary when it is condensate-like
+        and its ``refit_level`` contour otherwise, with objects kept apart
+        (`boundary_refit.refit_regional_boundaries`). 'level': the ``refit_level`` contour for
+        every object — the behaviour before 1.6.461.
 
     Returns
     -------
@@ -304,8 +311,13 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
         # ── The EDGE, measured on the raw image rather than inherited from the
         # band-pass. Identity is already decided above; this only moves boundaries.
         if boundary_refit:
-            refined_puncta_mask_crop = refit_object_boundaries(
-                orig_crop, refined_puncta_mask_crop, mask_crop, level=refit_level)
+            if boundary_mode == 'regional':
+                refined_puncta_mask_crop = refit_regional_boundaries(
+                    orig_crop, refined_puncta_mask_crop, mask_crop, ball_radius,
+                    level=refit_level)
+            else:
+                refined_puncta_mask_crop = refit_object_boundaries(
+                    orig_crop, refined_puncta_mask_crop, mask_crop, level=refit_level)
 
         # Paste cropped results back into full-size output arrays
         puncta_mask = np.zeros_like(cell_mask)
@@ -320,7 +332,8 @@ def run_segment_subcellular_objects(pre_processed_image_layer, original_image_la
                                     intensity_hwhm_scale=1.17, max_area_fraction=0.25, min_spot_radius=2,
                                     punctate_gate=True, punctate_gate_sigma=5.0,
                                     punctate_gate_abs_sigma=3.0,
-                                    multiscale=True, boundary_refit=True, refit_level=0.5):
+                                    multiscale=True, boundary_refit=True, refit_level=0.5,
+                                    boundary_mode='regional'):
     """
     Orchestrates the segmentation and refinement of subcellular objects across all cells
     in an image. It utilizes the napari viewer for visualization and operates on pre-processed
@@ -424,7 +437,7 @@ def run_segment_subcellular_objects(pre_processed_image_layer, original_image_la
                 punctate_gate_sigma=punctate_gate_sigma,
                 punctate_gate_abs_sigma=punctate_gate_abs_sigma,
                 multiscale=multiscale, boundary_refit=boundary_refit,
-                refit_level=refit_level)
+                refit_level=refit_level, boundary_mode=boundary_mode)
 
         # Add the segmented mask to the total mask
         total_puncta_mask += puncta_mask 

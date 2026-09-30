@@ -1,3 +1,42 @@
+## [1.6.461] - 2026-09-30
+### Changed — **Condensate boundaries: regional where an object is condensate-like, half-max otherwise, and objects are never fused.**
+Default changed, as a documented decision: `segment_subcellular_objects` / `run_segment_subcellular_objects`
+`boundary_mode` **`'level'` (half-max contour for every object, the 1.6.460 behaviour) → `'regional'`**. Measured
+against 5,581 objects traced by three annotators (Box, *Biological data comparison*), scored on the nuclei they
+annotated, with object sizes from the image (`estimate_object_size_px`) — no annotation enters the run, and every
+setting was chosen by field-held-out cross-validation of pooled pixel IoU over all 27 fields:
+
+| consensus pixel IoU | pooled | large | small | irregular |
+|---|---|---|---|---|
+| 1.6.460 (half-max) | 0.468 | 0.55 | 0.40 | 0.20 |
+| **1.6.461 (regional)** | **0.580** | **0.71** | **0.44** | **0.19** |
+| CellProfiler (hand-tuned per class) | 0.554 | 0.71 | 0.13 | 0.17 |
+
+Large puncta are now level with CellProfiler (ΔIoU +0.005, 95% CI −0.030…+0.067) while fusing 0% of annotated
+condensates into a neighbour (CellProfiler 28%, the regional step without separation 11%). Irregular −0.010
+(CI −0.035…+0.000, not significant). Robust to the measure line: pooled 0.577 / 0.572 / 0.561 at 0.7× / 1× /
+1.5× the estimated object size.
+
+- **New `boundary_refit.refit_regional_boundaries`.** Each detection is grown by watershed into the cell's
+  foreground (per-cell Otsu × 0.8 of a white top-hat at 2 × `ball_radius`) and keeps that region only if it is
+  compact (solidity ≥ 0.9) and at most 2.5× its own half-max contour; otherwise it keeps the half-max contour.
+  Half-max under-draws large condensates (seeds cover ~45% of them); a regional threshold over-draws sparse
+  puncta 9–15× — the guards decide per object, from the image, which one applies.
+- **New `boundary_refit.keep_objects_apart`**: drops pixels where two different objects touch, so the
+  pipeline's boolean OR + relabel cannot fuse objects the boundary step kept distinct.
+- **GUI:** "Regional boundaries for condensates" checkbox in *Show refinement parameters*, default on;
+  unchecked = the Boundary level contour for every object. Recorded for batch replay.
+- **Fixed — batch replay ignored the recorded boundary settings.** `replay_condensate_segmentation` passed none
+  of `multiscale`, `boundary_refit`, `refit_level` (or now `boundary_mode`), so a batch run silently used the
+  library defaults whatever the user set interactively.
+- **Not changed:** detection gates. Of the large-puncta objects 1.6.460 misses, 132/141 are never proposed by the
+  segmentation (8 are gated out), so loosening gates cannot recover them; two extra proposal passes were tested
+  and added more untraced detections than they recovered.
+- **Benchmarks** (`benchmarks/`): `mask_inventory.py` (image↔annotation pairing verified by content, inter-annotator
+  agreement), `mask_level_calibration.py` (+ figures), `incell_pipeline_eval.py` (the GUI chain headless, all
+  annotators + CellProfiler, annotated cells only). Reports: `docs/audits/mask_level_calibration_2026-09-29.md`
+  (including the withdrawn Phase 1 size rule and why), `docs/audits/region_selection_phases2-3_2026-09-29.md`.
+
 ## [1.6.460] - 2026-09-08
 ### Fixed — **The condensate pipeline is no longer blind to object scale.** Three measured failures, one benchmark.
 Every scale in the condensate path descends from `ball_radius`, and `ball_radius` descends from ONE line the user

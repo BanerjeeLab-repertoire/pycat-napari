@@ -197,3 +197,21 @@ best of a coarse grid is A(r) = 0.815 − 0.324 ln r (IoU 0.652, area ratio 0.91
 only +0.011 over the approved curve and fitted on the same data — so Phase 2 keeps the approved
 A(r) and re-checks the slope leave-one-annotator-out once the real, detection-seeded ladder exists.
 These are optimistic (seeds are the human masks); the runtime numbers are Phase 2's to measure.
+
+## Correction (2026-09-29/30): A(r) does not survive at runtime — withdrawn
+
+**The size rule above is withdrawn.** Its IoU gain (0.500 → 0.571) was measured using each object's
+*human-traced* radius. That is partly circular: tracing lower on an object's profile makes its mask
+bigger, so per-object tracing noise alone produces "bigger objects are traced at lower levels". At
+runtime there is no human mask; forced to be self-consistent (the level whose own contour has the
+radius A(r) assigns it), A(r) scores **0.46 — worse than half-max**. In the real 1.6.460 pipeline it
+moved large-puncta IoU only 0.50 → 0.53. The leave-one-annotator-out check did not catch this
+because it still used the held-out annotator's own radius.
+
+A per-object level model trained on these masks (gradient-boosted, on profile and SNR features)
+was also built and **not shipped**: with a whole class held out it lost its large-puncta advantage
+(0.71 → 0.61), i.e. it had learned these annotators on this dataset — unacceptable for a control
+figure compared against the same annotations. What does hold from this report: the level varies
+strongly between objects, 80% of that variation is shared between annotators, and the displayed
+colormap does not explain it. The shipped fix (1.6.461) uses no annotation at all — see
+`region_selection_phases2-3_2026-09-29.md`.

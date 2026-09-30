@@ -114,14 +114,8 @@ def _local_background(sub, seed, cell, others, ring_px,
 
 
 def _resolve_level(level, current):
-    """The level for this pass: a constant, or a function of the object's CURRENT size.
-
-    Humans trace larger objects further out along their profile (measured on 5,581
-    annotated in-cell objects: best-fit level falls from ~0.69 at r = 1-2 px to ~0.28
-    at r >= 8 px; `benchmarks/mask_level_calibration.py`). A callable receives the
-    equivalent radius, in px of THIS image, of the boundary the pass starts from — so
-    an under-covering seed is re-measured once the first pass has grown it.
-    """
+    """The level for this pass: a constant, or a function of the CURRENT boundary's
+    equivalent radius, in px of this image (called per object, per pass)."""
     if callable(level):
         return float(level(float(np.sqrt(max(int(current.sum()), 1) / np.pi))))
     return float(level)
@@ -254,3 +248,102 @@ def refit_object_boundaries(raw_image, object_mask, cell_mask, level=0.5,
             fitted = seed
         out[view] |= fitted
     return out
+
+
+# ── Regional boundaries ─────────────────────────────────────────────────────────
+#
+# Half-maximum is the right edge for a punctum near the PSF, and the wrong one for a
+# condensate several times larger: its seed under-covers it by about half, the ring the
+# level is measured from lands in its own skirt, and the result is drawn at ~0.55 of the
+# area three annotators traced (large-puncta fields, 1.6.460). A simple per-cell
+# threshold gets those right — which is why a hand-tuned CellProfiler pipeline beat PyCAT
+# there — and badly wrong for sparse puncta, where the same threshold splits nucleoplasm
+# from background and over-draws 9-15x.
+#
+# So each detection is offered BOTH boundaries and keeps the regional one only when it
+# behaves like a condensate: compact, and not far past its own half-max contour. Nothing
+# here was fitted to human masks: the four constants below were chosen by field-held-out
+# cross-validation of pooled pixel IoU over all 27 annotated fields, with object sizes
+# from `estimate_object_size_px` (docs/audits/region_selection_phases2-3_2026-09-29.md).
+
+# Top-hat radius, in units of ball_radius: flattens nucleoplasm, keeps objects up to it.
+REGIONAL_TOPHAT_SCALE = 2.0
+# The regional foreground is the per-cell Otsu threshold of the flattened image x this.
+REGIONAL_OTSU_FACTOR = 0.8
+# Keep the regional boundary only if it is at most this many times the half-max one...
+REGIONAL_MAX_GROWTH = 2.5
+# ...and at least this solid (area / convex area). A region that leaks along textured
+# nucleoplasm or an irregular aggregate is not compact, and keeps its half-max edge.
+REGIONAL_MIN_SOLIDITY = 0.9
+# Smoothing for the regional pass: one ORIGINAL pixel at the GUI's x2 working grid.
+REGIONAL_SMOOTH_SIGMA = 2.0
+
+
+def keep_objects_apart(labels):
+    """Remove the pixels where two DIFFERENT objects touch.
+
+    Callers accumulate objects into one boolean mask and relabel it, so any two objects
+    that touch come back as one. Measured on the large-puncta fields, touching regional
+    boundaries fused 11% of annotated condensates that way (CellProfiler: 28%). A one-pixel
+    gap makes relabelling unable to merge objects this step kept distinct.
+    """
+    labels = np.asarray(labels)
+    high = ndi.maximum_filter(labels, size=3)
+    low = ndi.minimum_filter(np.where(labels == 0, np.iinfo(labels.dtype).max, labels), size=3)
+    touching = (labels > 0) & ((high > labels) | (low < labels))
+    return np.where(touching, 0, labels)
+
+
+def refit_regional_boundaries(raw_image, object_mask, cell_mask, ball_radius, level=0.5,
+                              tophat_scale=REGIONAL_TOPHAT_SCALE,
+                              otsu_factor=REGIONAL_OTSU_FACTOR,
+                              max_growth=REGIONAL_MAX_GROWTH,
+                              min_solidity=REGIONAL_MIN_SOLIDITY,
+                              smooth_sigma=REGIONAL_SMOOTH_SIGMA):
+    """Per object, the regional boundary if it is condensate-like, else the ``level`` contour.
+
+    Each detection is grown by watershed into the cell's foreground — the Otsu threshold
+    (x ``otsu_factor``) of the image after a white top-hat at ``tophat_scale * ball_radius``
+    — and keeps that region only if it is at least ``min_solidity`` solid and at most
+    ``max_growth`` times its own `refit_object_boundaries` contour. Otherwise it keeps
+    that contour. Identity is preserved: one object out per detection, never created or
+    deleted, and objects are kept apart so they cannot fuse downstream.
+
+    Parameters
+    ----------
+    raw_image, object_mask, cell_mask : numpy.ndarray
+        As for `refit_object_boundaries`; ``cell_mask`` is ONE cell.
+    ball_radius : float
+        The working scale (px of ``raw_image``) the rest of the pipeline uses.
+    level : float or callable, optional
+        The fallback contour level, passed to `refit_object_boundaries`.
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean mask, same shape as the input.
+    """
+    seeds = np.asarray(object_mask, dtype=bool)
+    cell = np.asarray(cell_mask, dtype=bool)
+    fallback = refit_object_boundaries(raw_image, seeds, cell, level=level)
+    if not seeds.any() or int(cell.sum()) < 50:
+        return fallback
+    img = ndi.gaussian_filter(np.asarray(raw_image, dtype=np.float32), smooth_sigma)
+    radius = max(2, int(round(tophat_scale * float(ball_radius))))
+    flat = sk.morphology.white_tophat(img, sk.morphology.disk(radius))
+    foreground = (flat > sk.filters.threshold_otsu(flat[cell]) * otsu_factor) & cell
+    markers, _n = ndi.label(seeds)
+    markers = np.where(cell, markers, 0)
+    regions = sk.segmentation.watershed(-flat, markers, mask=foreground | (markers > 0))
+    contours, _m = ndi.label(fallback)
+    out = np.zeros(seeds.shape, dtype=np.int32)
+    for index, window in enumerate(ndi.find_objects(markers), start=1):
+        if window is None:
+            continue
+        region = regions == index
+        own = np.unique(contours[(markers == index) & fallback])
+        own = np.isin(contours, own[own != 0]) if (own != 0).any() else markers == index
+        compact = sk.measure.regionprops(region.astype(np.uint8))[0].solidity >= min_solidity
+        chosen = region if compact and region.sum() <= max_growth * max(int(own.sum()), 1) else own
+        out[chosen & (out == 0)] = index
+    return keep_objects_apart(out) > 0

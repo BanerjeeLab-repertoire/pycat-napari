@@ -225,6 +225,18 @@ def replay_sacf_analysis(state: dict, image_path: Path, params: dict, output_dir
     print(f"[PyCAT Batch]   SACF ({mode}) done: {len(results_df)} rows.")
 
 
+def _condensate_refit_kwargs(params):
+    """The boundary settings the GUI recorded, with the GUI's defaults.
+
+    Replay used to pass none of these, so a batch run silently used the library
+    defaults whatever the user had set interactively.
+    """
+    return {'multiscale': params.get('multiscale', True),
+            'boundary_refit': params.get('boundary_refit', True),
+            'refit_level': params.get('refit_level', 0.5),
+            'boundary_mode': params.get('boundary_mode', 'regional')}
+
+
 def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, output_dir: Path):
     """
     Run segment_subcellular_objects cell-by-cell (the inner loop from
@@ -285,6 +297,7 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
     # (bg_median/bg_sigma/smooth_sigma), so the same globally-computed dict
     # is valid for both the bbox-crop and full-image branches below.
     min_spot_radius = params.get('min_spot_radius', 2)
+    refit_kw = _condensate_refit_kwargs(params)
     image_stats = compute_image_intensity_stats(
         original_image, labeled_cells,
         smooth_sigma=max(0.5, min_spot_radius / 2.0))
@@ -317,6 +330,7 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
                 punctate_gate=params.get('punctate_gate', True),
                 punctate_gate_sigma=params.get('punctate_gate_sigma', 5.0),
                 punctate_gate_abs_sigma=params.get('punctate_gate_abs_sigma', 3.0),
+                **refit_kw,
             )
             # Stitch results back into full-image mask
             total_puncta_mask[y0:y1, x0:x1]         |= unrefined_crop
@@ -336,6 +350,7 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
                 punctate_gate=params.get('punctate_gate', True),
                 punctate_gate_sigma=params.get('punctate_gate_sigma', 5.0),
                 punctate_gate_abs_sigma=params.get('punctate_gate_abs_sigma', 3.0),
+                **refit_kw,
             )
             total_puncta_mask |= unrefined
             total_refined_puncta_mask |= refined

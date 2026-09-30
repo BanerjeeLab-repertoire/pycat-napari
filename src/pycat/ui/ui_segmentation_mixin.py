@@ -64,6 +64,19 @@ def _add_object_scale_controls(params_layout, widgets, make_spinbox):
         "higher cuts closer to its core.")
     params_layout.addRow("Boundary level (fraction of peak):", widgets['refit_level'])
 
+    widgets['regional_boundaries'] = QCheckBox("Regional boundaries for condensates")
+    widgets['regional_boundaries'].setChecked(True)
+    widgets['regional_boundaries'].setToolTip(
+        "Lets each object grow into the cell's flattened foreground (Otsu of a top-hat at "
+        "twice the measured object scale) and keeps that edge only when the result is compact "
+        "(solidity >= 0.9) and at most 2.5x its half-max contour; otherwise it keeps the "
+        "Boundary level contour. Fixes large condensates being drawn at roughly half their "
+        "area, and keeps neighbouring objects apart so they are never fused. Failure mode: a "
+        "cell whose foreground is dominated by something other than condensates (e.g. a "
+        "bright nucleolus) can pull edges outward on compact objects — uncheck to use the "
+        "Boundary level contour for every object.")
+    params_layout.addRow(widgets['regional_boundaries'])
+
 
 def _build_condensate_refinement_params_group():
     """Build the (initially hidden) 'Refinement Parameters' box for condensate segmentation.
@@ -492,6 +505,7 @@ class _SegmentationWidgetsMixin:
         multiscale_cb = _rp['multiscale']
         boundary_refit_cb = _rp['boundary_refit']
         refit_level_spin = _rp['refit_level']
+        regional_cb = _rp['regional_boundaries']
 
         # Refinement parameters are hidden behind an off-by-default reveal
         # checkbox (advanced tuning; sensible defaults are used otherwise).
@@ -525,6 +539,7 @@ class _SegmentationWidgetsMixin:
                 multiscale=multiscale_cb.isChecked(),
                 boundary_refit=boundary_refit_cb.isChecked(),
                 refit_level=refit_level_spin.value(),
+                boundary_mode='regional' if regional_cb.isChecked() else 'level',
             )
             fn.__name__ = 'run_segment_subcellular_objects'
             self.on_general_button_clicked(
@@ -546,6 +561,7 @@ class _SegmentationWidgetsMixin:
                 'multiscale': multiscale_cb.isChecked(),
                 'boundary_refit': boundary_refit_cb.isChecked(),
                 'refit_level': refit_level_spin.value(),
+                'boundary_mode': 'regional' if regional_cb.isChecked() else 'level',
             })
         process_cells_button.clicked.connect(_on_condensate_seg)
         try:
