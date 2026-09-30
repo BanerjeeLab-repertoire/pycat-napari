@@ -277,6 +277,9 @@ REGIONAL_MAX_GROWTH = 2.5
 REGIONAL_MIN_SOLIDITY = 0.9
 # Smoothing for the regional pass: one ORIGINAL pixel at the GUI's x2 working grid.
 REGIONAL_SMOOTH_SIGMA = 2.0
+# Provenance codes written by `refit_regional_boundaries(source_out=...)`.
+BOUNDARY_REGIONAL = 1
+BOUNDARY_LEVEL = 2
 
 
 def keep_objects_apart(labels):
@@ -299,7 +302,7 @@ def refit_regional_boundaries(raw_image, object_mask, cell_mask, ball_radius, le
                               otsu_factor=REGIONAL_OTSU_FACTOR,
                               max_growth=REGIONAL_MAX_GROWTH,
                               min_solidity=REGIONAL_MIN_SOLIDITY,
-                              smooth_sigma=REGIONAL_SMOOTH_SIGMA):
+                              smooth_sigma=REGIONAL_SMOOTH_SIGMA, source_out=None):
     """Per object, the regional boundary if it is condensate-like, else the ``level`` contour.
 
     Each detection is grown by watershed into the cell's foreground — the Otsu threshold
@@ -317,6 +320,10 @@ def refit_regional_boundaries(raw_image, object_mask, cell_mask, ball_radius, le
         The working scale (px of ``raw_image``) the rest of the pipeline uses.
     level : float or callable, optional
         The fallback contour level, passed to `refit_object_boundaries`.
+    source_out : numpy.ndarray, optional
+        Same shape as the input; receives, per output pixel, which boundary its object kept:
+        ``BOUNDARY_REGIONAL`` or ``BOUNDARY_LEVEL``. This is the per-object provenance that
+        lets a user see why one object is drawn wider than its neighbour.
 
     Returns
     -------
@@ -327,6 +334,8 @@ def refit_regional_boundaries(raw_image, object_mask, cell_mask, ball_radius, le
     cell = np.asarray(cell_mask, dtype=bool)
     fallback = refit_object_boundaries(raw_image, seeds, cell, level=level)
     if not seeds.any() or int(cell.sum()) < 50:
+        if source_out is not None:
+            source_out[fallback] = BOUNDARY_LEVEL
         return fallback
     img = ndi.gaussian_filter(np.asarray(raw_image, dtype=np.float32), smooth_sigma)
     radius = max(2, int(round(tophat_scale * float(ball_radius))))
@@ -337,6 +346,7 @@ def refit_regional_boundaries(raw_image, object_mask, cell_mask, ball_radius, le
     regions = sk.segmentation.watershed(-flat, markers, mask=foreground | (markers > 0))
     contours, _m = ndi.label(fallback)
     out = np.zeros(seeds.shape, dtype=np.int32)
+    took_regional = []
     for index, window in enumerate(ndi.find_objects(markers), start=1):
         if window is None:
             continue
@@ -344,6 +354,11 @@ def refit_regional_boundaries(raw_image, object_mask, cell_mask, ball_radius, le
         own = np.unique(contours[(markers == index) & fallback])
         own = np.isin(contours, own[own != 0]) if (own != 0).any() else markers == index
         compact = sk.measure.regionprops(region.astype(np.uint8))[0].solidity >= min_solidity
-        chosen = region if compact and region.sum() <= max_growth * max(int(own.sum()), 1) else own
-        out[chosen & (out == 0)] = index
-    return keep_objects_apart(out) > 0
+        regional = compact and region.sum() <= max_growth * max(int(own.sum()), 1)
+        took_regional.append(index) if regional else None
+        out[(region if regional else own) & (out == 0)] = index
+    out = keep_objects_apart(out)
+    if source_out is not None:
+        source_out[out > 0] = np.where(np.isin(out[out > 0], took_regional),
+                                       BOUNDARY_REGIONAL, BOUNDARY_LEVEL)
+    return out > 0

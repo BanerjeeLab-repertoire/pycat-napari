@@ -283,6 +283,7 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
     unique_labels = np.unique(labeled_cells)[1:]  # skip background 0
     total_puncta_mask = np.zeros_like(labeled_cells, dtype=bool)
     total_refined_puncta_mask = np.zeros_like(labeled_cells, dtype=bool)
+    boundary_source = np.zeros(labeled_cells.shape, dtype=np.uint8)
 
     # ── Absolute-intensity punctate gate ────────────────────────────────
     # run_segment_subcellular_objects (the interactive path) computes this
@@ -331,7 +332,7 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
                 punctate_gate=params.get('punctate_gate', True),
                 punctate_gate_sigma=params.get('punctate_gate_sigma', 5.0),
                 punctate_gate_abs_sigma=params.get('punctate_gate_abs_sigma', 3.0),
-                **refit_kw,
+                **refit_kw, boundary_source=boundary_source[y0:y1, x0:x1],
             )
             # Stitch results back into full-image mask
             total_puncta_mask[y0:y1, x0:x1]         |= unrefined_crop
@@ -351,11 +352,12 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
                 punctate_gate=params.get('punctate_gate', True),
                 punctate_gate_sigma=params.get('punctate_gate_sigma', 5.0),
                 punctate_gate_abs_sigma=params.get('punctate_gate_abs_sigma', 3.0),
-                **refit_kw,
+                **refit_kw, boundary_source=boundary_source,
             )
             total_puncta_mask |= unrefined
             total_refined_puncta_mask |= refined
 
+    data_instance.data_repository['boundary_source_map'] = boundary_source
     state['puncta_mask'] = total_refined_puncta_mask
     state['puncta_mask_unrefined'] = total_puncta_mask
 

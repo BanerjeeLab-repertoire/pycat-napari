@@ -1,3 +1,17 @@
+## [1.6.463] - 2026-09-30
+### Added — **Every condensate records which boundary it kept** (region-selection spec, per-object provenance).
+- **New `boundary_source` column in `puncta_df`: `'regional'` or `'half-max'`** — whether the object kept its
+  regional boundary or fell back to its half-max contour (1.6.461). This is what lets a user see why one object is
+  drawn wider than its neighbour: a compact condensate takes the regional edge; a punctum whose regional region
+  would balloon, or an irregular one, keeps half-max. Objects the segmentation did not produce (a mask loaded or
+  edited by hand) are `'unrecorded'`, never guessed.
+- `refit_regional_boundaries(..., source_out=)` and `segment_subcellular_objects(..., boundary_source=)` write the
+  per-pixel provenance; GUI and batch condensate segmentation keep it as `data_repository['boundary_source_map']`
+  for the analyzer. Codes: `boundary_refit.BOUNDARY_REGIONAL` / `BOUNDARY_LEVEL`.
+- The spec's original provenance item (a stop level and stop reason per object from a fusion-capped descent) does
+  not apply: that descent was superseded — the regional watershed never assigns a pixel to two objects and
+  `keep_objects_apart` removes the remaining fusion path (1.6.461).
+
 ## [1.6.462] - 2026-09-30
 ### Added — **Large irregular objects are flagged, never deleted** (region-selection spec, Phase 4).
 - **New `shape_filtered` and `solidity` columns in `puncta_df`.** An object is flagged when its area is more than

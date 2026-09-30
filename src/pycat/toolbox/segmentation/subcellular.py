@@ -24,7 +24,7 @@ from pycat.toolbox.segmentation.intensity import cell_has_punctate_signal, compu
 from pycat.toolbox.segmentation.morphology import cell_mask_stretching
 from pycat.toolbox.segmentation.object_scale import (
     object_scale_spectrum, recommend_working_scales)
-from pycat.toolbox.segmentation.boundary_refit import (refit_object_boundaries,
+from pycat.toolbox.segmentation.boundary_refit import (BOUNDARY_LEVEL, refit_object_boundaries,
                                                        refit_regional_boundaries)
 
 
@@ -75,7 +75,7 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
                                 image_stats=None, punctate_gate=True,
                                 punctate_gate_sigma=5.0, punctate_gate_abs_sigma=3.0,
                                 multiscale=True, boundary_refit=True, refit_level=0.5,
-                                boundary_mode='regional'):
+                                boundary_mode='regional', boundary_source=None):
     """
     Segments and refines subcellular objects within a specified cell mask from microscopy images.
     The function uses pre-processed images and cell-specific metrics to remove background, enhance
@@ -115,6 +115,9 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
         and its ``refit_level`` contour otherwise, with objects kept apart
         (`boundary_refit.refit_regional_boundaries`). 'level': the ``refit_level`` contour for
         every object — the behaviour before 1.6.461.
+    boundary_source : numpy.ndarray, optional
+        Full-size uint8 array owned by the caller; receives which boundary each object kept
+        (`boundary_refit.BOUNDARY_REGIONAL` / `BOUNDARY_LEVEL`), for the results table.
 
     Returns
     -------
@@ -311,13 +314,16 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
         # ── The EDGE, measured on the raw image rather than inherited from the
         # band-pass. Identity is already decided above; this only moves boundaries.
         if boundary_refit:
+            source = boundary_source[r0p:r1p, c0p:c1p] if boundary_source is not None else None
             if boundary_mode == 'regional':
                 refined_puncta_mask_crop = refit_regional_boundaries(
                     orig_crop, refined_puncta_mask_crop, mask_crop, ball_radius,
-                    level=refit_level)
+                    level=refit_level, source_out=source)
             else:
                 refined_puncta_mask_crop = refit_object_boundaries(
                     orig_crop, refined_puncta_mask_crop, mask_crop, level=refit_level)
+                if source is not None:
+                    source[refined_puncta_mask_crop.astype(bool)] = BOUNDARY_LEVEL
 
         # Paste cropped results back into full-size output arrays
         puncta_mask = np.zeros_like(cell_mask)
@@ -413,6 +419,7 @@ def run_segment_subcellular_objects(pre_processed_image_layer, original_image_la
     # Initialize total masks to store the combined results
     total_puncta_mask = np.zeros_like(cell_masks, dtype=bool)
     total_refined_puncta_mask = np.zeros_like(cell_masks, dtype=bool)
+    boundary_source = np.zeros(cell_masks.shape, dtype=np.uint8)
 
     # Iterate over all cell labels, segment, and refine puncta within each cell
     for label in unique_labels:
@@ -437,12 +444,15 @@ def run_segment_subcellular_objects(pre_processed_image_layer, original_image_la
                 punctate_gate_sigma=punctate_gate_sigma,
                 punctate_gate_abs_sigma=punctate_gate_abs_sigma,
                 multiscale=multiscale, boundary_refit=boundary_refit,
-                refit_level=refit_level, boundary_mode=boundary_mode)
+                refit_level=refit_level, boundary_mode=boundary_mode,
+                boundary_source=boundary_source)
 
         # Add the segmented mask to the total mask
         total_puncta_mask += puncta_mask 
         total_refined_puncta_mask += refined_puncta_mask
 
+    # Which boundary each object kept, for the condensate table (`puncta_analysis_func`).
+    data_instance.data_repository['boundary_source_map'] = boundary_source
 
     # Count DISTINCT objects via connected components, not the boolean max.
     # total_refined_puncta_mask is a boolean OR-accumulation across cells, so its

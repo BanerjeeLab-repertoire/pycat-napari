@@ -97,3 +97,27 @@ def test_batch_replay_defaults_match_the_gui():
     assert _condensate_refit_kwargs({}) == {'multiscale': True, 'boundary_refit': True,
                                             'refit_level': 0.5, 'boundary_mode': 'regional'}
     assert _condensate_refit_kwargs({'boundary_mode': 'level'})['boundary_mode'] == 'level'
+
+
+def test_every_object_records_which_boundary_it_kept():
+    from pycat.toolbox.segmentation.boundary_refit import BOUNDARY_LEVEL, BOUNDARY_REGIONAL
+    img = _field((70, 70, 9.0, 300.0), (150, 140, 1.8, 300.0))
+    cell = np.ones(img.shape, bool)
+    seeds = _disc(70, 70, 6) | _disc(150, 140, 1)
+    source = np.zeros(img.shape, np.uint8)
+    reg = refit_regional_boundaries(img, seeds, cell, ball_radius=8, source_out=source)
+    assert np.array_equal(source > 0, reg)                         # every output pixel is attributed
+    assert source[70, 70] == BOUNDARY_REGIONAL                     # the condensate took the regional edge
+    assert set(np.unique(source[reg])) <= {BOUNDARY_REGIONAL, BOUNDARY_LEVEL}
+
+
+def test_segmentation_fills_the_callers_provenance_map_in_both_modes():
+    from pycat.toolbox.segmentation.subcellular import segment_subcellular_objects
+    img = _field((100, 100, 5.0, 300.0), seed=5)
+    cell = _disc(100, 100, 60)
+    for mode in ('regional', 'level'):
+        source = np.zeros(img.shape, np.uint8)
+        refined, _ = segment_subcellular_objects(img, img, cell, 1, 8, boundary_mode=mode,
+                                                 multiscale=False, punctate_gate=False,
+                                                 boundary_source=source)
+        assert np.array_equal(source > 0, refined.astype(bool)), mode

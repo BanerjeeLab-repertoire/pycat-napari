@@ -66,3 +66,15 @@ def test_no_measured_scale_flags_nothing():
     data.data_repository['ball_radius'] = 0
     df = flag_irregular_puncta(pd.DataFrame({'area': [5000.0], 'solidity': [0.3]}), data)
     assert not df['shape_filtered'].any()
+
+
+def test_boundary_source_is_reported_or_honestly_unrecorded():
+    mask, image, cells, data = _scene()
+    puncta_analysis_func(mask, image, cells, data)
+    assert set(data.get_data('puncta_df')['boundary_source']) == {'unrecorded'}   # no map: no guess
+    source = np.where(mask, 2, 0).astype(np.uint8)
+    source[20:40, 20:40][mask[20:40, 20:40]] = 1                    # the first punctum went regional
+    data.data_repository['boundary_source_map'] = source
+    puncta_analysis_func(mask, image, cells, data)
+    df = data.get_data('puncta_df').sort_values(['bbox_y0', 'bbox_x0'])
+    assert list(df['boundary_source']) == ['regional', 'half-max', 'half-max']

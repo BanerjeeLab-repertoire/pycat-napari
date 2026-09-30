@@ -752,6 +752,32 @@ def flag_irregular_puncta(df, data_instance):
     return df
 
 
+_BOUNDARY_NAMES = {1: 'regional', 2: 'half-max'}   # boundary_refit.BOUNDARY_REGIONAL / _LEVEL
+
+
+def attach_boundary_source(df, labeled_puncta, data_instance):
+    """Add ``boundary_source``: which boundary segmentation kept for each object ('regional' or
+    'half-max'), read from the map condensate segmentation leaves in the repository. An object
+    the map does not cover -- a mask loaded or edited by hand, or segmented before 1.6.463 -- is
+    'unrecorded' rather than guessed."""
+    source_map = data_instance.data_repository.get('boundary_source_map')
+    names = ['unrecorded'] * len(df)
+    if source_map is not None and source_map.shape == labeled_puncta.shape and len(df):
+        # One pass: count each (object, code) pair, then read each object's majority code.
+        inside = labeled_puncta > 0
+        n_codes = 3
+        counts = np.bincount(labeled_puncta[inside].astype(np.int64) * n_codes
+                             + np.clip(source_map[inside], 0, n_codes - 1),
+                             minlength=(int(labeled_puncta.max()) + 1) * n_codes
+                             ).reshape(-1, n_codes)
+        for i, lab in enumerate(df['label'].astype(int)):
+            coded = counts[lab, 1:]
+            if coded.sum() >= 0.5 * counts[lab].sum() and coded.sum() > 0:
+                names[i] = _BOUNDARY_NAMES[int(np.argmax(coded)) + 1]
+    df['boundary_source'] = names
+    return df
+
+
 def puncta_analysis_func(puncta_masks, image, labeled_cells, data_instance, progress_callback=None,
                          filter_irregular=True):
     """
@@ -847,7 +873,7 @@ def puncta_analysis_func(puncta_masks, image, labeled_cells, data_instance, prog
 
         # Compute this cell's puncta + dilute-phase statistics and write them onto its cell_df row.
         # Extracted to a helper so the per-cell loop stays within the review-length budget.
-        df = flag_irregular_puncta(df, data_instance)
+        df = attach_boundary_source(flag_irregular_puncta(df, data_instance), labeled_puncta, data_instance)
         _store_cell_puncta_stats(data_instance, label,
                                  df[~df['shape_filtered']] if filter_irregular else df,
                                  labeled_puncta, image, cell_xor_puncta_mask, cell_mask_holder)
