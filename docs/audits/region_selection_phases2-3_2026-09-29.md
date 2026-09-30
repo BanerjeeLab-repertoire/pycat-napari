@@ -106,3 +106,28 @@ so never-proposed objects remain the main shortfall that is left (CellProfiler m
   one set of defaults for all three.
 - Pixel IoU against human traces rewards generous masks on big objects; the fusion table is the
   check that PyCAT's gain is not bought that way.
+
+## Phase 4 and provenance (1.6.462–1.6.463)
+
+- **Irregular filter** (`shape_filtered`, default on, flags only): area > 4× the measured object area and
+  solidity < 0.8. Annotators trace moderately irregular puncta (30% of Irregular-field consensus objects below
+  solidity 0.9; 5.7% below 0.8), so a shape-only cut would disagree with the ground truth; they essentially never
+  trace *large* irregular objects. At 4× / 0.8 nothing in any annotated cell is flagged and no flagged object was
+  traced; at 2× the filter begins removing traced area in the Irregular fields. Flagged rows stay in `puncta_df`;
+  only per-cell summaries exclude them.
+- **Provenance:** `boundary_source` ('regional' / 'half-max' / 'unrecorded') per object in `puncta_df`.
+
+## Runtime (acceptance 8)
+
+Same fields, 1.6.460 level mode → 1.6.461 regional, this workstation (CPU):
+
+| field | segmentation | whole pipeline |
+|---|---|---|
+| large 1 | 12.7 → 13.8 s | 42.1 → 30.8 s |
+| large 7 | 40.0 → 45.1 s | 58.5 → 64.9 s |
+| small 6 | 127.6 → 131.8 s | 141.8 → 145.5 s |
+| irregular 8 | 307.1 → 306.1 s | 321.3 → 320.5 s |
+
+The regional step adds 0–13% to segmentation. The spec's "~15 s per 512² field" budget does not hold for 1.6.460
+itself on these fields (13–307 s of segmentation per field, dominated by the existing detection/refinement) — a
+pre-existing cost worth its own investigation, not introduced here.
