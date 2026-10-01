@@ -197,6 +197,41 @@ def robust_cell_background(values, n_sigma=3.0, iterations=3, min_keep_fraction=
     return base, sigma
 
 
+# ── The second route through the gate: a clearly transfected cell with clearly resolved puncta ──
+#
+# The local floor above is `base + 5 * sigma_cell`, and `sigma_cell` is the cell's own intensity
+# spread. In a bright cell packed with dim irregular puncta that spread IS the puncta and their
+# texture, not noise: measured on the annotated Irregular fields, sigma_cell was ~5x the pixel noise,
+# the floor rose above the puncta, and 7 of 15 annotated cells (46% of the traced objects) were
+# skipped whole. Lowering n_sigma is the wrong fix: the cells it newly admits are untransfected
+# nuclei, whose small noise makes any flicker significant.
+#
+# So a cell also passes when it is clearly TRANSFECTED (its baseline sits far above the image
+# background) and its peak stands far above its PIXEL noise (the high-frequency residual, which
+# texture and puncta do not inflate). A dark cell can never take this route. Over all 241 cells of
+# the 27 annotated fields: 59/59 annotated cells pass (52 before), 6 unannotated -- all transfected,
+# none dark -- newly pass, and the result is the same for any baseline 5-20 and peak 8-10.
+TRANSFECTED_MIN_BG_SIGMA = 10.0   # cell baseline above the image background, in background sigmas
+TRANSFECTED_MIN_NOISE_Z = 10.0    # cell peak above its baseline, in pixel-noise sigmas
+
+
+def _transfected_punctate_evidence(img, smoothed, cell_mask, base, image_stats, info):
+    """True when the cell is clearly transfected and its peak is far above its pixel noise.
+    Needs `image_stats` (the absolute background); without it this route is closed."""
+    if image_stats is None or not cell_mask.any():
+        return False
+    residual = (img - ndi.gaussian_filter(img, 3.0))[cell_mask]
+    noise = 1.4826 * float(np.median(np.abs(residual - np.median(residual))))
+    if noise <= 0:
+        return False
+    base_over_bg = (base - image_stats['bg_median']) / max(float(image_stats['bg_sigma']), 1e-12)
+    z_noise = (float(np.percentile(smoothed[cell_mask], 99.9)) - base) / noise
+    passed = base_over_bg >= TRANSFECTED_MIN_BG_SIGMA and z_noise >= TRANSFECTED_MIN_NOISE_Z
+    info.update({'base_over_bg': float(base_over_bg), 'z_noise': float(z_noise),
+                 'transfected_route': bool(passed)})
+    return passed
+
+
 def cell_has_punctate_signal(original_crop, cell_mask, image_stats=None,
                              n_sigma=5.0, abs_n_sigma=3.0, min_spot_radius=2,
                              min_area_px=None, smooth_sigma=None):
@@ -310,4 +345,5 @@ def cell_has_punctate_signal(original_crop, cell_mask, image_stats=None,
                  'binding': 'absolute' if thr_abs > thr_local else 'local',
                  'base': base, 'sigma_cell': sigma_cell,
                  'threshold': float(threshold)})
-    return largest >= min_area_px, info
+    transfected = _transfected_punctate_evidence(img, sm, cell_mask, base, image_stats, info)
+    return largest >= min_area_px or transfected, info

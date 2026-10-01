@@ -1,3 +1,24 @@
+## [1.6.464] - 2026-10-01
+### Fixed — **Bright cells packed with dim puncta were skipped whole by the punctate gate.**
+`cell_has_punctate_signal` passes a cell only if a 13-px blob clears `base + 5 × sigma_cell`, where `sigma_cell` is
+the cell's own intensity spread. In a transfected cell dense with dim irregular puncta, that spread *is* the puncta
+and nucleoplasm texture — ~5× the pixel noise on the annotated Irregular fields — so the floor rose above the puncta
+and **7 of 15 annotated Irregular cells (46% of the traced objects) were never segmented at all.** No per-object
+gate ever saw them.
+
+- **New second route through the gate:** a cell also passes when it is clearly **transfected** (baseline ≥ 10
+  background σ above the image background) **and** its peak is ≥ 10 × its **pixel noise** (the high-frequency
+  residual, which texture and puncta do not inflate). A dark cell can never take this route. Diagnostics
+  `base_over_bg`, `z_noise`, `transfected_route` added to the gate's info.
+- **Why not just lower n_sigma:** the cells a lower floor newly admits are untransfected nuclei (contact sheet in the
+  report), whose small noise makes any flicker significant. Over all 241 cells of the 27 annotated fields: 59/59
+  annotated cells pass (52 before); 6 unannotated cells newly pass — all transfected, none dark; the outcome is the
+  same for any baseline threshold 5–20 and peak 8–10.
+- **Effect (consensus, annotated cells, end-to-end):** Irregular IoU **0.19 → 0.38**, recall 0.26 → 0.61, traced
+  objects missed 365 → 180 of 603 (CellProfiler 0.17). Large and Small are unchanged by construction — every
+  annotated cell there already passed, and the gate only decides whole cells.
+- Only the 2D cellular condensate path calls this gate.
+
 ## [1.6.463] - 2026-09-30
 ### Added — **Every condensate records which boundary it kept** (region-selection spec, per-object provenance).
 - **New `boundary_source` column in `puncta_df`: `'regional'` or `'half-max'`** — whether the object kept its
