@@ -70,3 +70,6 @@ End-to-end: large missed 102 → 80, IoU 0.71; Small 0.44 and Irregular 0.38 unc
 1.6.461 (regional default) and 1.6.464 (gate route) had changed the shared `segment_subcellular_objects` used by
 in-vitro, time-series, colocalisation and z-stack. Library defaults are restored (byte-identical to 1.6.460); only
 the 2D cellular GUI handler and batch replay opt in.
+
+Runtime with the second pass (segmentation without → with; whole pipeline with): Irregular 8 7.8 → 11.1 s, 23 s;
+Small 6 4.8 → 6.6 s, 19 s; large 7 17.4 → 21.8 s, 41 s.
