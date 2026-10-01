@@ -77,6 +77,17 @@ def _add_object_scale_controls(params_layout, widgets, make_spinbox):
         "Boundary level contour for every object.")
     params_layout.addRow(widgets['regional_boundaries'])
 
+    widgets['second_pass'] = QCheckBox("Second pass for dim objects beside bright ones")
+    widgets['second_pass'].setChecked(True)
+    widgets['second_pass'].setToolTip(
+        "Segments each cell again with the objects already found masked out, and keeps a newly "
+        "found object only if it stands at least 2 local standard deviations above its own "
+        "surroundings in the raw image. Recovers dim puncta that a bright condensate next to "
+        "them hid (the region merge is scaled to the brightest object in the cell). Failure "
+        "mode: in a cell with strong nucleoplasm texture it can still add a few texture spots; "
+        "uncheck to use the single pass.")
+    params_layout.addRow(widgets['second_pass'])
+
 
 def _build_condensate_refinement_params_group():
     """Build the (initially hidden) 'Refinement Parameters' box for condensate segmentation.
@@ -506,6 +517,7 @@ class _SegmentationWidgetsMixin:
         boundary_refit_cb = _rp['boundary_refit']
         refit_level_spin = _rp['refit_level']
         regional_cb = _rp['regional_boundaries']
+        second_pass_cb = _rp['second_pass']
 
         # Refinement parameters are hidden behind an off-by-default reveal
         # checkbox (advanced tuning; sensible defaults are used otherwise).
@@ -540,6 +552,7 @@ class _SegmentationWidgetsMixin:
                 boundary_refit=boundary_refit_cb.isChecked(),
                 refit_level=refit_level_spin.value(),
                 boundary_mode='regional' if regional_cb.isChecked() else 'level',
+                second_pass=second_pass_cb.isChecked(),
             )
             fn.__name__ = 'run_segment_subcellular_objects'
             self.on_general_button_clicked(
@@ -562,6 +575,7 @@ class _SegmentationWidgetsMixin:
                 'boundary_refit': boundary_refit_cb.isChecked(),
                 'refit_level': refit_level_spin.value(),
                 'boundary_mode': 'regional' if regional_cb.isChecked() else 'level',
+                'second_pass': second_pass_cb.isChecked(),
             })
         process_cells_button.clicked.connect(_on_condensate_seg)
         try:

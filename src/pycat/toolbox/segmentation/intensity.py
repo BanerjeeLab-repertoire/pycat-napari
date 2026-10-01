@@ -211,6 +211,9 @@ def robust_cell_background(values, n_sigma=3.0, iterations=3, min_keep_fraction=
 # texture and puncta do not inflate). A dark cell can never take this route. Over all 241 cells of
 # the 27 annotated fields: 59/59 annotated cells pass (52 before), 6 unannotated -- all transfected,
 # none dark -- newly pass, and the result is the same for any baseline 5-20 and peak 8-10.
+# Opt-in (`transfected_route=True`): the 2D cellular fluorescence workflow turns it on; the other
+# callers of segment_subcellular_objects (in-vitro, time-series, colocalisation, z-stack) keep the
+# single route they had.
 TRANSFECTED_MIN_BG_SIGMA = 10.0   # cell baseline above the image background, in background sigmas
 TRANSFECTED_MIN_NOISE_Z = 10.0    # cell peak above its baseline, in pixel-noise sigmas
 
@@ -234,7 +237,7 @@ def _transfected_punctate_evidence(img, smoothed, cell_mask, base, image_stats, 
 
 def cell_has_punctate_signal(original_crop, cell_mask, image_stats=None,
                              n_sigma=5.0, abs_n_sigma=3.0, min_spot_radius=2,
-                             min_area_px=None, smooth_sigma=None):
+                             min_area_px=None, smooth_sigma=None, transfected_route=False):
     """
     Decide whether a cell contains anything punctate, using ABSOLUTE intensity.
 
@@ -345,5 +348,5 @@ def cell_has_punctate_signal(original_crop, cell_mask, image_stats=None,
                  'binding': 'absolute' if thr_abs > thr_local else 'local',
                  'base': base, 'sigma_cell': sigma_cell,
                  'threshold': float(threshold)})
-    transfected = _transfected_punctate_evidence(img, sm, cell_mask, base, image_stats, info)
+    transfected = transfected_route and _transfected_punctate_evidence(img, sm, cell_mask, base, image_stats, info)
     return largest >= min_area_px or transfected, info

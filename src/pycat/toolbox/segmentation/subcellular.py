@@ -19,7 +19,7 @@ from pycat.utils.notify import show_warning as napari_show_warning
 from pycat.utils.general_utils import dtype_conversion_func, check_contrast_func
 from pycat.toolbox.image_processing_tools import rb_gaussian_bg_removal_with_edge_enhancement
 from pycat.toolbox.segmentation.puncta_refinement import puncta_refinement_func
-from pycat.toolbox.segmentation.fz import fz_segmentation_and_binarization
+from pycat.toolbox.segmentation.fz import fz_segmentation_with_second_pass
 from pycat.toolbox.segmentation.intensity import cell_has_punctate_signal, compute_image_intensity_stats
 from pycat.toolbox.segmentation.morphology import cell_mask_stretching
 from pycat.toolbox.segmentation.object_scale import (
@@ -29,7 +29,7 @@ from pycat.toolbox.segmentation.boundary_refit import (BOUNDARY_LEVEL, refit_obj
 
 
 def _segment_one_scale(enhanced_crop, orig_crop, proc_crop, mask_crop, ball_radius,
-                       min_spot_radius, refine_fast, refinement_kwargs):
+                       min_spot_radius, refine_fast, refinement_kwargs, second_pass=False):
     """One band-pass scale, start to finish: FZ binarisation then the refinement gate.
 
     Split out so the SECOND (large-object) pass runs the identical code path as the
@@ -37,9 +37,9 @@ def _segment_one_scale(enhanced_crop, orig_crop, proc_crop, mask_crop, ball_radi
     live in one refinement filter and not the other (see `puncta_refinement`) is
     exactly what a second hand-written pass would reintroduce.
     """
-    puncta_mask = fz_segmentation_and_binarization(
+    puncta_mask = fz_segmentation_with_second_pass(
         enhanced_crop, mask_crop, ball_radius,
-        rim_close_radius=4 * ball_radius, raw_img=orig_crop)
+        rim_close_radius=4 * ball_radius, raw_img=orig_crop, second_pass=second_pass)
     refined = puncta_refinement_func(
         orig_crop, proc_crop, puncta_mask, mask_crop,
         min_spot_radius=min_spot_radius, fast=refine_fast, **refinement_kwargs)
@@ -47,7 +47,7 @@ def _segment_one_scale(enhanced_crop, orig_crop, proc_crop, mask_crop, ball_radi
 
 
 def _large_object_pass(orig_crop, proc_crop, mask_crop, ball_radius,
-                       min_spot_radius, refine_fast, refinement_kwargs):
+                       min_spot_radius, refine_fast, refinement_kwargs, second_pass=False):
     """The added pass for objects the primary scale cannot see.
 
     It re-derives its OWN enhanced image from the RAW crop at the larger radius
@@ -63,7 +63,7 @@ def _large_object_pass(orig_crop, proc_crop, mask_crop, ball_radius,
         empty = np.zeros(mask_crop.shape, dtype=bool)
         return empty, empty
     return _segment_one_scale(enhanced, orig_crop, proc_crop, mask_crop, ball_radius,
-                              min_spot_radius, refine_fast, refinement_kwargs)
+                              min_spot_radius, refine_fast, refinement_kwargs, second_pass)
 
 
 @tags_layer('subcellular_segment', role='labels', inputs=('image',),
@@ -75,7 +75,8 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
                                 image_stats=None, punctate_gate=True,
                                 punctate_gate_sigma=5.0, punctate_gate_abs_sigma=3.0,
                                 multiscale=True, boundary_refit=True, refit_level=0.5,
-                                boundary_mode='regional', boundary_source=None):
+                                boundary_mode='level', boundary_source=None, second_pass=False,
+                                transfected_route=False):
     """
     Segments and refines subcellular objects within a specified cell mask from microscopy images.
     The function uses pre-processed images and cell-specific metrics to remove background, enhance
@@ -110,11 +111,20 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
     refit_level : float, optional
         Contour level for the re-fit, as a fraction from an object's local background to its
         own peak. Default 0.5 (half maximum).
-    boundary_mode : {'regional', 'level'}, optional
-        'regional' (default): each object keeps a regional boundary when it is condensate-like
-        and its ``refit_level`` contour otherwise, with objects kept apart
-        (`boundary_refit.refit_regional_boundaries`). 'level': the ``refit_level`` contour for
-        every object — the behaviour before 1.6.461.
+    boundary_mode : {'level', 'regional'}, optional
+        'level' (default): the ``refit_level`` contour for every object. 'regional': each object
+        keeps a regional boundary when it is condensate-like and its ``refit_level`` contour
+        otherwise, with objects kept apart (`boundary_refit.refit_regional_boundaries`). The 2D
+        cellular fluorescence workflow (`run_segment_subcellular_objects`, batch replay) uses
+        'regional'; the other callers of this function keep 'level'.
+    second_pass : bool, optional
+        Segment again with the first pass's objects masked, to find dim objects a brighter
+        neighbour hid (`fz.fz_segmentation_with_second_pass`). Default False here; the 2D
+        cellular fluorescence workflow turns it on.
+    transfected_route : bool, optional
+        Let the punctate gate also pass a clearly transfected cell whose peak stands far above
+        its pixel noise (`intensity._transfected_punctate_evidence`). Default False here; the
+        2D cellular fluorescence workflow turns it on.
     boundary_source : numpy.ndarray, optional
         Full-size uint8 array owned by the caller; receives which boundary each object kept
         (`boundary_refit.BOUNDARY_REGIONAL` / `BOUNDARY_LEVEL`), for the results table.
@@ -199,7 +209,7 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
         has_signal, gate_info = cell_has_punctate_signal(
             orig_crop, mask_crop, image_stats=image_stats,
             n_sigma=punctate_gate_sigma, abs_n_sigma=punctate_gate_abs_sigma,
-            min_spot_radius=min_spot_radius)
+            min_spot_radius=min_spot_radius, transfected_route=transfected_route)
         if not has_signal:
             napari_show_info(
                 f"Cell {cell_label}: no punctate signal above the absolute "
@@ -259,9 +269,9 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
         # default used when raw_img is None) because raw_img makes that safe: the raw-image
         # rim-brightness check in _bridge_fragmented_rims rejects any bridge a wider closing
         # reaches that isn't real physical continuity, regardless of how far it reaches.
-        puncta_mask_crop = fz_segmentation_and_binarization(
+        puncta_mask_crop = fz_segmentation_with_second_pass(
             bg_removed_crop, mask_crop, ball_radius,
-            rim_close_radius=4 * ball_radius, raw_img=orig_crop)
+            rim_close_radius=4 * ball_radius, raw_img=orig_crop, second_pass=second_pass)
         # ── Pass the thresholds ON. They used to stop here. ────────────────────
         #
         # This call took `min_spot_radius` and `fast` and DROPPED the other five —
@@ -306,7 +316,7 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
             for _br in _plan['ball_radii'][1:]:
                 _p2, _r2 = _large_object_pass(
                     orig_crop, proc_crop, mask_crop, _br, min_spot_radius,
-                    refine_fast, _refinement_kwargs)
+                    refine_fast, _refinement_kwargs, second_pass)
                 puncta_mask_crop = puncta_mask_crop.astype(bool) | _p2.astype(bool)
                 refined_puncta_mask_crop = (refined_puncta_mask_crop.astype(bool)
                                             | _r2.astype(bool))
@@ -339,7 +349,8 @@ def run_segment_subcellular_objects(pre_processed_image_layer, original_image_la
                                     punctate_gate=True, punctate_gate_sigma=5.0,
                                     punctate_gate_abs_sigma=3.0,
                                     multiscale=True, boundary_refit=True, refit_level=0.5,
-                                    boundary_mode='regional'):
+                                    boundary_mode='regional', second_pass=True,
+                                    transfected_route=True):
     """
     Orchestrates the segmentation and refinement of subcellular objects across all cells
     in an image. It utilizes the napari viewer for visualization and operates on pre-processed
@@ -444,7 +455,8 @@ def run_segment_subcellular_objects(pre_processed_image_layer, original_image_la
                 punctate_gate_sigma=punctate_gate_sigma,
                 punctate_gate_abs_sigma=punctate_gate_abs_sigma,
                 multiscale=multiscale, boundary_refit=boundary_refit,
-                refit_level=refit_level, boundary_mode=boundary_mode,
+                refit_level=refit_level, boundary_mode=boundary_mode, second_pass=second_pass,
+                transfected_route=transfected_route,
                 boundary_source=boundary_source)
 
         # Add the segmented mask to the total mask

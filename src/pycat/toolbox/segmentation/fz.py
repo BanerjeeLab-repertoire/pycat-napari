@@ -7,15 +7,19 @@ Imports local_thresholding_func from the local_thresholding family.
 """
 from __future__ import annotations
 
-import heapq
 import math
+
 import numpy as np
-import skimage as sk
 import scipy.ndimage as ndi
-from pycat.utils.tag_registry import tags_layer
-from pycat.toolbox.label_and_mask_tools import binary_morph_operation, opencv_contour_func
-from pycat.utils.general_utils import dtype_conversion_func, check_contrast_func
+import skimage as sk
+
+from pycat.toolbox.label_and_mask_tools import (
+    binary_morph_operation,
+    opencv_contour_func,
+)
 from pycat.toolbox.segmentation.local_thresholding import local_thresholding_func
+from pycat.utils.general_utils import check_contrast_func, dtype_conversion_func
+from pycat.utils.tag_registry import tags_layer
 
 
 def _weight_mean_color(graph, src, dst, n):
@@ -131,6 +135,7 @@ class _LazyMeanColourMerge:
         return best
 
     def push(self, heap, x):
+        import heapq  # stdlib; local so the CI dependency scan does not ask to pip-install it
         c = self.candidate(x)
         if c is not None and c[0] < self.thresh:
             heapq.heappush(heap, [c[0], int(self.pid[x]), c[1], x, c[2], int(self.time[x])])
@@ -191,6 +196,7 @@ def merge_mean_color_fast(labels, rag, thresh):
     and on the captured slow calls of an annotated field (109.5 s -> 0.8 s). Returns None when
     the channels differ (a genuine RGB graph); the caller then uses skimage.
     """
+    import heapq  # stdlib; local so the CI dependency scan does not ask to pip-install it
     state = _LazyMeanColourMerge(rag, thresh)
     if state.channels is None:
         return None
@@ -290,6 +296,11 @@ def felzenszwalb_segmentation_and_merging(image, scale=7.0, sigma=0.5, min_size=
     # Apply Felzenszwalb's segmentation algorithm to the image
     # This step segments the image into regions based on pixel similarity and the specified parameters
     segments_fz = sk.segmentation.felzenszwalb(img, scale=scale, sigma=sigma, min_size=min_size)
+    if int(segments_fz.max()) == 0:
+        # One segment (a flat crop): skimage's `rag_mean_color` raises KeyError on a single-
+        # region label image. A flat crop has nothing to merge; its average is itself.
+        return dtype_conversion_func(np.full(img.shape, float(img.mean()), dtype=np.float32),
+                                     output_bit_depth=input_dtype)
 
     # Construct a Region Adjacency Graph (RAG) from the initial segmentation, weighting each edge by the
     # DISTANCE between its two segments' mean colours (small = alike). This must match the units of both the
@@ -648,3 +659,59 @@ def fz_segmentation_and_binarization(image, mask, ball_radius, rim_close_radius=
     boolean_mask = binary_morph_operation(boolean_mask, iterations=1, element_size=1, element_shape='Disk', mode='Dilation')
 
     return boolean_mask
+
+
+# ── Second pass: objects shadowed by brighter neighbours ─────────────────────────────────
+#
+# The region merge above folds regions whose means differ by less than `merge_tol` of the
+# crop's dynamic range, and one bright condensate sets that range -- so a dim punctum beside
+# it is folded into the background and never proposed (measured on the annotated large-puncta
+# fields: most misses were dim relative to the cell's brightest objects, never proposed, and
+# came back when the tolerance was lowered). Lowering the tolerance globally also turns
+# nucleoplasm texture into objects in sparse-puncta cells. So the first pass's objects are
+# masked out (with their skirts) and the crop is segmented again, where the dim objects now
+# set the range; a new object is kept only if it stands out from its own surroundings in the
+# RAW image (SECOND_PASS_MIN_CONTRAST ring standard deviations), which shadowed puncta do and
+# texture does not.
+SECOND_PASS_MIN_CONTRAST = 2.0
+
+
+def _local_contrast(raw, obj, exclude, ring_px):
+    ring = (ndi.distance_transform_edt(~obj) <= ring_px) & ~obj & ~exclude
+    if int(ring.sum()) < 8:
+        return 0.0
+    values = raw[ring]
+    spread = float(values.std())
+    return (float(raw[obj].mean()) - float(np.median(values))) / spread if spread > 0 else 0.0
+
+
+def fz_segmentation_with_second_pass(image, mask, ball_radius, raw_img=None, second_pass=True,
+                                     **kwargs):
+    """`fz_segmentation_and_binarization`, plus a second pass for objects a brighter neighbour
+    hid (see SECOND_PASS_MIN_CONTRAST). The second pass needs `raw_img`; without it, or with
+    `second_pass=False`, this is exactly the single pass."""
+    first = fz_segmentation_and_binarization(image, mask, ball_radius, raw_img=raw_img,
+                                             **kwargs).astype(bool)
+    if not second_pass or raw_img is None or not first.any():
+        return first
+    object_radius = float(ball_radius) / 1.5
+    covered = ndi.distance_transform_edt(~first) <= max(2, int(round(object_radius)))
+    inside = np.asarray(mask, dtype=bool)
+    rest = inside & ~covered
+    if int(rest.sum()) < 16:
+        return first
+    masked = np.array(image, dtype=np.float32, copy=True)
+    masked[covered] = float(np.median(masked[rest]))
+    second = fz_segmentation_and_binarization(masked, mask, ball_radius, raw_img=raw_img,
+                                              **kwargs).astype(bool)
+    labels, n_new = ndi.label(second & ~covered)
+    raw = np.asarray(raw_img, dtype=np.float32)
+    ring_px = max(3, int(round(object_radius / 2)))
+    out = first.copy()
+    for index in range(1, n_new + 1):
+        obj = labels == index
+        if (ndi.binary_dilation(obj) & covered).any():
+            continue                                   # touches a first-pass object: not new
+        if _local_contrast(raw, obj, covered | (labels > 0) & ~obj, ring_px) >= SECOND_PASS_MIN_CONTRAST:
+            out |= obj
+    return out

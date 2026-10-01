@@ -66,8 +66,12 @@ def _manual_puncta_mask(pre, original, cells, ball_radius, **thresholds):
     refined = np.zeros_like(cells, dtype=bool)
     for label in np.unique(cells)[1:]:
         cell_mask = (cells == label).astype(bool)
+        # The batch handler's 2D-cellular boundary settings (regional boundaries, second pass),
+        # which it passes on top of the library defaults the other workflows keep.
+        from pycat.batch.steps.analysis_steps import _condensate_refit_kwargs
         r, _u = segment_subcellular_objects(original.copy(), CMS.copy(), cell_mask, label, ball_radius,
-                                            pd.DataFrame(), image_stats=stats, **thresholds)
+                                            pd.DataFrame(), image_stats=stats,
+                                            **{**_condensate_refit_kwargs({}), **thresholds})
         refined |= r
     return refined
 

@@ -56,3 +56,17 @@ One bright condensate sets that range, so a dim punctum beside it is merged into
 Irregular 423/449/450, untraced 68/88/101 (IoU flat); Small 362/361/358, untraced 79/102/101 (IoU 0.438 → 0.425).
 A lower tolerance is a clear win where bright condensates shadow dim puncta and a loss for sparse puncta, so the
 default stays 0.05 pending a per-cell rule.
+
+## Shadowed large puncta — fixed with a second pass (1.6.467)
+
+Two-pass segmentation (first-pass objects masked, crop re-segmented) recovered large-puncta misses (+29 traced) but
+added texture in Small/Irregular. Contact sheets: recovered objects are dim puncta beside bright condensates; the
+Small/Irregular additions are featureless texture, with lower local contrast (median 1.6–1.9 vs 2.7–2.9 ring SDs).
+A 2.0 local-contrast floor on second-pass objects keeps 32/39 recovered large puncta and 1/15 Irregular texture.
+End-to-end: large missed 102 → 80, IoU 0.71; Small 0.44 and Irregular 0.38 unchanged.
+
+## Scope correction
+
+1.6.461 (regional default) and 1.6.464 (gate route) had changed the shared `segment_subcellular_objects` used by
+in-vitro, time-series, colocalisation and z-stack. Library defaults are restored (byte-identical to 1.6.460); only
+the 2D cellular GUI handler and batch replay opt in.

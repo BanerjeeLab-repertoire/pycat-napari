@@ -51,6 +51,9 @@ ROOT = Path(DEFAULT_ROOT)
 UPSCALE = 2
 # 'auto' (default): object size from the image; 'consensus': from the annotations (old runs).
 SIZE_SOURCE = os.environ.get('PYCAT_EVAL_SIZES', 'auto')
+# What the 2D cellular fluorescence GUI handler (`run_segment_subcellular_objects`) passes on top of
+# `segment_subcellular_objects`' library defaults, which the other workflows keep.
+GUI_2D_CELLULAR = {'boundary_mode': 'regional', 'second_pass': True, 'transfected_route': True}
 ANNOTATORS = ('meet', 'shamli', 'gable', 'consensus')
 CELLPROFILER_DIRS = {'Small puncta': 'Cell profiler masks', 'large puncta': 'Cellprofiler analysis',
                      'Irregular puncta': 'Cellprofiler masks'}
@@ -143,7 +146,7 @@ def run_pipeline(gfp, dapi, object_d, cell_d, refit_level=0.5, boundary_refit=Tr
         refined, raw = segment_subcellular_objects(
             gfp_up.copy(), stretched.copy(), labeled == lab, lab, ball_radius, cell_df,
             image_stats=stats, multiscale=True, boundary_refit=boundary_refit,
-            refit_level=refit_level, **seg_kwargs)
+            refit_level=refit_level, **{**GUI_2D_CELLULAR, **seg_kwargs})
         total |= refined.astype(bool)
         total_raw |= raw.astype(bool)
     t_end = time.perf_counter()

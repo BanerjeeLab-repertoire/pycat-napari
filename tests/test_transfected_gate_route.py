@@ -34,7 +34,7 @@ def _field(bright_cell, puncta, texture=0.0, seed=0):
 def _gate(img):
     labels = CELL.astype(int)
     stats = compute_image_intensity_stats(img, labels, smooth_sigma=1.0)
-    return cell_has_punctate_signal(img, CELL, image_stats=stats)
+    return cell_has_punctate_signal(img, CELL, image_stats=stats, transfected_route=True)
 
 
 @pytest.mark.parametrize('seed', [0, 1])
@@ -64,3 +64,10 @@ def test_without_image_stats_the_route_is_closed():
     img = _field(bright_cell=0.05, puncta=0.03)
     _ok, info = cell_has_punctate_signal(img, CELL, image_stats=None)
     assert 'transfected_route' not in info
+
+
+def test_route_is_off_unless_asked_so_other_workflows_are_unchanged():
+    img = _field(bright_cell=0.05, puncta=0.025, texture=0.006)
+    stats = compute_image_intensity_stats(img, CELL.astype(int), smooth_sigma=1.0)
+    ok, info = cell_has_punctate_signal(img, CELL, image_stats=stats)          # default: off
+    assert not ok and 'transfected_route' not in info

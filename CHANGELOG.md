@@ -1,3 +1,32 @@
+## [1.6.467] - 2026-10-01
+### Added — **A second segmentation pass recovers dim puncta a bright neighbour hid.**
+The Felzenszwalb region merge folds regions whose means differ by less than 5% of the crop's dynamic range, and one
+bright condensate sets that range — so a dim punctum beside it was merged into the background and never proposed
+(the large-puncta misses: dim relative to the cell's brightest objects). Lowering the tolerance globally recovered
+them but turned nucleoplasm texture into objects in sparse-puncta cells (Small IoU 0.438 → 0.425).
+
+- **`fz.fz_segmentation_with_second_pass`**: the first pass's objects (with a skirt of one object radius) are filled
+  with the cell's median and the crop is segmented again, so the dim objects now set the range. A new object is kept
+  only if it does not touch a first-pass object and stands ≥ 2 local standard deviations above its own surroundings
+  in the RAW image (`SECOND_PASS_MIN_CONTRAST`) — shadowed puncta do, texture does not (contact sheets in the
+  report). Runs at both scales of the multiscale detection.
+- **Effect (consensus, annotated cells, end-to-end):** large-puncta objects missed **102 → 80** of 757 (CellProfiler
+  142), IoU 0.71 (CellProfiler 0.71); Small and Irregular unchanged at two decimals (0.44, 0.38).
+- **GUI:** "Second pass for dim objects beside bright ones", default on, in *Show refinement parameters*; recorded for
+  batch replay (`second_pass`).
+- **Fixed:** `felzenszwalb_segmentation_and_merging` crashed (`KeyError` from skimage's `rag_mean_color`) on a crop
+  Felzenszwalb returns as a single segment; a flat crop now returns its own average.
+
+### Fixed — **scope: 1.6.461 and 1.6.464 changed workflows the spec said to leave alone.**
+`segment_subcellular_objects` is shared by in-vitro segmentation, time-series analysis, two-channel colocalisation and
+z-stack segmentation as well as the 2D cellular workflow. 1.6.461 made `boundary_mode='regional'` its library default
+and 1.6.464 put the punctate gate's transfected route into the shared gate, so those workflows changed too.
+- Library defaults restored: `boundary_mode='level'`, `second_pass=False`, `transfected_route=False` — verified
+  byte-identical to 1.6.460 on synthetic cells (refined and raw masks).
+- The 2D cellular fluorescence entry points opt in: `run_segment_subcellular_objects` (GUI) and batch
+  `replay_condensate_segmentation` default to `'regional'`, `second_pass=True`, `transfected_route=True`.
+- `cell_has_punctate_signal(..., transfected_route=False)` — the second route is opt-in.
+
 ## [1.6.466] - 2026-10-01
 ### Performance — **The Felzenszwalb region merge is ~130× faster than skimage, still bit-for-bit identical.**
 1.6.465 moved `merge_hierarchical` onto plain containers (2.3×); the remaining cost was the algorithm itself. The

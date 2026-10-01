@@ -235,7 +235,9 @@ def _condensate_refit_kwargs(params):
     return {'multiscale': params.get('multiscale', True),
             'boundary_refit': params.get('boundary_refit', True),
             'refit_level': params.get('refit_level', 0.5),
-            'boundary_mode': params.get('boundary_mode', 'regional')}
+            'boundary_mode': params.get('boundary_mode', 'regional'),
+            'second_pass': params.get('second_pass', True),
+            'transfected_route': params.get('transfected_route', True)}
 
 
 def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, output_dir: Path):
