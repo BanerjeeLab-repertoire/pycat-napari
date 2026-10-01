@@ -10,11 +10,45 @@ from pycat.toolbox.segmentation.fz import (_weight_mean_color, merge_mean_color,
 pytestmark = pytest.mark.base
 
 
-def _case(seed):
+def _case(seed, quantised=False):
     rng = np.random.default_rng(seed)
     img = ndi.gaussian_filter(rng.random((96, 96)), rng.uniform(0.5, 3)).astype(np.float32)
     img += (rng.random((96, 96)) > 0.99) * 0.5                    # bright puncta on texture
+    if quantised:                                                  # many EXACT weight ties
+        img = (np.round(img * 50) / 50).astype(np.float32)
     return img, sk.segmentation.felzenszwalb(img, scale=7.0, sigma=0.5, min_size=2)
+
+
+def _background_case():
+    """The real slow shape: a near-zero background of noise segments around a few puncta."""
+    rng = np.random.default_rng(7)
+    img = np.abs(rng.normal(0, 0.002, (160, 160))).astype(np.float32)
+    yy, xx = np.mgrid[:160, :160]
+    for cy, cx in rng.integers(20, 140, (12, 2)):
+        img += np.exp(-((yy - cy) ** 2 + (xx - cx) ** 2) / 8.0).astype(np.float32)
+    return img, sk.segmentation.felzenszwalb(img, scale=7.0, sigma=0.5, min_size=2)
+
+
+def _reference(img, segs, thresh):
+    return sk.graph.merge_hierarchical(
+        segs, sk.graph.rag_mean_color(img, segs, mode='distance'), thresh=thresh, rag_copy=False,
+        in_place_merge=True, merge_func=merge_mean_color, weight_func=_weight_mean_color)
+
+
+@pytest.mark.parametrize('quantised', [False, True])
+@pytest.mark.parametrize('seed', range(4))
+def test_identical_including_exact_ties(seed, quantised):
+    img, segs = _case(seed, quantised)
+    thresh = 0.05 * float(img.max() - img.min())
+    fast = merge_mean_color_fast(segs, sk.graph.rag_mean_color(img, segs, mode='distance'), thresh)
+    np.testing.assert_array_equal(fast, _reference(img, segs, thresh))
+
+
+def test_identical_on_a_background_dominated_crop():
+    img, segs = _background_case()
+    thresh = 0.05 * float(img.max() - img.min())
+    fast = merge_mean_color_fast(segs, sk.graph.rag_mean_color(img, segs, mode='distance'), thresh)
+    np.testing.assert_array_equal(fast, _reference(img, segs, thresh))
 
 
 @pytest.mark.parametrize('seed', range(6))

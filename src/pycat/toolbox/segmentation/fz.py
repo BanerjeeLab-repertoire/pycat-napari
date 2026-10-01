@@ -7,6 +7,7 @@ Imports local_thresholding_func from the local_thresholding family.
 """
 from __future__ import annotations
 
+import heapq
 import math
 import numpy as np
 import skimage as sk
@@ -51,86 +52,164 @@ def _weight_mean_color(graph, src, dst, n):
     # Return a dictionary with the calculated weight
     return {'weight': diff}
 
+class _LazyMeanColourMerge:
+    """State for `merge_mean_color_fast`. See that function for why each piece is exact."""
+
+    def __init__(self, rag, thresh):
+        self.thresh = thresh
+        nodes = list(rag.nodes)
+        size = max(nodes) + 1
+        self.total = np.zeros(size)
+        self.count = np.zeros(size)
+        self.mean = np.zeros(size)
+        self.channels = None
+        for node in nodes:
+            colour = np.asarray(rag.nodes[node]['total color'], dtype=np.float64).ravel()
+            if colour.size == 0 or np.any(colour != colour[0]):
+                self.channels = None
+                return
+            self.channels = colour.size
+            self.total[node] = colour[0]
+            self.count[node] = rag.nodes[node]['pixel count']
+            self.mean[node] = self.total[node] / self.count[node]
+        self.pid = np.arange(size)                       # public id a storage slot answers to
+        self.time = np.zeros(size, dtype=np.int64)        # when a slot was last a merge dst
+        self.alive = np.zeros(size, dtype=bool)
+        self.alive[nodes] = True
+        self.alive_ids = dict.fromkeys(nodes)             # rag.nodes order, by public id
+        self.members = {n: list(rag.nodes[n]['labels']) for n in nodes}
+        self.adj = {n: set() for n in nodes}
+        self.init_owner, self.init_w = {}, {}
+        for n1, n2, data in rag.edges(data=True):
+            self.adj[n1].add(n2)
+            self.adj[n2].add(n1)
+            key = (n1, n2) if n1 < n2 else (n2, n1)
+            self.init_owner[key] = n1                     # skimage's initial item orientation
+            self.init_w[key] = data['weight']
+
+    def f(self, diff):
+        """norm of `channels` equal differences, exactly as numpy computes it."""
+        squared = diff * diff
+        acc = squared
+        for _ in range(self.channels - 1):
+            acc = acc + squared
+        return np.sqrt(acc)
+
+    def weight(self, a, b):
+        if self.time[a] == 0 and self.time[b] == 0:        # never re-weighted: rag's own weight
+            ia, ib = self.pid[a], self.pid[b]
+            return self.init_w[(ia, ib) if ia < ib else (ib, ia)]
+        return float(self.f(self.mean[a] - self.mean[b]))
+
+    def owns(self, a, b):
+        """skimage orients an edge's valid item from its most recent merge dst."""
+        if self.time[a] != self.time[b]:
+            return self.time[a] > self.time[b]
+        ia, ib = self.pid[a], self.pid[b]
+        return self.init_owner[(ia, ib) if ia < ib else (ib, ia)] == ia
+
+    def candidate(self, x):
+        """(weight, neighbour id, neighbour slot) of slot x's minimum owned edge, or None."""
+        nbrs = self.adj[x]
+        if not nbrs:
+            return None
+        if self.time[x] > 0 and len(nbrs) > 24:            # vectorised: the background region
+            arr = np.fromiter(nbrs, dtype=np.int64, count=len(nbrs))
+            arr = arr[self.time[arr] < self.time[x]]
+            if arr.size == 0:
+                return None
+            w = self.f(self.mean[x] - self.mean[arr])
+            ids = self.pid[arr]
+            k = np.lexsort((ids, w))[0]
+            return float(w[k]), int(ids[k]), int(arr[k])
+        best = None
+        for n in nbrs:
+            if self.owns(x, n):
+                item = (self.weight(x, n), int(self.pid[n]), n)
+                if best is None or item[:2] < best[:2]:
+                    best = item
+        return best
+
+    def push(self, heap, x):
+        c = self.candidate(x)
+        if c is not None and c[0] < self.thresh:
+            heapq.heappush(heap, [c[0], int(self.pid[x]), c[1], x, c[2], int(self.time[x])])
+
+    def is_current(self, x, n, n_id, w):
+        return bool(self.alive[n] and self.pid[n] == n_id and n in self.adj[x]
+                    and self.owns(x, n) and self.weight(x, n) == w)
+
+    def merge(self, x, n, clock):
+        """skimage merges src = x into dst = n; dst keeps its id. The larger adjacency set
+        stays in place and takes dst's id, so the background region is never re-keyed."""
+        src_id, dst_id = int(self.pid[x]), int(self.pid[n])
+        keep, gone = (x, n) if len(self.adj[x]) >= len(self.adj[n]) else (n, x)
+        self.total[keep] = self.total[n] + self.total[x]
+        self.count[keep] = self.count[n] + self.count[x]
+        self.mean[keep] = self.total[keep] / self.count[keep]
+        self.adj[keep].discard(gone)
+        for nb in self.adj[gone]:
+            if nb != keep:
+                self.adj[nb].discard(gone)
+                self.adj[nb].add(keep)
+                self.adj[keep].add(nb)
+        self.adj[gone] = set()
+        self.alive[gone] = False
+        self.pid[keep] = dst_id
+        self.time[keep] = clock
+        self.members[dst_id] = self.members[src_id] + self.members[dst_id]
+        del self.members[src_id], self.alive_ids[src_id]
+        return keep
+
+
 def merge_mean_color_fast(labels, rag, thresh):
     """`skimage.graph.merge_hierarchical(..., rag_copy=False, in_place_merge=True,
-    merge_func=merge_mean_color, weight_func=_weight_mean_color)`, bit-for-bit, without networkx.
+    merge_func=merge_mean_color, weight_func=_weight_mean_color)`, bit-for-bit, ~100x faster.
 
-    Why: on a cell dense with dim irregular puncta, the background region becomes a node with
-    thousands of neighbours, and every merge into it recomputes all of their weights through
-    networkx `add_edge` plus a `numpy.linalg.norm` of a one-element array. Profiled on an
-    annotated Irregular field: 98% of segmentation (366 of 375 s), 35.7 million weight updates.
-    The algorithm is unchanged — same heap of ``[weight, n1, n2, valid]`` items, same
-    invalidation, same in-place merge (``dst`` keeps its id and its place in node order), same
-    final relabelling by surviving-node order (so `label2rgb`'s treatment of label 0 is
-    unchanged) — only the containers are plain Python. `rag_mean_color` stores a grayscale
-    image's colour as C identical channels (C = 3), so the weight is the norm of C equal
-    differences: ``sqrt(d*d + ... + d*d)`` reproduces it exactly (checked against numpy on 2e5
-    values). Graphs whose channels differ use skimage.
+    Why: the bandpassed crop is ~97% near-zero background, built by absorbing ~5,000 noise
+    segments one at a time, and skimage re-weights every one of that region's thousands of
+    edges on every merge (35.7 M networkx updates; 98% of segmentation on an annotated
+    Irregular field).
 
-    Returns None when the channels are not identical, so the caller falls back.
+    The same merges, in the same order, tracked differently:
+
+    * An edge's weight depends only on its endpoints' current means: `rag_mean_color`'s weight
+      until either endpoint is a merge dst, then the norm of the mean difference.
+      `rag_mean_color` stores grayscale as C identical channels, so that norm is
+      ``sqrt(d*d + ... + d*d)`` -- identical to numpy's.
+    * skimage keeps one valid heap item per edge, ``[w, owner, other]``, owner = the endpoint
+      most recently a merge dst (the initial `rag.edges` orientation otherwise). The heap
+      compares ``[w, n1, n2]``, and so does this -- ties included.
+    * A node's OWNED edges only shrink, at fixed weights, until it is a dst again. So one heap
+      entry per node holding its minimum owned edge is a lower bound; a popped entry that is
+      still current is skimage's next merge, and a stale one is recomputed. The background
+      node's minimum is one vectorised numpy pass over its neighbours.
+    * Final relabelling by surviving-node order, as skimage does (so `label2rgb`'s handling of
+      label 0 is unchanged).
+
+    Verified identical on 160 synthetic cases (including quantised images full of exact ties)
+    and on the captured slow calls of an annotated field (109.5 s -> 0.8 s). Returns None when
+    the channels differ (a genuine RGB graph); the caller then uses skimage.
     """
-    import heapq
-    nodes = list(rag.nodes)
-    total = {}
-    count = {}
-    for node in nodes:
-        data = rag.nodes[node]
-        colour = np.asarray(data['total color'], dtype=np.float64).ravel()
-        if colour.size == 0 or np.any(colour != colour[0]):
-            return None
-        channels = colour.size
-        total[node] = float(colour[0])
-        count[node] = data['pixel count']
-    members = {node: list(rag.nodes[node]['labels']) for node in nodes}
-    mean = {node: total[node] / count[node] for node in nodes}
-    adjacency = {node: {} for node in nodes}     # node -> {neighbour: heap item}
+    state = _LazyMeanColourMerge(rag, thresh)
+    if state.channels is None:
+        return None
     heap = []
-    for n1, n2, data in rag.edges(data=True):
-        item = [data['weight'], n1, n2, True]
-        if item[0] < thresh:
-            heap.append(item)
-        adjacency[n1][n2] = item
-        adjacency[n2][n1] = item
-    # Only edges below `thresh` ever enter the heap. skimage pushes every edge and stops at the
-    # first popped weight >= thresh; such an item can never be merged before its edge is
-    # re-weighted, and a re-weighting pushes a fresh item anyway -- so leaving it out changes no
-    # merge, while sparing the tens of millions of pushes a giant background region generates.
-    heapq.heapify(heap)
-    alive = dict.fromkeys(nodes)                   # insertion-ordered set: rag.nodes order
-    while heap:
-        _w, src, dst, valid = heapq.heappop(heap)
-        if not valid:
+    for x in list(state.alive_ids):
+        state.push(heap, x)
+    clock = 0
+    while heap and heap[0][0] < thresh:
+        w, x_id, n_id, x, n, stamp = heapq.heappop(heap)
+        if not state.alive[x] or state.time[x] != stamp or state.pid[x] != x_id:
+            continue                                     # superseded by a fresher entry
+        if not state.is_current(x, n, n_id, w):
+            state.push(heap, x)                          # stale lower bound: recompute
             continue
-        for nbr in adjacency[src]:
-            adjacency[src][nbr][3] = False
-        for nbr in adjacency[dst]:
-            adjacency[dst][nbr][3] = False
-        total[dst] += total[src]                   # merge_mean_color
-        count[dst] += count[src]
-        mean[dst] = total[dst] / count[dst]
-        neighbours = (set(adjacency[src]) | set(adjacency[dst])) - {src, dst}
-        for nbr in neighbours:                     # RAG.merge_nodes(in_place=True)
-            diff = mean[dst] - mean[nbr]
-            squared = diff * diff
-            acc = squared
-            for _ in range(channels - 1):
-                acc = acc + squared
-            item = adjacency[dst].get(nbr) or adjacency[src].get(nbr)
-            new = [math.sqrt(acc), dst, nbr, True]
-            if item is not None:
-                item[3] = False
-            adjacency[dst][nbr] = new
-            adjacency[nbr][dst] = new
-            adjacency[nbr].pop(src, None)
-            if new[0] < thresh:
-                heapq.heappush(heap, new)
-        members[dst] = members[src] + members[dst]
-        for nbr in adjacency[src]:
-            adjacency[nbr].pop(src, None)
-        del adjacency[src], alive[src]
+        clock += 1
+        state.push(heap, state.merge(x, n, clock))
     label_map = np.arange(labels.max() + 1)
-    for ix, node in enumerate(alive):
-        for label in members[node]:
+    for ix, node_id in enumerate(state.alive_ids):
+        for label in state.members[node_id]:
             label_map[label] = ix
     return label_map[labels]
 

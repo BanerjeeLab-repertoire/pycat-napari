@@ -1,3 +1,19 @@
+## [1.6.466] - 2026-10-01
+### Performance — **The Felzenszwalb region merge is ~130× faster than skimage, still bit-for-bit identical.**
+1.6.465 moved `merge_hierarchical` onto plain containers (2.3×); the remaining cost was the algorithm itself. The
+bandpassed crop is ~97% near-zero background, assembled by absorbing ~5,000 noise segments one at a time, and every
+absorption re-weighted all of that region's thousands of edges (6 M heap operations on one cell).
+
+- `fz.merge_mean_color_fast` now performs **the same merges in the same order** with per-node lazy minima: an edge's
+  weight depends only on its endpoints' current means; skimage's single valid heap item per edge is oriented from the
+  endpoint most recently a merge dst; a node's owned edges only shrink, at fixed weights, until it is a dst again —
+  so one heap entry per node is a valid lower bound, a popped current entry is exactly skimage's next merge, and the
+  background node's minimum is one vectorised numpy pass. The large adjacency set stays in place and takes the dst's
+  id, so the background region is never re-keyed. Ties are broken on `[w, n1, n2]` as skimage's heap does.
+- **Verified identical** on the three captured slow calls of an annotated Irregular field (109.5 / 32.8 / 69.8 s
+  in skimage → 0.84 / 0.28 / 0.57 s) and 400 synthetic cases including quantised images full of exact weight ties
+  and a background-dominated crop; pinned by `tests/test_fz_fast_merge.py` (28 cases).
+
 ## [1.6.465] - 2026-10-01
 ### Performance — **Condensate segmentation ~3× faster, output bit-for-bit identical.**
 Profiling the slowest annotated field (Irregular 8: 306 s of segmentation) put **98% of the time in
