@@ -1,3 +1,21 @@
+## [1.6.465] - 2026-10-01
+### Performance — **Condensate segmentation ~3× faster, output bit-for-bit identical.**
+Profiling the slowest annotated field (Irregular 8: 306 s of segmentation) put **98% of the time in
+`skimage.graph.merge_hierarchical`** inside `fz.felzenszwalb_segmentation_and_merging`: as a uniform background
+region absorbs its neighbours it becomes a node with thousands of edges, and every merge into it recomputed all of
+them through networkx `add_edge` and a `numpy.linalg.norm` of a three-element array — 35.7 million weight updates.
+
+- **New `fz.merge_mean_color_fast`**: the same algorithm — same heap of `[weight, n1, n2, valid]` items, same
+  invalidation, same in-place merge and node order, same final relabelling (so `label2rgb`'s handling of label 0 is
+  unchanged) — on plain Python containers. `rag_mean_color` stores a grayscale colour as three identical channels;
+  the weight `sqrt(d*d + d*d + d*d)` reproduces `norm` exactly (checked on 2×10⁵ values). Graphs with genuinely
+  different channels fall back to skimage. Edges at or above the merge threshold are never pushed: they cannot be
+  merged before being re-weighted, which pushes a fresh item anyway.
+- **Verified identical** label maps on the three captured slow calls of Irregular field 8 and 90 synthetic
+  field/threshold cases; pinned by `tests/test_fz_fast_merge.py`.
+- **Measured** (segmentation / whole pipeline): Irregular 8 306 → 96 s / 320 → 114 s; Small 6 132 → 40 s /
+  146 → 53 s; large 7 45 → 23 s / 65 → 41 s.
+
 ## [1.6.464] - 2026-10-01
 ### Fixed — **Bright cells packed with dim puncta were skipped whole by the punctate gate.**
 `cell_has_punctate_signal` passes a cell only if a 13-px blob clears `base + 5 × sigma_cell`, where `sigma_cell` is

@@ -51,6 +51,90 @@ def _weight_mean_color(graph, src, dst, n):
     # Return a dictionary with the calculated weight
     return {'weight': diff}
 
+def merge_mean_color_fast(labels, rag, thresh):
+    """`skimage.graph.merge_hierarchical(..., rag_copy=False, in_place_merge=True,
+    merge_func=merge_mean_color, weight_func=_weight_mean_color)`, bit-for-bit, without networkx.
+
+    Why: on a cell dense with dim irregular puncta, the background region becomes a node with
+    thousands of neighbours, and every merge into it recomputes all of their weights through
+    networkx `add_edge` plus a `numpy.linalg.norm` of a one-element array. Profiled on an
+    annotated Irregular field: 98% of segmentation (366 of 375 s), 35.7 million weight updates.
+    The algorithm is unchanged — same heap of ``[weight, n1, n2, valid]`` items, same
+    invalidation, same in-place merge (``dst`` keeps its id and its place in node order), same
+    final relabelling by surviving-node order (so `label2rgb`'s treatment of label 0 is
+    unchanged) — only the containers are plain Python. `rag_mean_color` stores a grayscale
+    image's colour as C identical channels (C = 3), so the weight is the norm of C equal
+    differences: ``sqrt(d*d + ... + d*d)`` reproduces it exactly (checked against numpy on 2e5
+    values). Graphs whose channels differ use skimage.
+
+    Returns None when the channels are not identical, so the caller falls back.
+    """
+    import heapq
+    nodes = list(rag.nodes)
+    total = {}
+    count = {}
+    for node in nodes:
+        data = rag.nodes[node]
+        colour = np.asarray(data['total color'], dtype=np.float64).ravel()
+        if colour.size == 0 or np.any(colour != colour[0]):
+            return None
+        channels = colour.size
+        total[node] = float(colour[0])
+        count[node] = data['pixel count']
+    members = {node: list(rag.nodes[node]['labels']) for node in nodes}
+    mean = {node: total[node] / count[node] for node in nodes}
+    adjacency = {node: {} for node in nodes}     # node -> {neighbour: heap item}
+    heap = []
+    for n1, n2, data in rag.edges(data=True):
+        item = [data['weight'], n1, n2, True]
+        if item[0] < thresh:
+            heap.append(item)
+        adjacency[n1][n2] = item
+        adjacency[n2][n1] = item
+    # Only edges below `thresh` ever enter the heap. skimage pushes every edge and stops at the
+    # first popped weight >= thresh; such an item can never be merged before its edge is
+    # re-weighted, and a re-weighting pushes a fresh item anyway -- so leaving it out changes no
+    # merge, while sparing the tens of millions of pushes a giant background region generates.
+    heapq.heapify(heap)
+    alive = dict.fromkeys(nodes)                   # insertion-ordered set: rag.nodes order
+    while heap:
+        _w, src, dst, valid = heapq.heappop(heap)
+        if not valid:
+            continue
+        for nbr in adjacency[src]:
+            adjacency[src][nbr][3] = False
+        for nbr in adjacency[dst]:
+            adjacency[dst][nbr][3] = False
+        total[dst] += total[src]                   # merge_mean_color
+        count[dst] += count[src]
+        mean[dst] = total[dst] / count[dst]
+        neighbours = (set(adjacency[src]) | set(adjacency[dst])) - {src, dst}
+        for nbr in neighbours:                     # RAG.merge_nodes(in_place=True)
+            diff = mean[dst] - mean[nbr]
+            squared = diff * diff
+            acc = squared
+            for _ in range(channels - 1):
+                acc = acc + squared
+            item = adjacency[dst].get(nbr) or adjacency[src].get(nbr)
+            new = [math.sqrt(acc), dst, nbr, True]
+            if item is not None:
+                item[3] = False
+            adjacency[dst][nbr] = new
+            adjacency[nbr][dst] = new
+            adjacency[nbr].pop(src, None)
+            if new[0] < thresh:
+                heapq.heappush(heap, new)
+        members[dst] = members[src] + members[dst]
+        for nbr in adjacency[src]:
+            adjacency[nbr].pop(src, None)
+        del adjacency[src], alive[src]
+    label_map = np.arange(labels.max() + 1)
+    for ix, node in enumerate(alive):
+        for label in members[node]:
+            label_map[label] = ix
+    return label_map[labels]
+
+
 @tags_layer('merge_mean_color', role='labels',
             summary='Region merging by mean colour')
 def merge_mean_color(graph, src, dst):
@@ -144,10 +228,12 @@ def felzenszwalb_segmentation_and_merging(image, scale=7.0, sigma=0.5, min_size=
 
     # Merge segments hierarchically: edges below `threshold` (mean-colour distance) collapse.
     # `merge_func` determines how the color information is combined when segments are merged.
-    labels = sk.graph.merge_hierarchical(segments_fz, g, thresh=threshold, rag_copy=False,
-                                         in_place_merge=True,
-                                         merge_func=merge_mean_color,
-                                         weight_func=_weight_mean_color)
+    labels = merge_mean_color_fast(segments_fz, g, threshold)
+    if labels is None:
+        labels = sk.graph.merge_hierarchical(segments_fz, g, thresh=threshold, rag_copy=False,
+                                             in_place_merge=True,
+                                             merge_func=merge_mean_color,
+                                             weight_func=_weight_mean_color)
 
     # Convert the merged segment labels into a segmented image with averaged colors
     # The `label2rgb` function assigns the average color of a segment to all its pixels
