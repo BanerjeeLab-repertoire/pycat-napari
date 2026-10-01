@@ -13,6 +13,10 @@ absorption re-weighted all of that region's thousands of edges (6 M heap operati
 - **Verified identical** on the three captured slow calls of an annotated Irregular field (109.5 / 32.8 / 69.8 s
   in skimage → 0.84 / 0.28 / 0.57 s) and 400 synthetic cases including quantised images full of exact weight ties
   and a background-dominated crop; pinned by `tests/test_fz_fast_merge.py` (28 cases).
+- **Whole pipeline** (segmentation, 1.6.464 → 1.6.465 → 1.6.466; total, 1.6.464 → 1.6.466): Irregular 8
+  306 → 96 → **10 s**, 320 → **36 s**; Small 6 132 → 40 → **6 s**, 146 → **20 s**; large 7 45 → 23 → **20 s**,
+  65 → **39 s**. The merge is no longer significant; what remains is background removal, CLAHE, per-cell contrast
+  stretching and Cellpose.
 
 ## [1.6.465] - 2026-10-01
 ### Performance — **Condensate segmentation ~3× faster, output bit-for-bit identical.**

@@ -40,3 +40,19 @@ which misses a similar share).
 Small 6 132 → 40 s, large 7 45 → 23 s. Remaining cost is the algorithm itself (6 M heap operations as one background
 region absorbs its neighbours); a sorted-neighbour structure for that node could cut it further but must keep the
 exact tie-breaking.
+
+## Runtime, continued (1.6.466)
+
+`fz.merge_mean_color_fast` rewritten with per-node lazy minima — same merges, same order, ties included (identical
+on the captured real calls and 400 synthetic cases): 109.5 s → 0.84 s on the largest call. Segmentation per field
+(1.6.464 → 1.6.466): Irregular 8 306 → 10 s, Small 6 132 → 6 s, large 7 45 → 20 s; whole pipeline 20–39 s, now
+dominated by background removal, CLAHE, contrast stretching and Cellpose.
+
+## Large-puncta objects shadowed by bright neighbours — mechanism found
+
+The Felzenszwalb region merge folds regions whose means differ by < `merge_tol` × the crop's dynamic range (0.05).
+One bright condensate sets that range, so a dim punctum beside it is merged into the background. Sweep 0.05 / 0.02 /
+0.01 (traced found; untraced in annotated cells): large 655/677/**687** of 757, untraced 21/25/29 (IoU 0.708 → 0.712);
+Irregular 423/449/450, untraced 68/88/101 (IoU flat); Small 362/361/358, untraced 79/102/101 (IoU 0.438 → 0.425).
+A lower tolerance is a clear win where bright condensates shadow dim puncta and a loss for sparse puncta, so the
+default stays 0.05 pending a per-cell rule.
