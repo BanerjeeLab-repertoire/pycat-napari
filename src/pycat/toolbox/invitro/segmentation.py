@@ -29,9 +29,11 @@ def segment_ivf_droplets(pre, raw, *, method='otsu', otsu_sensitivity=1.0, multi
 
     Parameters mirror the in-vitro-fluorescence panel's controls. ``pre`` is the pre-processed image the
     threshold methods run on; ``raw`` is the raw fluorescence image the advanced-spot pipeline needs.
-    ``method`` selects the branch: ``'otsu'`` / ``'multiotsu'`` / ``'sauvola'`` (global / multi-level /
-    local thresholds), ``'rf'`` (a trained random-forest classifier, requires ``rf_scribbles``), or the
-    default advanced-spot detector (``segment_subcellular_objects`` on a whole-frame mask).
+    ``method`` selects the branch: ``'droplet'`` (one object per droplet, each bounded at half its own
+    height on ``raw`` — the panel's default, see ``invitro/droplets.py``), ``'otsu'`` / ``'multiotsu'`` /
+    ``'sauvola'`` (global / multi-level / local thresholds), ``'rf'`` (a trained random-forest
+    classifier, requires ``rf_scribbles``), or the advanced-spot detector
+    (``segment_subcellular_objects`` on a whole-frame mask).
 
     Returns
     -------
@@ -52,6 +54,18 @@ def segment_ivf_droplets(pre, raw, *, method='otsu', otsu_sensitivity=1.0, multi
                     keep[lab == pr.label] = pr.label
             lab = measure.label(keep > 0)
         return lab.astype(np.int32), b
+
+    if method == 'droplet':
+        # Per-droplet boundaries on the RAW image (``invitro/droplets.py``); it keeps droplets apart
+        # itself, so the post-filter must not relabel the binary (that is what would fuse them).
+        from pycat.toolbox.invitro.droplets import segment_droplets_by_peak
+        lab = segment_droplets_by_peak(raw, min_area=max(int(min_area), 1))
+        if reject_nonround:
+            for pr in measure.regionprops(lab):
+                if pr.solidity < 0.85:
+                    lab[pr.slice][pr.image] = 0
+            lab = measure.label(lab > 0)
+        return lab.astype(np.int32), lab > 0
 
     if method == 'otsu':
         t = filters.threshold_otsu(pre) * otsu_sensitivity

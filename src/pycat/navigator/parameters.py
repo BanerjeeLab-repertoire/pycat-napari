@@ -104,10 +104,11 @@ _MATERIAL: dict = {
     ),
     # In-vitro fluorescence droplet segmentation: the threshold method + the small-object cutoff.
     "ivf_droplet_segment": (
-        StepParam("method", "Threshold method", "choice", "otsu",
-                  choices=("otsu", "multiotsu", "sauvola"),
-                  help="How the whole-field droplet threshold is chosen: otsu (global), multiotsu (multi-level), "
-                       "or sauvola (local). Default otsu."),
+        StepParam("method", "Segmentation method", "choice", "droplet",
+                  choices=("droplet", "otsu", "multiotsu", "sauvola"),
+                  help="droplet: each droplet bounded at half its own height, touching droplets kept apart. "
+                       "Or a whole-field threshold: otsu (global), multiotsu (multi-level), sauvola (local). "
+                       "Default droplet."),
         StepParam("min_area", "Min droplet area (px)", "int", 6, minimum=1,
                   help="Smallest droplet kept, in pixels of area. Larger drops small/noise objects. Default 6."),
     ),

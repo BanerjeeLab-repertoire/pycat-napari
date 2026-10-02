@@ -166,8 +166,8 @@ def replay_ivf_spatial_metrology(state: dict, image_path: Path, params: dict, ou
 def replay_ivf_segmentation(state: dict, image_path: Path, params: dict, output_dir: Path):
     """Replay in vitro fluorescence droplet segmentation (whole field, no cell mask).
 
-    Must dispatch on the recorded 'method' (otsu/multiotsu/sauvola/rf/spot)
-    exactly like the GUI's 5-branch _task() in invitro_fluor_ui.py's
+    Must dispatch on the recorded 'method' (droplet/otsu/multiotsu/sauvola/rf/spot)
+    exactly like the GUI's 6-branch _task() in invitro_fluor_ui.py's
     _ivf_segmentation -- this previously always ran the 'spot' (Advanced
     spot detection) branch regardless of what was recorded, the same bug
     class already found and fixed in replay_ivf_preprocess/
@@ -200,7 +200,12 @@ def replay_ivf_segmentation(state: dict, image_path: Path, params: dict, output_
             lab = measure.label(keep > 0)
         return lab.astype(np.int32)
 
-    if method == 'otsu':
+    if method == 'droplet':
+        from pycat.toolbox.invitro.segmentation import segment_ivf_droplets
+        labeled, _ = segment_ivf_droplets(pre, raw, method='droplet', min_area=p_minarea,
+                                          reject_nonround=p_round)
+
+    elif method == 'otsu':
         t = filters.threshold_otsu(pre) * params.get('otsu_sensitivity', 1.0)
         labeled = _postfilter(pre > t)
 
@@ -261,7 +266,7 @@ def replay_ivf_droplet_segment(state: dict, image_path: Path, params: dict, outp
     pre = np.asarray(state.get('preprocessed', state['image']))
     raw = _normalize_to_float(state['image'])
     labeled, _unrefined = segment_ivf_droplets(
-        pre, raw, method=params.get('method', 'otsu'),
+        pre, raw, method=params.get('method', 'droplet'),
         min_area=int(params.get('min_area', 6)),
         reject_nonround=bool(params.get('reject_nonround', False)))
     labeled = np.asarray(labeled).astype(np.int32)
@@ -270,7 +275,7 @@ def replay_ivf_droplet_segment(state: dict, image_path: Path, params: dict, outp
     state['labeled_cells']    = labeled
     _save_array(labeled.astype(np.uint16),
                 output_dir / f"{image_path.stem}_ivf_droplet_mask.tiff")
-    print(f"[PyCAT Batch]   IVF droplet segmentation ({params.get('method', 'otsu')}): "
+    print(f"[PyCAT Batch]   IVF droplet segmentation ({params.get('method', 'droplet')}): "
           f"{int(labeled.max())} droplets.")
 
 

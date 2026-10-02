@@ -359,23 +359,35 @@ def _ivf_segmentation(ui, layout):
     form.addRow("Raw fluorescence image:", raw_dd)
 
     # ── Method selector (radio buttons) ───────────────────────────────────
-    # In-vitro droplets on a clean field segment well with a simple global
-    # threshold, so Otsu is the default and the fiddly options are opt-in.
+    # Default: one object per droplet, each bounded at half its own height
+    # (invitro/droplets.py). A single whole-field threshold lets a bright
+    # droplet's glow fuse it with its neighbours; the threshold methods stay
+    # available as alternatives.
     method_box = QVBoxLayout()
+    rb_drop   = QRadioButton("Droplets (per-droplet boundaries) — recommended")
     rb_otsu   = QRadioButton("Threshold (Otsu) — simplest, no parameters")
     rb_multi  = QRadioButton("Multi-level threshold (Multi-Otsu)")
     rb_sauv   = QRadioButton("Local threshold (Sauvola)")
     rb_rf     = QRadioButton("Random Forest (paint scribbles)")
     rb_adv    = QRadioButton("Advanced: spot detection (kurtosis / SNR)")
-    rb_otsu.setChecked(True)
+    rb_drop.setChecked(True)
     bg = QButtonGroup(grp)
-    for _rb in (rb_otsu, rb_multi, rb_sauv, rb_rf, rb_adv):
+    for _rb in (rb_drop, rb_otsu, rb_multi, rb_sauv, rb_rf, rb_adv):
         bg.addButton(_rb); method_box.addWidget(_rb)
     _mw = QWidget(); _mw.setLayout(method_box)
     form.addRow("Segmentation method:", _mw)
 
     # ── Per-method parameter panels (only the active one is shown) ─────────
     stack = QStackedWidget()
+
+    # Droplets: no parameters; runs on the raw image.
+    drop_w = QWidget(); drop_f = QFormLayout(drop_w)
+    drop_f.setContentsMargins(0,0,0,0)
+    _drop_lbl = QLabel("Finds each droplet, then places its edge at half its height\n"
+                       "above the local background. Touching droplets stay separate.\n"
+                       "Uses the raw fluorescence image.")
+    drop_f.addRow(_drop_lbl)
+    stack.addWidget(drop_w)
 
     # Otsu: one OPTIONAL sensitivity nudge (default 1.0 = plain Otsu).
     otsu_w = QWidget(); otsu_f = QFormLayout(otsu_w)
@@ -438,7 +450,7 @@ def _ivf_segmentation(ui, layout):
     form.addRow(stack)
 
     # Wire radio buttons to the stack, and show/hide the RF scribble panel.
-    _rb_order = [rb_otsu, rb_multi, rb_sauv, rb_rf, rb_adv]
+    _rb_order = [rb_drop, rb_otsu, rb_multi, rb_sauv, rb_rf, rb_adv]
     def _on_method():
         for i, _rb in enumerate(_rb_order):
             if _rb.isChecked():
@@ -485,7 +497,8 @@ def _ivf_segmentation(ui, layout):
     prog, run = _run_btn(form, "▶  Segment Droplets")
 
     def _gather_seg_params():
-        if rb_otsu.isChecked():      method = 'otsu'
+        if rb_drop.isChecked():      method = 'droplet'
+        elif rb_otsu.isChecked():    method = 'otsu'
         elif rb_multi.isChecked():   method = 'multiotsu'
         elif rb_sauv.isChecked():    method = 'sauvola'
         elif rb_rf.isChecked():      method = 'rf'

@@ -167,8 +167,8 @@ def _bf_segment_params(intent, ctx, state, reviewed):
 
 
 #: In-vitro fluorescence droplet segmentation knobs (`segment_ivf_droplets` via `replay_ivf_droplet_segment`),
-#: with the grounded defaults the producer uses. Method 'otsu' is the pure-skimage default.
-_IVF_SEG_DEFAULTS: dict = {"method": "otsu", "min_area": 6, "reject_nonround": False}
+#: with the in-vitro panel's defaults: 'droplet' (per-droplet boundaries, ``invitro/droplets.py``).
+_IVF_SEG_DEFAULTS: dict = {"method": "droplet", "min_area": 6, "reject_nonround": False}
 
 
 def _ivf_segment_params(intent, ctx, state, reviewed):

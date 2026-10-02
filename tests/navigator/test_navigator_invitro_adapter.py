@@ -53,7 +53,7 @@ def _scene():
     return np.clip(img, 0, None).astype(np.float32)
 
 
-def _manual_mask(img, *, method="otsu", min_area=6, reject_nonround=False):
+def _manual_mask(img, *, method="droplet", min_area=6, reject_nonround=False):
     from pycat.toolbox.invitro.segmentation import segment_ivf_droplets
     from pycat.batch.steps._common import _normalize_to_float
     labeled, _u = segment_ivf_droplets(img, _normalize_to_float(img), method=method,
