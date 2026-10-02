@@ -575,6 +575,27 @@ def extract_ims_metadata(file_path, reader=None, width_px=None):
 # TIFF / OME-TIFF
 # ---------------------------------------------------------------------------
 
+def _fill_bluelake_fields(common, parsed):
+    """Lumicks Bluelake (C-Trap camera) TIFFs carry their calibration as JSON in the ImageDescription:
+    'Framerate (Hz)', 'Pixel calibration (nm/pix)' and 'Exposure time (ms)'. Without these a fusion
+    movie loads with no frame interval and no pixel size, so tau and the droplet radius have no units.
+    Fills only fields nothing else has set."""
+    if common.get('frame_interval_s') is None:
+        _fr = _safe_float(parsed.get('Framerate (Hz)'))
+        if _fr is not None and _fr > 0:
+            common['frame_interval_s'] = 1.0 / _fr
+            common['frame_interval_source'] = 'bluelake_framerate'
+    if common.get('pixel_size_um') is None:
+        _nm = _safe_float(parsed.get('Pixel calibration (nm/pix)'))
+        if _nm is not None and _nm > 0:
+            common['pixel_size_um'] = _nm / 1e3
+            common['pixel_size_source'] = 'bluelake_pixel_calibration'
+    if common.get('exposure_s') is None:
+        _ms = _safe_float(parsed.get('Exposure time (ms)'))
+        if _ms is not None and _ms > 0:
+            common['exposure_s'] = _ms / 1e3
+
+
 def _parse_voxelsize(page_name):
     """Parse ``VoxelSize=0.0977x0.0977x19.0000`` (µm) out of a TIFF ``PageName`` tag. Returns
     ``(x, y, z)`` floats or ``None`` when the tag carries no VoxelSize. ISS Vista writes the z-step here,
@@ -672,6 +693,7 @@ def extract_tiff_metadata(file_path):
                         _e = _safe_float(_parsed.get('Exposure-ms') or _parsed.get('ExposureTime'))
                         if _e is not None:
                             common['exposure_s'] = _e / 1e3 if _e > 5 else _e
+                    _fill_bluelake_fields(common, _parsed)
                 # modality should be a short descriptor — not a JSON/XML/ImageJ
                 # blob. Only accept a short, plain token here.
                 if len(desc) <= 40 and '=' not in desc and '{' not in desc and '<' not in desc:

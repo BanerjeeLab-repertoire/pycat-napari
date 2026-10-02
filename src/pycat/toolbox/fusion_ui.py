@@ -137,6 +137,13 @@ class DropletFusionUI:
         self._img_dd = self.create_layer_dropdown(napari.layers.Image, binding='common.raw_image')
         self._img_dd.setToolTip("Image stack (T,H,W) of the fusing droplet pair.")
         ic.addRow("Image stack:", self._img_dd)
+        self._img_kind = QComboBox()
+        self._img_kind.addItems(["Auto", "Brightfield (droplet halo)", "Fluorescence (threshold)"])
+        self._img_kind.setToolTip(
+            "How the droplet outline is found in each frame. Brightfield: the bright halo ring around "
+            "each droplet (an intensity threshold cannot see a brightfield droplet, whose interior "
+            "matches the background). Fluorescence: Otsu threshold. Auto picks from the image.")
+        ic.addRow("Image type:", self._img_kind)
         form.addRow(self._image_container)
         self._image_container.setVisible(False)
 
@@ -150,10 +157,7 @@ class DropletFusionUI:
 
     def _on_load_forces(self):
         from PyQt5.QtWidgets import QFileDialog
-        from pycat.file_io.frap_io import lumicks_available, load_lumicks_fusion
-        if not lumicks_available():
-            napari_show_warning("lumicks.pylake not installed. Run: pip install lumicks.pylake")
-            return
+        from pycat.file_io.frap_io import load_lumicks_fusion   # reads with h5py when pylake is absent
         path, _ = QFileDialog.getOpenFileName(
             None, "Open Lumicks C-Trap fusion .h5", "", "Lumicks HDF5 (*.h5)")
         if not path:
@@ -284,18 +288,27 @@ class DropletFusionUI:
                 # **Swallowing the warning silently means nothing ever says so.**
                 from pycat.utils.general_utils import report_guarantee_failure
                 report_guarantee_failure("fusion_ui: T-vs-Z axis warning", _axis_exc)
+            kind = {0: 'auto', 1: 'brightfield', 2: 'otsu'}[self._img_kind.currentIndex()]
             try:
-                time, sig = aspect_ratio_signal(
-                    stack, frame_interval_s=self._frame_dt.value())
+                time, sig, details = aspect_ratio_signal(
+                    stack, threshold_method=kind, frame_interval_s=self._frame_dt.value(),
+                    return_details=True)
             except Exception as e:
                 napari_show_warning(f"Could not build aspect-ratio signal: {e}"); return
-            src = "image aspect ratio"
+            self._dr()['fusion_image_details'] = details
+            src = f"image aspect ratio ({details['method']})"
 
         self._dr()['fusion_time'] = time
         self._dr()['fusion_signal'] = sig
-        # Pre-fill the fit window with the full range
-        self._t_start.setValue(float(np.nanmin(time)))
-        self._t_end.setValue(float(np.nanmax(time)))
+        self._dr()['fusion_source'] = src
+        # Pre-fill the fit window from the inflection of the transient to the end: the neck-growth
+        # phase before it is not exponential (fusion_tools.suggest_fit_window).
+        from pycat.toolbox.fusion_tools import suggest_fit_window
+        win = suggest_fit_window(time, sig)
+        if np.isfinite(win['t_start']):
+            self._t_start.setValue(win['t_start']); self._t_end.setValue(win['t_end'])
+        else:
+            self._t_start.setValue(float(np.nanmin(time))); self._t_end.setValue(float(np.nanmax(time)))
         # Show the built signal immediately so the analysis isn't a black box —
         # the user sees the force/aspect-ratio profile they're about to fit and
         # can read off a sensible fit window.
@@ -308,8 +321,8 @@ class DropletFusionUI:
             'n_samples': int(len(sig))})
         napari_show_info(
             f"Built fusion signal from {src}: {len(sig)} samples, "
-            f"t=[{np.nanmin(time):.4g}, {np.nanmax(time):.4g}] s. "
-            "Set the fit window to isolate the fusion event, then fit.")
+            f"t=[{np.nanmin(time):.4g}, {np.nanmax(time):.4g}] s. The fit window starts at the "
+            f"steepest point of the transient ({self._t_start.value():.4g} s); adjust if needed, then fit.")
 
     # ── Step 3: fit ────────────────────────────────────────────────────
     def _add_fit(self, layout):
@@ -464,6 +477,27 @@ class DropletFusionUI:
         except Exception:
             pass
 
+    def _fusion_size_columns(self, fit):
+        """Image mode: the droplet radii (µm) around the fusion and tau/R, the per-event inverse
+        capillary velocity (tau ≈ (η/γ)·R). Empty for force mode or without a pixel size."""
+        details = self._dr().get('fusion_image_details')
+        time = self._dr().get('fusion_time')
+        tau = fit.get('tau_s')
+        if not details or time is None or tau != tau:
+            return {}
+        try:
+            from pycat.toolbox.fusion_tools import droplet_radii_um
+            onset = int(np.searchsorted(np.asarray(time), fit['t_start']))
+            r = droplet_radii_um(details, onset, float(self._mpx()))
+        except (ValueError, TypeError, IndexError, KeyError) as e:
+            debug_log('fusion: droplet radii unavailable', e)
+            return {}
+        cols = {'R1 (µm)': round(r['R1_um'], 3), 'R2 (µm)': round(r['R2_um'], 3),
+                'R fused (µm)': round(r['R_fused_um'], 3)}
+        if r['R_mean_um'] == r['R_mean_um'] and r['R_mean_um'] > 0:
+            cols['τ/R (s/µm)'] = round(tau / r['R_mean_um'], 5)
+        return cols
+
     def _on_fit(self):
         from pycat.toolbox.fusion_tools import fit_fusion_relaxation
         time = self._dr().get('fusion_time')
@@ -501,6 +535,9 @@ class DropletFusionUI:
                 'b (drift)': round(fit['b'], 6) if fit['b']==fit['b'] else None,
                 'd (offset)': round(fit['d'], 5) if fit['d']==fit['d'] else None,
                 'R²':    round(fit['r_squared'], 4) if fit['r_squared']==fit['r_squared'] else None,
+                'τ change, later start': (f"{100 * fit['start_sensitivity']['relative_spread']:.0f}%"
+                                          if fit.get('start_sensitivity') else None),
+                **self._fusion_size_columns(fit),
                 'window (s)': f"[{fit['t_start']:.3g}, {fit['t_end']:.3g}]"
                               if fit['t_start']==fit['t_start'] else None,
             }])

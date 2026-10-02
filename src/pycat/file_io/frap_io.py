@@ -238,6 +238,32 @@ def extract_andor_photostim_rois(ims_path: str) -> list:
 # Lumicks C-Trap force traces (droplet fusion)
 # ---------------------------------------------------------------------------
 
+def _load_lumicks_fusion_h5py(h5_path: str) -> dict:
+    """``load_lumicks_fusion`` without pylake. A Bluelake .h5 is plain HDF5: the high-frequency force
+    channels are 1-D datasets under 'Force HF' carrying their 'Sample rate (Hz)' and 'Start time (ns)'
+    attributes, so reading them needs only h5py. The start time is returned too, so the force record
+    can be aligned to the camera frames (whose page timestamps are on the same nanosecond clock)."""
+    try:
+        import h5py
+    except ImportError as _e:
+        raise ImportError("Reading a Lumicks .h5 needs lumicks.pylake or h5py: "
+                          "pip install lumicks.pylake") from _e
+    forces, sample_rate, start_ns = {}, None, None
+    with h5py.File(h5_path, 'r') as f:
+        for key, ch in (('F1x', 'Force 1x'), ('F1y', 'Force 1y'), ('F2x', 'Force 2x'), ('F2y', 'Force 2y')):
+            ds = f.get(f'Force HF/{ch}')
+            if ds is None or ds.dtype.names:          # LF channels are (Timestamp, Value) records
+                continue
+            forces[key] = np.asarray(ds[:], dtype=float)
+            if sample_rate is None and 'Sample rate (Hz)' in ds.attrs:
+                sample_rate = float(ds.attrs['Sample rate (Hz)'])
+                start_ns = int(ds.attrs.get('Start time (ns)', 0)) or None
+    if not forces:
+        raise ValueError(f"No force channels found in {h5_path} (looked for Force HF Force 1x/1y/2x/2y).")
+    n = len(next(iter(forces.values())))
+    return dict(forces=forces, sample_rate_hz=sample_rate, n_samples=int(n), start_time_ns=start_ns)
+
+
 def load_lumicks_fusion(h5_path: str) -> dict:
     """
     Load C-Trap force traces for a droplet-fusion experiment.
@@ -260,9 +286,8 @@ def load_lumicks_fusion(h5_path: str) -> dict:
     """
     try:
         import lumicks.pylake as pylake
-    except ImportError as _e:
-        raise ImportError(
-            "lumicks.pylake not installed. Run: pip install lumicks.pylake") from _e
+    except ImportError:
+        return _load_lumicks_fusion_h5py(h5_path)
 
     f = pylake.File(h5_path)
     forces = {}

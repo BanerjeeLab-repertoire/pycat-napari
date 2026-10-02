@@ -63,6 +63,12 @@ def fusion_relaxation_model(t, a, tau, b, d):
     return a * np.exp(-t / tau) + b * t + d
 
 
+# Two modes must be two DIFFERENT time constants. A better AICc from two near-equal taus is one decay
+# split in two (measured on the C-Trap poly(rA) aspect ratio: 0.310 and 0.312 s, dAICc 3.5), and calling
+# it two-mode would tell the user tau is a blend when it is not.
+TWO_MODE_MIN_RATIO = 2.0
+
+
 def _fusion_two_mode(t, a1, tau1, a2, tau2, b, d):
     """Two relaxation modes: a fast (surface-driven) and a slow (bulk) decay."""
     return (a1 * np.exp(-t / tau1) + a2 * np.exp(-t / tau2) + b * t + d)
@@ -158,8 +164,8 @@ def test_two_mode_relaxation(t, y):
                     verdict="Two-mode fit did not converge; single exponential retained.")
 
     delta = float(a_single - a_double)          # positive => two-mode is better
-    two_mode = bool(delta > 2.0)
     taus = sorted([abs(float(p2[1])), abs(float(p2[3]))])
+    two_mode = bool(delta > 2.0 and taus[1] >= TWO_MODE_MIN_RATIO * taus[0])
 
     if two_mode:
         # The slow mode is only measurable if it decays substantially WITHIN the window.
@@ -326,7 +332,21 @@ def fit_fusion_relaxation(
         ss_tot = np.sum((y_fit - np.mean(y_fit)) ** 2)
         r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else np.nan
 
-        quality, two_mode = _fusion_model_adequacy(t_fit, y_fit, fit_curve)
+        # Window-relative time, as for the main fit: from absolute time (a fusion 31 s into a movie)
+        # exp(-t/tau) underflows, the single-exponential reference fit fails, and two modes "win".
+        quality, two_mode = _fusion_model_adequacy(tt, y_fit, fit_curve)
+
+        start_check = fit_start_sensitivity(tt, y_fit, tau)
+        # One warning per cause: a short record and a second mode already explain a moving tau.
+        if (start_check['stable'] is False and _windows_observed >= 3.0
+                and not two_mode.get('two_mode')):
+            napari_show_warning(
+                f"Fusion: tau depends on where the fit starts — it moves "
+                f"{100 * start_check['relative_spread']:.0f}% "
+                f"({min(start_check['taus']):.3g}-{max(start_check['taus']):.3g} s) when the start "
+                f"is moved up to 0.75 tau later. A single exponential would not move. Start the "
+                f"window at the inflection of the transient (the default) rather than at contact, "
+                f"or treat this signal as qualitative.")
 
         return dict(
             a=float(a), tau=float(tau), b=float(b), d=float(d),
@@ -341,6 +361,7 @@ def fit_fusion_relaxation(
             fit_adequate=bool(quality['adequate']),
             two_mode=two_mode,
             is_two_mode=bool(two_mode.get('two_mode', False)),
+            start_sensitivity=start_check,
             fit_time=t_fit, fit_curve=fit_curve,
             t_start=float(t0), t_end=float(t_fit[-1]))
     except Exception as e:
@@ -423,10 +444,81 @@ def build_fusion_signal_from_forces(
 # Image-based fusion signal (aspect ratio of the merging pair)
 # ---------------------------------------------------------------------------
 
+def looks_brightfield(stack: np.ndarray, n_sample: int = 8) -> bool:
+    """Is this a brightfield (transmitted-light) movie rather than fluorescence?
+
+    In fluorescence the background is the DARK end of the range and droplets are the bright tail; in
+    brightfield the background sits mid-range and droplets show as a dark rim inside a bright halo. So
+    the background (median) position within the robust range separates them: ~0.0-0.1 for
+    fluorescence, ~0.3-0.6 for brightfield (0.46 on the C-Trap poly(rA) movie)."""
+    stack = np.asarray(stack)
+    idx = np.linspace(0, stack.shape[0] - 1, min(n_sample, stack.shape[0])).astype(int)
+    pos = []
+    for i in idx:
+        f = stack[i].astype(np.float64)
+        lo, med, hi = np.percentile(f, [0.5, 50, 99.5])
+        if hi > lo:
+            pos.append((med - lo) / (hi - lo))
+    return bool(pos) and float(np.median(pos)) > 0.25
+
+
+def brightfield_droplet_mask(frame: np.ndarray, ridge_sigmas=(2, 3), hysteresis_low: float = 0.4,
+                             min_area: int = 500, keep_fraction: float = 0.25):
+    """The fusing droplet(s) in one brightfield frame, or None.
+
+    A droplet in brightfield is not brighter or darker than the background on average — its interior
+    matches it — so an intensity threshold (Otsu on the raw frame) finds background texture instead:
+    on the C-Trap poly(rA) movie it returned an aspect ratio of ~2.5 in EVERY frame, before and after
+    fusion. What does mark a droplet is the thin bright halo ring around its edge. A ridge filter
+    (Sato, bright ridges) picks that ring out cleanly; a hysteresis threshold keeps a ring whose
+    contrast varies around it closed; filling the closed ring gives the droplet.
+
+    Every filled object at least ``keep_fraction`` of the largest is kept, so two droplets that have
+    not yet touched are measured together (their union's aspect ratio is ~2) and relax to one.
+    """
+    import skimage as sk
+    import scipy.ndimage as ndi
+
+    f = np.asarray(frame, dtype=np.float64)
+    ridge_resp = sk.filters.sato(f, sigmas=ridge_sigmas, black_ridges=False)
+    try:
+        hi = sk.filters.threshold_otsu(ridge_resp)
+    except ValueError:
+        return None
+    ridge = sk.filters.apply_hysteresis_threshold(ridge_resp, hysteresis_low * hi, hi)
+    ridge = ndi.binary_closing(ridge, structure=sk.morphology.disk(3))
+    filled = ndi.binary_fill_holes(ridge)
+    filled = ndi.binary_opening(filled, structure=sk.morphology.disk(5))   # ridge fragments go, discs stay
+    lab = sk.measure.label(filled)
+    props = [p for p in sk.measure.regionprops(lab) if p.area >= min_area]
+    if not props:
+        return None
+    biggest = max(p.area for p in props)
+    return np.isin(lab, [p.label for p in props if p.area >= keep_fraction * biggest])
+
+
+def _threshold_mask(frame, thr_fn):
+    import skimage as sk
+    frame = frame.astype(np.float32)
+    mn, mx = float(frame.min()), float(frame.max())
+    if mx <= mn:
+        return None
+    frame = (frame - mn) / (mx - mn)
+    try:
+        labeled = sk.measure.label(frame > thr_fn(frame))
+    except (ValueError, RuntimeError):          # a flat or degenerate histogram has no threshold
+        return None
+    props = sk.measure.regionprops(labeled)
+    if not props:
+        return None
+    return labeled == max(props, key=lambda p: p.area).label
+
+
 def aspect_ratio_signal(
     stack: np.ndarray,
     threshold_method: str = 'otsu',
     frame_interval_s: float = 1.0,
+    return_details: bool = False,
 ) -> tuple:
     """
     Build a fusion signal from a brightfield/fluorescence image stack by
@@ -439,13 +531,17 @@ def aspect_ratio_signal(
     Parameters
     ----------
     stack : (T, H, W) image stack.
-    threshold_method : 'otsu' | 'triangle' | 'li' for per-frame segmentation.
+    threshold_method : 'brightfield' (halo ridge, ``brightfield_droplet_mask``), 'auto' (brightfield
+        when ``looks_brightfield``, else Otsu), or 'otsu' | 'triangle' | 'li' for a per-frame
+        intensity threshold (fluorescence).
     frame_interval_s : time per frame (s).
+    return_details : also return a dict with the method used, per-frame area (px) and number of
+        objects, and the equivalent radius (px) of each object per frame.
 
     Returns
     -------
-    (time, aspect_ratio) arrays. aspect_ratio = major_axis / minor_axis of
-    the largest connected object in each frame.
+    (time, aspect_ratio) arrays — plus the details dict when ``return_details``. aspect_ratio =
+    major_axis / minor_axis of the droplet pair (brightfield) or of the largest object (threshold).
     """
     import skimage as sk
 
@@ -454,31 +550,126 @@ def aspect_ratio_signal(
         raise ValueError("Aspect-ratio fusion signal requires a (T,H,W) stack.")
 
     method = threshold_method.lower()
+    if method == 'auto':
+        method = 'brightfield' if looks_brightfield(stack) else 'otsu'
     thr_fn = {'triangle': sk.filters.threshold_triangle,
               'li': sk.filters.threshold_li}.get(method, sk.filters.threshold_otsu)
 
-    ar = np.full(stack.shape[0], np.nan)
-    for i in range(stack.shape[0]):
-        frame = stack[i].astype(np.float32)
-        mn, mx = float(frame.min()), float(frame.max())
-        if mx <= mn:
+    n = stack.shape[0]
+    ar = np.full(n, np.nan)
+    area = np.full(n, np.nan)
+    n_obj = np.zeros(n, dtype=int)
+    radii = [[] for _ in range(n)]
+    for i in range(n):
+        if method == 'brightfield':
+            mask = brightfield_droplet_mask(stack[i])
+        else:
+            mask = _threshold_mask(stack[i], thr_fn)
+        if mask is None:
             continue
-        frame = (frame - mn) / (mx - mn)
-        try:
-            binary = frame > thr_fn(frame)
-        except Exception:
-            continue
-        labeled = sk.measure.label(binary)
-        props = sk.measure.regionprops(labeled)
-        if not props:
-            continue
-        largest = max(props, key=lambda p: p.area)
-        minor = largest.minor_axis_length
-        if minor > 0:
-            ar[i] = largest.major_axis_length / minor
+        whole = sk.measure.regionprops(mask.astype(np.uint8))[0]
+        if whole.axis_minor_length > 0:
+            ar[i] = whole.axis_major_length / whole.axis_minor_length
+        area[i] = whole.area
+        parts = sk.measure.regionprops(sk.measure.label(mask))
+        n_obj[i] = len(parts)
+        radii[i] = [float(np.sqrt(p.area / np.pi)) for p in parts]
 
-    time = frame_interval_s * np.arange(stack.shape[0])
+    time = frame_interval_s * np.arange(n)
+    if return_details:
+        return time, ar, dict(method=method, area_px=area, n_objects=n_obj, radii_px=radii)
     return time, ar
+
+
+def droplet_radii_um(details: dict, onset_index: int, microns_per_pixel: float) -> dict:
+    """Droplet sizes around a fusion: the two droplets just before it and the fused one at the end.
+
+    Radii are equivalent-circle radii of the brightfield masks, which run to the OUTER edge of the
+    halo, so they read a few pixels large (the halo is ~2-3 px wide at the ridge scale used). The
+    fused radius checks volume conservation: two spheres R1, R2 merge to (R1³ + R2³)^(1/3).
+    """
+    radii = details.get('radii_px', [])
+    n_obj = np.asarray(details.get('n_objects', []))
+    pre = [i for i in range(min(onset_index, len(radii))) if n_obj[i] == 2]
+    if pre:
+        pairs = np.array([sorted(radii[i]) for i in pre[-10:]])
+        r1, r2 = (np.median(pairs, axis=0) * microns_per_pixel).tolist()
+    else:
+        r1 = r2 = float('nan')
+    post = [i for i in range(len(radii)) if n_obj[i] == 1][-10:]
+    r_fused = (float(np.median([radii[i][0] for i in post])) * microns_per_pixel) if post else float('nan')
+    return dict(R1_um=r1, R2_um=r2, R_fused_um=r_fused,
+                R_mean_um=float(np.nanmean([r1, r2])) if np.isfinite([r1, r2]).any() else float('nan'),
+                R_fused_expected_um=float((r1 ** 3 + r2 ** 3) ** (1 / 3)))
+
+
+# ---------------------------------------------------------------------------
+# Where to fit: the relaxation, not the neck growth before it
+# ---------------------------------------------------------------------------
+
+def suggest_fit_window(time: np.ndarray, signal: np.ndarray, smooth_s: Optional[float] = None) -> dict:
+    """The fit window for a fusion trace: from the inflection (steepest point) of the main transient to
+    the end of the record.
+
+    Why not from the onset: a fusion begins with the neck between the droplets widening, and over that
+    phase the signal accelerates (an S-shaped start) — an exponential cannot follow it. On the C-Trap
+    poly(rA) event, fitting the force from the onset gave tau = 0.76-2.0 s depending on the channel, at
+    visibly wrong fits; from the inflection the brightfield aspect ratio gives tau = 0.23 s at R² = 0.999
+    and the soft-trap force 0.25-0.27 s. After the inflection the shape relaxation is exponential.
+
+    ``smooth_s`` is the Gaussian smoothing used to find the steepest point (default: 2% of the record,
+    at least one sample).
+    """
+    import scipy.ndimage as ndi
+    t = np.asarray(time, float)
+    y = np.asarray(signal, float)
+    ok = np.isfinite(t) & np.isfinite(y)
+    t, y = t[ok], y[ok]
+    if t.size < 5:
+        return dict(t_start=float('nan'), t_end=float('nan'), index=None)
+    dt = float(np.median(np.diff(t)))
+    w = max(1.0, (smooth_s / dt) if smooth_s else 0.02 * t.size)
+    ys = ndi.gaussian_filter1d(y, w, mode='nearest')
+    i = int(np.argmax(np.abs(np.gradient(ys, t))))
+    return dict(t_start=float(t[i]), t_end=float(t[-1]), index=i)
+
+
+def _quiet_tau(tt, y):
+    a0, d0 = float(y[0] - y[-1]), float(y[-1])
+    popt, _ = curve_fit(fusion_relaxation_model, tt, y,
+                        p0=[a0, max((tt[-1] - tt[0]) / 3.0, 1e-4), 0.0, d0],
+                        bounds=([-np.inf, 1e-5, -np.inf, -np.inf], [np.inf, 1e6, np.inf, np.inf]),
+                        maxfev=20000)
+    return float(popt[1])
+
+
+def fit_start_sensitivity(t_fit: np.ndarray, y_fit: np.ndarray, tau: float,
+                          offsets_tau=(0.25, 0.5, 0.75)) -> dict:
+    """Does tau change when the fit starts a little later?
+
+    For a single exponential it must not: starting later only drops data. If tau drifts as the start
+    moves, the trace is not one exponential over the window (a lag, a second mode, trap dynamics) and
+    the tau reported depends on an arbitrary choice. Measured on the C-Trap poly(rA) event: the
+    brightfield aspect ratio moves 8% (0.25 → 0.23 s) over starts 0-0.3 s past the inflection; the
+    stiff-trap force (F2x) moves 30% (0.58 → 0.41 s), and disagrees with the image by 2x.
+    """
+    t = np.asarray(t_fit, float); y = np.asarray(y_fit, float)
+    taus = [float(tau)]
+    for k in offsets_tau:
+        sel = t >= t[0] + k * tau
+        if sel.sum() < 8:
+            continue
+        try:
+            taus.append(_quiet_tau(t[sel] - t[sel][0], y[sel]))
+        except (RuntimeError, ValueError):      # curve_fit did not converge on the shorter window
+            continue
+    taus = np.array(taus)
+    spread = float((taus.max() - taus.min()) / np.median(taus)) if len(taus) > 1 else float('nan')
+    return dict(taus=taus.tolist(), offsets_tau=[0.0, *offsets_tau][:len(taus)], relative_spread=spread,
+                stable=bool(spread <= START_SENSITIVITY_LIMIT) if np.isfinite(spread) else None)
+
+
+START_SENSITIVITY_LIMIT = 0.15
 
 
 # ---------------------------------------------------------------------------
