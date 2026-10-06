@@ -238,7 +238,8 @@ def _condensate_refit_kwargs(params):
             'boundary_mode': params.get('boundary_mode', 'regional'),
             'second_pass': params.get('second_pass', True),
             'transfected_route': params.get('transfected_route', True),
-            'ring_rejection': params.get('ring_rejection', True)}
+            'ring_rejection': params.get('ring_rejection', True),
+            'scale_reconciliation': params.get('scale_reconciliation', True)}
 
 
 def _apply_recorded_contrast_floor(data_instance, refined_mask, original_image, labeled_cells, params):

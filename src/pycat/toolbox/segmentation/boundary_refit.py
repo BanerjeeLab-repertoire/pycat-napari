@@ -297,12 +297,43 @@ def keep_objects_apart(labels):
     return np.where(touching, 0, labels)
 
 
+SPLIT_JOIN_MIN_SOLIDITY = 0.9    # the joined object must be as compact as a regional boundary must be
+
+
+def _join_split_objects(out, img, took_regional, min_solidity=SPLIT_JOIN_MIN_SOLIDITY):
+    """Join touching objects that are one condensate the detection split in two (Meet's 'mask split
+    into two'): no intensity dip between them (`reconcile._pieces_are_one_object`) AND a joined shape as
+    compact as a regional boundary must be. A dim droplet pressed against a bright one also shows little
+    dip, but two touching discs are not compact (solidity ~0.86), so they stay two."""
+    from pycat.toolbox.segmentation.reconcile import _pieces_are_one_object
+    out = out.copy()
+    high = ndi.maximum_filter(out, size=3)
+    pairs = set(zip(out[(out > 0) & (high > out)].tolist(), high[(out > 0) & (high > out)].tolist()))
+    for a, b in sorted(pairs):
+        a, b = int(a), int(b)
+        if not (out == a).any() or not (out == b).any():
+            continue
+        both = (out == a) | (out == b)
+        ys, xs = np.nonzero(both)
+        sl = (slice(max(0, ys.min() - 4), ys.max() + 5), slice(max(0, xs.min() - 4), xs.max() + 5))
+        joined = both[sl]
+        if sk.measure.regionprops(joined.astype(np.uint8))[0].solidity < min_solidity:
+            continue
+        pieces = np.where(joined, out[sl], 0)
+        if _pieces_are_one_object(img[sl], joined, pieces):
+            out[out == b] = a
+            if b in took_regional and a not in took_regional:
+                took_regional.append(a)
+    return out
+
+
 def refit_regional_boundaries(raw_image, object_mask, cell_mask, ball_radius, level=0.5,
                               tophat_scale=REGIONAL_TOPHAT_SCALE,
                               otsu_factor=REGIONAL_OTSU_FACTOR,
                               max_growth=REGIONAL_MAX_GROWTH,
                               min_solidity=REGIONAL_MIN_SOLIDITY,
-                              smooth_sigma=REGIONAL_SMOOTH_SIGMA, source_out=None):
+                              smooth_sigma=REGIONAL_SMOOTH_SIGMA, source_out=None,
+                              join_split_objects=False):
     """Per object, the regional boundary if it is condensate-like, else the ``level`` contour.
 
     Each detection is grown by watershed into the cell's foreground — the Otsu threshold
@@ -365,6 +396,8 @@ def refit_regional_boundaries(raw_image, object_mask, cell_mask, ball_radius, le
         regional = compact and region.sum() <= max_growth * max(int(own.sum()), 1)
         took_regional.append(index) if regional else None
         out[(region if regional else own) & (out == 0)] = index
+    if join_split_objects:
+        out = _join_split_objects(out, img, took_regional)
     out = keep_objects_apart(out)
     if source_out is not None:
         source_out[out > 0] = np.where(np.isin(out[out > 0], took_regional),

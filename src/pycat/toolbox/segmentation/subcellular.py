@@ -24,6 +24,7 @@ from pycat.toolbox.segmentation.intensity import cell_has_punctate_signal, compu
 from pycat.toolbox.segmentation.morphology import cell_mask_stretching
 from pycat.toolbox.segmentation.object_scale import (
     object_scale_spectrum, recommend_working_scales)
+from pycat.toolbox.segmentation.reconcile import reconcile_scales
 from pycat.toolbox.segmentation.boundary_refit import (BOUNDARY_LEVEL, refit_object_boundaries,
                                                        refit_regional_boundaries)
 
@@ -93,7 +94,8 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
                                 punctate_gate_sigma=5.0, punctate_gate_abs_sigma=3.0,
                                 multiscale=True, boundary_refit=True, refit_level=0.5,
                                 boundary_mode='level', boundary_source=None, second_pass=False,
-                                transfected_route=False, ring_rejection=False, ring_rejected=None):
+                                transfected_route=False, ring_rejection=False, ring_rejected=None,
+                                scale_reconciliation=False):
     """
     Segments and refines subcellular objects within a specified cell mask from microscopy images.
     The function uses pre-processed images and cell-specific metrics to remove background, enhance
@@ -149,6 +151,11 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
         Remove optical halo fragments -- thin, dim arcs at a constant standoff outside a brighter
         object (`halo.find_halo_fragments`) -- leaving every other object's mask untouched.
         Default False here; the 2D cellular fluorescence workflow turns it on.
+    scale_reconciliation : bool, optional
+        Fold each coarse detection pass in object by object (`reconcile.reconcile_scales`) instead of
+        a plain union: a coarse object overlapping one primary detection replaces it, one overlapping
+        several is discarded. Removes the split and the merge the union makes. Default False here;
+        the 2D cellular fluorescence workflow turns it on.
     ring_rejected : numpy.ndarray, optional
         Full-size bool array owned by the caller; receives the removed fragments, for the results
         table and overlay.
@@ -341,9 +348,13 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
                 _p2, _r2 = _large_object_pass(
                     orig_crop, proc_crop, mask_crop, _br, min_spot_radius,
                     refine_fast, _refinement_kwargs, second_pass)
-                puncta_mask_crop = puncta_mask_crop.astype(bool) | _p2.astype(bool)
-                refined_puncta_mask_crop = (refined_puncta_mask_crop.astype(bool)
-                                            | _r2.astype(bool))
+                if scale_reconciliation:
+                    puncta_mask_crop = reconcile_scales(puncta_mask_crop, _p2, orig_crop)
+                    refined_puncta_mask_crop = reconcile_scales(refined_puncta_mask_crop, _r2, orig_crop)
+                else:
+                    puncta_mask_crop = puncta_mask_crop.astype(bool) | _p2.astype(bool)
+                    refined_puncta_mask_crop = (refined_puncta_mask_crop.astype(bool)
+                                                | _r2.astype(bool))
 
         # ── The EDGE, measured on the raw image rather than inherited from the
         # band-pass. Identity is already decided above; this only moves boundaries.
@@ -352,7 +363,7 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
             if boundary_mode == 'regional':
                 refined_puncta_mask_crop = refit_regional_boundaries(
                     orig_crop, refined_puncta_mask_crop, mask_crop, ball_radius,
-                    level=refit_level, source_out=source)
+                    level=refit_level, source_out=source, join_split_objects=scale_reconciliation)
             else:
                 refined_puncta_mask_crop = refit_object_boundaries(
                     orig_crop, refined_puncta_mask_crop, mask_crop, level=refit_level)
@@ -419,7 +430,8 @@ def run_segment_subcellular_objects(pre_processed_image_layer, original_image_la
                                     multiscale=True, boundary_refit=True, refit_level=0.5,
                                     boundary_mode='regional', second_pass=True,
                                     transfected_route=True, ring_rejection=True,
-                                    contrast_floor_on=True, contrast_floor=None):
+                                    contrast_floor_on=True, contrast_floor=None,
+                                    scale_reconciliation=True):
     """
     Orchestrates the segmentation and refinement of subcellular objects across all cells
     in an image. It utilizes the napari viewer for visualization and operates on pre-processed
@@ -528,7 +540,7 @@ def run_segment_subcellular_objects(pre_processed_image_layer, original_image_la
                 refit_level=refit_level, boundary_mode=boundary_mode, second_pass=second_pass,
                 transfected_route=transfected_route,
                 boundary_source=boundary_source, ring_rejection=ring_rejection,
-                ring_rejected=ring_rejected)
+                ring_rejected=ring_rejected, scale_reconciliation=scale_reconciliation)
 
         # Add the segmented mask to the total mask
         total_puncta_mask += puncta_mask 

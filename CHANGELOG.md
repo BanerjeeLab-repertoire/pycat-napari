@@ -1,3 +1,17 @@
+## [1.6.473] - 2026-10-06
+### Fixed — **scale reconciliation, and Meet's "mask split into two" (ring rejection spec, Phase D).**
+- **`segmentation/reconcile.py`:** each coarse detection pass is folded in object by object instead of a boolean OR —
+  a coarse object over no primary detection is kept, over one it replaces it, over several it is discarded unless the
+  raw image shows no dip between them (< 20%: sub-peaks of one condensate, replaced). No effect on the 27 annotated
+  fields (the coarse pass rarely proposes anything at the measured sizes).
+- **The split Meet reported is not a scale artefact:** the primary detection finds two touching pieces of one
+  elongated condensate (dip 2%) and the regional watershed kept them apart. `refit_regional_boundaries(
+  join_split_objects=True)` joins touching objects with no real dip whose union is compact (solidity >= 0.9); a dim
+  condensate pressed against a bright one is not compact and stays separate. 35 joins on the 27 fields; IoU 0.71 /
+  0.44 / 0.39 (irregular +0.01), misses unchanged; fusion 0.3% / 4.7% / 6.6% (was 0.3 / 3.6 / 6.1; spec limit 11%).
+- Opt-in in `segment_subcellular_objects(scale_reconciliation=False)`; on in the 2D cellular GUI handler and batch
+  replay. Other workflows byte-identical to 1.6.460. Report: `docs/audits/ring_rejection_phaseD_2026-10-06.md`.
+
 ## [1.6.472] - 2026-10-06
 ### Added — **a minimum contrast floor with a live slider (ring rejection spec, Phase C).**
 Each final condensate's local contrast-to-noise ratio — the refinement gate's own definition, measured once on the
