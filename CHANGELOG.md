@@ -1,3 +1,23 @@
+## [1.6.472] - 2026-10-06
+### Added — **a minimum contrast floor with a live slider (ring rejection spec, Phase C).**
+Each final condensate's local contrast-to-noise ratio — the refinement gate's own definition, measured once on the
+raw image after segmentation (`segmentation/contrast_floor.py`) — is compared with a floor by lookup, so a slider
+moves objects between "Total Refined Puncta Mask" and a muted red "Below Contrast Floor" layer in real time (~2 ms
+per step on 512², debounced). Contrast only; no shape or size term.
+- **Default 1.75, on — calibrated, with an overlap.** Fitted on Meet's two "diffuse" cells (small-puncta fields 5 and
+  7; the 24 detections he did not trace himself) against the 1,371 detections both Meet and Gable traced on all 27
+  annotated fields. No value separates them cleanly (Meet's objects CNR 0.93-2.80; agreed condensates' 10th
+  percentile 1.71): 1.75 removes 19/24 of his objects and 10.6% of the agreed condensates (Gable's choice of the
+  knee). Report: `docs/audits/ring_rejection_phaseC_2026-10-06.md`.
+- **A per-cell test was checked and is not supported by these data:** only two cells were called diffuse, and one of
+  them is indistinguishable from ordinary cells by every contrast statistic (balanced accuracy ~0.8 from two
+  negatives).
+- **Flagged, not deleted:** every object carries `local_cnr`; below-floor objects are listed with
+  `below_contrast_floor` True and stay out of the per-cell summaries. "Apply minimum contrast floor" + slider in the
+  condensate segmentation panel; the slider minimum reproduces the unfiltered result exactly.
+- **Batch:** `contrast_floor_on` / `contrast_floor` are recorded with condensate segmentation (and follow the
+  slider); replay applies the recorded floor. A recording without them (before 1.6.472) replays unchanged.
+
 ## [1.6.471] - 2026-10-06
 ### Added — **optical halo fragments are rejected (ring rejection spec, Phase B).**
 A ring or arc of light around a condensate (Airy, defocus or refractive-index interface halo) segmented as its own

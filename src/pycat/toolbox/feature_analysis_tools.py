@@ -778,29 +778,47 @@ def attach_boundary_source(df, labeled_puncta, data_instance):
     return df
 
 
-def attach_ring_rejected(df, data_instance, cell_mask, image, cell_label, properties):
-    """Add ``ring_rejected`` (False on every measured object) and append this cell's removed optical
-    halo fragments as rows with ``ring_rejected`` True, read from the map condensate segmentation leaves
-    (`segmentation.halo`). They are reported so a count difference is explainable, but they are not
-    objects: no label in the mask (``label`` and ``global_punctum_label`` 0) and never in the per-cell
-    summaries, which are computed before this runs."""
-    df = df.assign(ring_rejected=False)
-    halo_map = data_instance.data_repository.get('ring_rejected_map')
-    if halo_map is None or halo_map.shape != cell_mask.shape:
-        return df
-    halos = sk.measure.label(np.asarray(halo_map, dtype=bool) & cell_mask)
-    if not halos.max():
-        return df
-    rows = normalise_bbox_columns(pd.DataFrame(
-        sk.measure.regionprops_table(halos, intensity_image=image, properties=properties)))
-    rows['micron area'] = rows['area'] * data_instance.data_repository['microns_per_pixel_sq']
-    rows['cell label'] = cell_label
-    rows['label'] = 0
-    rows['global_punctum_label'] = 0
-    rows['shape_filtered'] = False
-    rows['boundary_source'] = 'ring rejected'
-    rows['ring_rejected'] = True
-    return pd.concat([df, rows], ignore_index=True)
+_EXCLUSION_MAPS = (('ring_rejected_map', 'ring_rejected', 'ring rejected'),
+                   ('below_floor_map', 'below_contrast_floor', 'below contrast floor'))
+
+
+def _local_cnr_of(labeled, cnr_map, n):
+    """Each object's local CNR from the map condensate segmentation painted (NaN where unrecorded)."""
+    if cnr_map is None or cnr_map.shape != labeled.shape or n == 0:
+        return np.full(n, np.nan)
+    import scipy.ndimage as ndi
+    return np.asarray(ndi.median(cnr_map, labeled, np.arange(1, n + 1)), float)
+
+
+def attach_excluded_objects(df, data_instance, cell_mask, image, cell_label, properties, labeled_puncta):
+    """Add ``local_cnr``, ``ring_rejected`` and ``below_contrast_floor``, and append this cell's objects
+    that condensate segmentation REMOVED -- optical halo fragments (`segmentation.halo`) and objects under
+    the minimum contrast floor (`segmentation.contrast_floor`) -- as flagged rows. They are reported so a
+    count difference is explainable and the floor can be judged, but they are not objects: no label in
+    the mask (``label`` and ``global_punctum_label`` 0) and never in the per-cell summaries, which are
+    computed before this runs."""
+    repo = data_instance.data_repository
+    cnr_map = repo.get('local_cnr_map')
+    df = df.assign(local_cnr=_local_cnr_of(labeled_puncta, cnr_map, len(df)) if len(df) else [],
+                   ring_rejected=False, below_contrast_floor=False)
+    parts = [df]
+    for key, flag, source in _EXCLUSION_MAPS:
+        mask = repo.get(key)
+        if mask is None or mask.shape != cell_mask.shape:
+            continue
+        removed = sk.measure.label(np.asarray(mask, dtype=bool) & cell_mask)
+        if not removed.max():
+            continue
+        rows = normalise_bbox_columns(pd.DataFrame(
+            sk.measure.regionprops_table(removed, intensity_image=image, properties=properties)))
+        rows = rows.assign(**{'micron area': rows['area'] * repo['microns_per_pixel_sq'],
+                              'cell label': cell_label, 'label': 0, 'global_punctum_label': 0,
+                              'shape_filtered': False, 'boundary_source': source,
+                              'local_cnr': _local_cnr_of(removed, cnr_map, int(removed.max())),
+                              'ring_rejected': False, 'below_contrast_floor': False})
+        rows[flag] = True
+        parts.append(rows)
+    return pd.concat(parts, ignore_index=True) if len(parts) > 1 else df
 
 
 def puncta_analysis_func(puncta_masks, image, labeled_cells, data_instance, progress_callback=None,
@@ -902,7 +920,8 @@ def puncta_analysis_func(puncta_masks, image, labeled_cells, data_instance, prog
         _store_cell_puncta_stats(data_instance, label,
                                  df[~df['shape_filtered']] if filter_irregular else df,
                                  labeled_puncta, image, cell_xor_puncta_mask, cell_mask_holder)
-        df = attach_ring_rejected(df, data_instance, cell_mask_holder, image, label, properties)
+        df = attach_excluded_objects(df, data_instance, cell_mask_holder, image, label, properties,
+                                     labeled_puncta)
 
         # Append the puncta properties DataFrame to a list for later concatenation
         puncta_prop_list.append(df)

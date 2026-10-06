@@ -382,6 +382,35 @@ def _show_rejected_halos(viewer, ring_rejected):
                          f"'Reject optical halo fragments' to keep them.")
 
 
+BELOW_FLOOR_LAYER = "Below Contrast Floor"
+
+
+def show_below_floor(viewer, below):
+    """Objects under the contrast floor, in one muted colour: still visible, so the population at the
+    margin can be judged as the slider moves (dropping them to invisible would hide exactly that)."""
+    data = (np.asarray(below) > 0).astype(np.float32)
+    if BELOW_FLOOR_LAYER in viewer.layers:
+        viewer.layers[BELOW_FLOOR_LAYER].data = data
+    else:
+        viewer.add_image(data, name=BELOW_FLOOR_LAYER, colormap='red', blending='additive', opacity=0.35)
+
+
+def _split_at_contrast_floor(viewer, data_instance, labels, original_image, cell_masks, on, floor):
+    """Measure every object's local CNR once and split at the floor (`segmentation.contrast_floor`);
+    returns the objects above it, and shows the ones below."""
+    from pycat.toolbox.segmentation.contrast_floor import (CONTRAST_FLOOR_DEFAULT, apply_floor,
+                                                           measure_for_floor)
+    floor = CONTRAST_FLOOR_DEFAULT if floor is None else float(floor)
+    measure_for_floor(data_instance, labels, original_image, cell_masks)
+    above, below = apply_floor(data_instance, floor, on)
+    show_below_floor(viewer, below)
+    n_below = int(len(np.unique(below)) - 1)
+    if n_below:
+        napari_show_info(f"{n_below} object(s) below the contrast floor (local CNR {floor:g}) -- shown in "
+                         f"red; move the floor slider to review them.")
+    return above
+
+
 def run_segment_subcellular_objects(pre_processed_image_layer, original_image_layer, data_instance, viewer,
                                     kurtosis_threshold=-3.0, local_snr_threshold=1.0, global_snr_threshold=1.0,
                                     intensity_hwhm_scale=1.17, max_area_fraction=0.25, min_spot_radius=2,
@@ -389,7 +418,8 @@ def run_segment_subcellular_objects(pre_processed_image_layer, original_image_la
                                     punctate_gate_abs_sigma=3.0,
                                     multiscale=True, boundary_refit=True, refit_level=0.5,
                                     boundary_mode='regional', second_pass=True,
-                                    transfected_route=True, ring_rejection=True):
+                                    transfected_route=True, ring_rejection=True,
+                                    contrast_floor_on=True, contrast_floor=None):
     """
     Orchestrates the segmentation and refinement of subcellular objects across all cells
     in an image. It utilizes the napari viewer for visualization and operates on pre-processed
@@ -546,7 +576,9 @@ def run_segment_subcellular_objects(pre_processed_image_layer, original_image_la
         )
         return
     _puncta_layer = viewer.add_labels(labeled_total_puncta, name="Total Puncta Mask")
-    _refined_layer = viewer.add_labels(labeled_total_refined, name="Total Refined Puncta Mask")
+    above = _split_at_contrast_floor(viewer, data_instance, labeled_total_refined, original_image,
+                                     cell_masks, contrast_floor_on, contrast_floor)
+    _refined_layer = viewer.add_labels(above, name="Total Refined Puncta Mask")
     # Record lineage: both masks were produced by segment_subcellular_objects FROM the pre-processed
     # image, so downstream steps and the resolver can trace them back to their source image.
     from pycat.utils.tag_registry import tag_from_operation

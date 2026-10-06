@@ -505,6 +505,15 @@ class _SegmentationWidgetsMixin:
         self._add_widget_to_layout_or_dock(sauvola_widget, layout, separate_widget, "Local Thresholding Dock")
 
 
+    def _update_recorded_contrast_floor(self, on, floor):
+        """Keep the last recorded condensate segmentation step in step with the floor slider, so a batch
+        replay uses the floor the user settled on rather than the one at run time."""
+        bp = getattr(self.central_manager, '_pycat_batch_processor', None)
+        for step in reversed((getattr(bp, 'config', None) or {}).get('steps', [])):
+            if step.get('step') == 'condensate_segmentation':
+                step['params'].update(contrast_floor_on=bool(on), contrast_floor=float(floor))
+                break
+
     def _add_run_segment_subcellular_objects(self, layout=None, separate_widget=False):
         """Add a widget for subcellular object segmentation, optionally in a separate dock."""
         process_cells_layout = QVBoxLayout()
@@ -543,6 +552,11 @@ class _SegmentationWidgetsMixin:
         _refine_cb.toggled.connect(params_group.setVisible)
         process_cells_layout.addWidget(params_group)
 
+        from pycat.ui.contrast_floor_controls import ContrastFloorControls
+        floor_ctl = ContrastFloorControls(
+            self.viewer, lambda: self.central_manager.active_data_class,
+            on_change=self._update_recorded_contrast_floor)
+
         # ── Run button ────────────────────────────────────────────────────
         process_cells_button = QPushButton("Run Condensate Segmentation")
         process_cells_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
@@ -566,6 +580,7 @@ class _SegmentationWidgetsMixin:
                 boundary_mode='regional' if regional_cb.isChecked() else 'level',
                 second_pass=second_pass_cb.isChecked(),
                 ring_rejection=ring_cb.isChecked(),
+                contrast_floor_on=floor_ctl.on(), contrast_floor=floor_ctl.floor(),
             )
             fn.__name__ = 'run_segment_subcellular_objects'
             self.on_general_button_clicked(
@@ -590,7 +605,9 @@ class _SegmentationWidgetsMixin:
                 'boundary_mode': 'regional' if regional_cb.isChecked() else 'level',
                 'second_pass': second_pass_cb.isChecked(),
                 'ring_rejection': ring_cb.isChecked(),
+                'contrast_floor_on': floor_ctl.on(), 'contrast_floor': floor_ctl.floor(),
             })
+            floor_ctl.refilter()
         process_cells_button.clicked.connect(_on_condensate_seg)
         try:
             from pycat.ui.field_status import button_with_circle
@@ -600,6 +617,7 @@ class _SegmentationWidgetsMixin:
                                  process_cells_image2_dropdown]))
         except Exception:
             process_cells_layout.addWidget(process_cells_button)
+        process_cells_layout.addWidget(floor_ctl)
         process_cells_widget = QWidget()
         process_cells_widget.setLayout(process_cells_layout)
         self._add_widget_to_layout_or_dock(process_cells_widget, layout, separate_widget, "Condensate Segmentation Dock")

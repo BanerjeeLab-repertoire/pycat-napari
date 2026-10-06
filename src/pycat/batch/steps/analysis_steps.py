@@ -241,6 +241,18 @@ def _condensate_refit_kwargs(params):
             'ring_rejection': params.get('ring_rejection', True)}
 
 
+def _apply_recorded_contrast_floor(data_instance, refined_mask, original_image, labeled_cells, params):
+    """The minimum-contrast floor the GUI recorded, applied as the GUI applies it
+    (`segmentation.contrast_floor`): objects below it leave the mask and are flagged for the table."""
+    import skimage as sk
+    from pycat.toolbox.segmentation.contrast_floor import (CONTRAST_FLOOR_DEFAULT, apply_floor,
+                                                           measure_for_floor)
+    labels = sk.measure.label(np.asarray(refined_mask, dtype=bool))
+    measure_for_floor(data_instance, labels, original_image, labeled_cells)
+    above, _below = apply_floor(data_instance, params.get('contrast_floor', CONTRAST_FLOOR_DEFAULT), True)
+    return above > 0
+
+
 def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, output_dir: Path):
     """
     Run segment_subcellular_objects cell-by-cell (the inner loop from
@@ -365,6 +377,9 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
     data_instance.data_repository['boundary_source_map'] = boundary_source
     data_instance.data_repository['ring_rejected_map'] = ring_rejected
     total_puncta_mask &= ~ring_rejected          # as in the GUI: a rejected halo fragment is gone from both
+    if params.get('contrast_floor_on', False):   # recorded by the GUI from 1.6.472; absent = no floor
+        total_refined_puncta_mask = _apply_recorded_contrast_floor(
+            data_instance, total_refined_puncta_mask, original_image, labeled_cells, params)
     state['puncta_mask'] = total_refined_puncta_mask
     state['puncta_mask_unrefined'] = total_puncta_mask
 
