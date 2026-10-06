@@ -66,6 +66,23 @@ def _large_object_pass(orig_crop, proc_crop, mask_crop, ball_radius,
                               min_spot_radius, refine_fast, refinement_kwargs, second_pass)
 
 
+def _drop_halo_fragments(refined, orig_crop, mask_crop, box, boundary_source, ring_rejected):
+    """Remove this cell's halo fragments from ``refined``; record them in ``ring_rejected`` and clear
+    their provenance. Every other object is returned exactly as it was."""
+    from pycat.toolbox.segmentation.halo import reject_halo_fragments
+    refined = np.asarray(refined, dtype=bool)
+    free = mask_crop.astype(bool) & ~refined
+    background = float(np.percentile(orig_crop[free], 20)) if free.any() else None
+    kept, halo = reject_halo_fragments(refined, orig_crop, background=background)
+    r0, r1, c0, c1 = box
+    if halo.any():
+        if boundary_source is not None:
+            boundary_source[r0:r1, c0:c1][halo] = 0
+        if ring_rejected is not None:
+            ring_rejected[r0:r1, c0:c1] |= halo
+    return kept
+
+
 @tags_layer('subcellular_segment', role='labels', inputs=('image',),
             summary='Subcellular object segmentation within cells')
 def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, cell_label, ball_radius, cell_df=None,
@@ -76,7 +93,7 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
                                 punctate_gate_sigma=5.0, punctate_gate_abs_sigma=3.0,
                                 multiscale=True, boundary_refit=True, refit_level=0.5,
                                 boundary_mode='level', boundary_source=None, second_pass=False,
-                                transfected_route=False):
+                                transfected_route=False, ring_rejection=False, ring_rejected=None):
     """
     Segments and refines subcellular objects within a specified cell mask from microscopy images.
     The function uses pre-processed images and cell-specific metrics to remove background, enhance
@@ -128,6 +145,13 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
     boundary_source : numpy.ndarray, optional
         Full-size uint8 array owned by the caller; receives which boundary each object kept
         (`boundary_refit.BOUNDARY_REGIONAL` / `BOUNDARY_LEVEL`), for the results table.
+    ring_rejection : bool, optional
+        Remove optical halo fragments -- thin, dim arcs at a constant standoff outside a brighter
+        object (`halo.find_halo_fragments`) -- leaving every other object's mask untouched.
+        Default False here; the 2D cellular fluorescence workflow turns it on.
+    ring_rejected : numpy.ndarray, optional
+        Full-size bool array owned by the caller; receives the removed fragments, for the results
+        table and overlay.
 
     Returns
     -------
@@ -334,6 +358,10 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
                     orig_crop, refined_puncta_mask_crop, mask_crop, level=refit_level)
                 if source is not None:
                     source[refined_puncta_mask_crop.astype(bool)] = BOUNDARY_LEVEL
+        if ring_rejection:
+            refined_puncta_mask_crop = _drop_halo_fragments(
+                refined_puncta_mask_crop, orig_crop, mask_crop, (r0p, r1p, c0p, c1p),
+                boundary_source, ring_rejected)
 
         # Paste cropped results back into full-size output arrays
         puncta_mask = np.zeros_like(cell_mask)
@@ -343,6 +371,17 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
 
     return refined_puncta_mask, puncta_mask
 
+def _show_rejected_halos(viewer, ring_rejected):
+    """The removed halo fragments, in one distinct colour, so a count difference is visible and a user
+    can see what was taken out (and disagree)."""
+    n = int(sk.measure.label(ring_rejected).max())
+    if n:
+        viewer.add_image(ring_rejected.astype(np.float32), name=f"Rejected Halo Fragments ({n})",
+                         colormap='magenta', blending='additive', opacity=0.8)
+        napari_show_info(f"Removed {n} optical halo fragment(s) -- shown in magenta; untick "
+                         f"'Reject optical halo fragments' to keep them.")
+
+
 def run_segment_subcellular_objects(pre_processed_image_layer, original_image_layer, data_instance, viewer,
                                     kurtosis_threshold=-3.0, local_snr_threshold=1.0, global_snr_threshold=1.0,
                                     intensity_hwhm_scale=1.17, max_area_fraction=0.25, min_spot_radius=2,
@@ -350,7 +389,7 @@ def run_segment_subcellular_objects(pre_processed_image_layer, original_image_la
                                     punctate_gate_abs_sigma=3.0,
                                     multiscale=True, boundary_refit=True, refit_level=0.5,
                                     boundary_mode='regional', second_pass=True,
-                                    transfected_route=True):
+                                    transfected_route=True, ring_rejection=True):
     """
     Orchestrates the segmentation and refinement of subcellular objects across all cells
     in an image. It utilizes the napari viewer for visualization and operates on pre-processed
@@ -431,6 +470,7 @@ def run_segment_subcellular_objects(pre_processed_image_layer, original_image_la
     total_puncta_mask = np.zeros_like(cell_masks, dtype=bool)
     total_refined_puncta_mask = np.zeros_like(cell_masks, dtype=bool)
     boundary_source = np.zeros(cell_masks.shape, dtype=np.uint8)
+    ring_rejected = np.zeros(cell_masks.shape, dtype=bool)
 
     # Iterate over all cell labels, segment, and refine puncta within each cell
     for label in unique_labels:
@@ -457,7 +497,8 @@ def run_segment_subcellular_objects(pre_processed_image_layer, original_image_la
                 multiscale=multiscale, boundary_refit=boundary_refit,
                 refit_level=refit_level, boundary_mode=boundary_mode, second_pass=second_pass,
                 transfected_route=transfected_route,
-                boundary_source=boundary_source)
+                boundary_source=boundary_source, ring_rejection=ring_rejection,
+                ring_rejected=ring_rejected)
 
         # Add the segmented mask to the total mask
         total_puncta_mask += puncta_mask 
@@ -465,6 +506,8 @@ def run_segment_subcellular_objects(pre_processed_image_layer, original_image_la
 
     # Which boundary each object kept, for the condensate table (`puncta_analysis_func`).
     data_instance.data_repository['boundary_source_map'] = boundary_source
+    data_instance.data_repository['ring_rejected_map'] = ring_rejected
+    total_puncta_mask &= ~ring_rejected          # a rejected halo fragment is gone from both layers
 
     # Count DISTINCT objects via connected components, not the boolean max.
     # total_refined_puncta_mask is a boolean OR-accumulation across cells, so its
@@ -509,6 +552,7 @@ def run_segment_subcellular_objects(pre_processed_image_layer, original_image_la
     from pycat.utils.tag_registry import tag_from_operation
     tag_from_operation(_puncta_layer, segment_subcellular_objects, source_layer=pre_processed_image_layer)
     tag_from_operation(_refined_layer, segment_subcellular_objects, source_layer=pre_processed_image_layer)
+    _show_rejected_halos(viewer, ring_rejected)
     napari_show_info(
         f"Condensate segmentation complete: {n_condensates} objects found.")
 

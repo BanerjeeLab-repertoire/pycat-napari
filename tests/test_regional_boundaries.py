@@ -96,7 +96,8 @@ def test_batch_replay_defaults_match_the_gui():
     from pycat.batch.steps.analysis_steps import _condensate_refit_kwargs
     assert _condensate_refit_kwargs({}) == {'multiscale': True, 'boundary_refit': True,
                                             'refit_level': 0.5, 'boundary_mode': 'regional',
-                                            'second_pass': True, 'transfected_route': True}
+                                            'second_pass': True, 'transfected_route': True,
+        'ring_rejection': True}
     assert _condensate_refit_kwargs({'boundary_mode': 'level'})['boundary_mode'] == 'level'
 
 

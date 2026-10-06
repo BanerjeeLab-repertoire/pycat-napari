@@ -88,6 +88,17 @@ def _add_object_scale_controls(params_layout, widgets, make_spinbox):
         "uncheck to use the single pass.")
     params_layout.addRow(widgets['second_pass'])
 
+    widgets['ring_rejection'] = QCheckBox("Reject optical halo fragments")
+    widgets['ring_rejection'].setChecked(True)
+    widgets['ring_rejection'].setToolTip(
+        "Removes a ring or arc of light segmented around a brighter condensate (Airy, defocus or "
+        "interface halo): an object that is thin, long along the parent's edge, at a near-constant "
+        "distance outside it, and at most half as bright. The parent's mask is never changed. "
+        "Removed fragments are shown in magenta and listed in the condensate table "
+        "(ring_rejected). The thresholds are physical defaults, not fitted to data -- uncheck to "
+        "keep every object.")
+    params_layout.addRow(widgets['ring_rejection'])
+
 
 def _build_condensate_refinement_params_group():
     """Build the (initially hidden) 'Refinement Parameters' box for condensate segmentation.
@@ -518,6 +529,7 @@ class _SegmentationWidgetsMixin:
         refit_level_spin = _rp['refit_level']
         regional_cb = _rp['regional_boundaries']
         second_pass_cb = _rp['second_pass']
+        ring_cb = _rp['ring_rejection']
 
         # Refinement parameters are hidden behind an off-by-default reveal
         # checkbox (advanced tuning; sensible defaults are used otherwise).
@@ -553,6 +565,7 @@ class _SegmentationWidgetsMixin:
                 refit_level=refit_level_spin.value(),
                 boundary_mode='regional' if regional_cb.isChecked() else 'level',
                 second_pass=second_pass_cb.isChecked(),
+                ring_rejection=ring_cb.isChecked(),
             )
             fn.__name__ = 'run_segment_subcellular_objects'
             self.on_general_button_clicked(
@@ -576,6 +589,7 @@ class _SegmentationWidgetsMixin:
                 'refit_level': refit_level_spin.value(),
                 'boundary_mode': 'regional' if regional_cb.isChecked() else 'level',
                 'second_pass': second_pass_cb.isChecked(),
+                'ring_rejection': ring_cb.isChecked(),
             })
         process_cells_button.clicked.connect(_on_condensate_seg)
         try:

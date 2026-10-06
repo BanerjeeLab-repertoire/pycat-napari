@@ -1,3 +1,24 @@
+## [1.6.471] - 2026-10-06
+### Added — **optical halo fragments are rejected (ring rejection spec, Phase B).**
+A ring or arc of light around a condensate (Airy, defocus or refractive-index interface halo) segmented as its own
+"condensate" is removed — not kept, and not merged into the parent, whose mask is never changed.
+`segmentation/halo.py`: an object is a halo fragment of a brighter neighbour when ALL of these hold: it follows the
+neighbour's edge (CV of its skeleton's distance to that edge <= 0.3), it is thin (width <= 0.5 x the neighbour's
+radius) and long along the edge (>= 2 x its width), its peak above background is <= 0.5 x the neighbour's, and it
+sits within one neighbour radius (+2 px) of the edge. Works on arcs as well as complete rings.
+- **Defaults are physical, not calibrated.** None of the reference fields contains an optical ring (Phase A), so there
+  was nothing to fit: the brightness and standoff limits are lenient (an ideal Airy first lobe is ~1.7% of the
+  peak), and real condensates are protected by the shape tests. On the 27 annotated fields it removes **0 of 2,165**
+  objects; every benchmark number is unchanged. ~0.4 s per field.
+- **Reported, not silently dropped:** removed fragments are drawn in magenta ("Rejected Halo Fragments") and listed
+  in the condensate table with `ring_rejected` True (no mask label, never in the per-cell summaries); every measured
+  object carries `ring_rejected` False.
+- **GUI:** "Reject optical halo fragments", default on, in *Show refinement parameters*; recorded for batch replay
+  (`ring_rejection`). Library default off (`segment_subcellular_objects(ring_rejection=False)`), so in-vitro,
+  time-series, colocalisation and z-stack segmentation are unchanged.
+- Tests: full ring and 5-arc ring rejected with the parent mask bit-identical; a round neighbour, dim or bright, kept
+  at every standoff tested down to a 1 px gap; a radial rod and a bright arc kept.
+
 ## [1.6.470] - 2026-10-06
 ### Fixed — **the annular "rings" around some condensates were a boundary-assembly bug, not optics.**
 Ring rejection spec, Phase A (`docs/audits/ring_rejection_phaseA_2026-10-06.md`): in the raw images of the 18

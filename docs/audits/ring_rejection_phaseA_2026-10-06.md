@@ -69,5 +69,26 @@ exists to measure.
   (which layer is shown, and how) and not a segmentation defect.
 - **Phase C** (contrast floor) is independent of this result.
 
+## Addendum — what made the annuli (found after this report; fixed in 1.6.470)
+
+Every processing stage was dumped on large field 9 and irregular field 1: pre-processing, background
+removal, edge enhancement and CLAHE stretching. None has a ring; each stage's radial profile decreases
+monotonically and the enhancement narrows objects. The C-arc exists only with `boundary_mode='regional'`.
+It is an assembly bug in `refit_regional_boundaries`, which works in four steps:
+
+1. Two detections whose blobs join at half height share one fallback contour.
+2. The first detection fails the regional test (solidity 0.89), falls back, and takes the whole shared
+   contour.
+3. The second detection's regional region is written only where still free, so it comes out as a shell
+   around the first.
+4. `keep_objects_apart` opens a one-pixel gap between them, which leaves a C-shaped arc.
+
+On the 18 fields, 83 of 1,610 detections had a shared contour and 50 lost more than 20% of their
+intended region this way.
+
+The fix makes each detection's region and contour its share of one watershed partition. The benchmark is
+unchanged. Phase B was built anyway, at the user's request, with physical defaults: optical rings can occur
+in other data even though they do not occur in these fields.
+
 Scripts (scratch, not in the repo): `ringA_run.py`, `crop_match*.py`, `phaseA*.py`, `radial.py`,
 `bridge_probe.py`.

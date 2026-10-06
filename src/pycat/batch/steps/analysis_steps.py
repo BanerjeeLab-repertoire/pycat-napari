@@ -237,7 +237,8 @@ def _condensate_refit_kwargs(params):
             'refit_level': params.get('refit_level', 0.5),
             'boundary_mode': params.get('boundary_mode', 'regional'),
             'second_pass': params.get('second_pass', True),
-            'transfected_route': params.get('transfected_route', True)}
+            'transfected_route': params.get('transfected_route', True),
+            'ring_rejection': params.get('ring_rejection', True)}
 
 
 def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, output_dir: Path):
@@ -286,6 +287,7 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
     total_puncta_mask = np.zeros_like(labeled_cells, dtype=bool)
     total_refined_puncta_mask = np.zeros_like(labeled_cells, dtype=bool)
     boundary_source = np.zeros(labeled_cells.shape, dtype=np.uint8)
+    ring_rejected = np.zeros(labeled_cells.shape, dtype=bool)
 
     # ── Absolute-intensity punctate gate ────────────────────────────────
     # run_segment_subcellular_objects (the interactive path) computes this
@@ -335,6 +337,7 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
                 punctate_gate_sigma=params.get('punctate_gate_sigma', 5.0),
                 punctate_gate_abs_sigma=params.get('punctate_gate_abs_sigma', 3.0),
                 **refit_kw, boundary_source=boundary_source[y0:y1, x0:x1],
+                ring_rejected=ring_rejected[y0:y1, x0:x1],
             )
             # Stitch results back into full-image mask
             total_puncta_mask[y0:y1, x0:x1]         |= unrefined_crop
@@ -354,12 +357,14 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
                 punctate_gate=params.get('punctate_gate', True),
                 punctate_gate_sigma=params.get('punctate_gate_sigma', 5.0),
                 punctate_gate_abs_sigma=params.get('punctate_gate_abs_sigma', 3.0),
-                **refit_kw, boundary_source=boundary_source,
+                **refit_kw, boundary_source=boundary_source, ring_rejected=ring_rejected,
             )
             total_puncta_mask |= unrefined
             total_refined_puncta_mask |= refined
 
     data_instance.data_repository['boundary_source_map'] = boundary_source
+    data_instance.data_repository['ring_rejected_map'] = ring_rejected
+    total_puncta_mask &= ~ring_rejected          # as in the GUI: a rejected halo fragment is gone from both
     state['puncta_mask'] = total_refined_puncta_mask
     state['puncta_mask_unrefined'] = total_puncta_mask
 

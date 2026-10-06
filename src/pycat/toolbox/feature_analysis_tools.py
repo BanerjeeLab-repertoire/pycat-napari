@@ -778,6 +778,31 @@ def attach_boundary_source(df, labeled_puncta, data_instance):
     return df
 
 
+def attach_ring_rejected(df, data_instance, cell_mask, image, cell_label, properties):
+    """Add ``ring_rejected`` (False on every measured object) and append this cell's removed optical
+    halo fragments as rows with ``ring_rejected`` True, read from the map condensate segmentation leaves
+    (`segmentation.halo`). They are reported so a count difference is explainable, but they are not
+    objects: no label in the mask (``label`` and ``global_punctum_label`` 0) and never in the per-cell
+    summaries, which are computed before this runs."""
+    df = df.assign(ring_rejected=False)
+    halo_map = data_instance.data_repository.get('ring_rejected_map')
+    if halo_map is None or halo_map.shape != cell_mask.shape:
+        return df
+    halos = sk.measure.label(np.asarray(halo_map, dtype=bool) & cell_mask)
+    if not halos.max():
+        return df
+    rows = normalise_bbox_columns(pd.DataFrame(
+        sk.measure.regionprops_table(halos, intensity_image=image, properties=properties)))
+    rows['micron area'] = rows['area'] * data_instance.data_repository['microns_per_pixel_sq']
+    rows['cell label'] = cell_label
+    rows['label'] = 0
+    rows['global_punctum_label'] = 0
+    rows['shape_filtered'] = False
+    rows['boundary_source'] = 'ring rejected'
+    rows['ring_rejected'] = True
+    return pd.concat([df, rows], ignore_index=True)
+
+
 def puncta_analysis_func(puncta_masks, image, labeled_cells, data_instance, progress_callback=None,
                          filter_irregular=True):
     """
@@ -877,6 +902,7 @@ def puncta_analysis_func(puncta_masks, image, labeled_cells, data_instance, prog
         _store_cell_puncta_stats(data_instance, label,
                                  df[~df['shape_filtered']] if filter_irregular else df,
                                  labeled_puncta, image, cell_xor_puncta_mask, cell_mask_holder)
+        df = attach_ring_rejected(df, data_instance, cell_mask_holder, image, label, properties)
 
         # Append the puncta properties DataFrame to a list for later concatenation
         puncta_prop_list.append(df)
