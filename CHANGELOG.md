@@ -1,3 +1,31 @@
+## [1.6.470] - 2026-10-06
+### Fixed — **the annular "rings" around some condensates were a boundary-assembly bug, not optics.**
+Ring rejection spec, Phase A (`docs/audits/ring_rejection_phaseA_2026-10-06.md`): in the raw images of the 18
+large/irregular fields there is no ring of light beyond any condensate's edge (a sector test fires on 5.2% of 906
+condensates against 2.6% on empty nucleoplasm, and every flagged profile decreases monotonically), and the
+pre-processing, background removal and edge enhancement add none either. The arcs came from
+`refit_regional_boundaries`: two detections whose blobs join at half height shared ONE fallback contour; the first,
+falling back, claimed all of it, and the second's regional region, written only where still free, came out as a
+crescent or hollow shell around the first (Meet's C-arc, irregular field 1; 50 of 1,610 detections lost >20% of
+their region this way on the 18 fields).
+- Each detection's regional region and fallback contour are now both its share of ONE watershed partition, so they
+  cannot overlap a neighbour's. Pinned by three synthetic scenes that produced crescents (solidity 0.67-0.76)
+  before.
+- End-to-end, consensus, annotated cells: Large IoU 0.71, missed 80/757 (unchanged); Small 0.44, missed 85/446
+  (84 before); Irregular 0.38, missed 177/603 (176 before).
+- Scope: `refit_regional_boundaries` runs only with `boundary_mode='regional'` (2D cellular workflow opt-in).
+
+## [1.6.469] - 2026-10-02
+### Fixed — **brightfield droplet fusion (C-Trap) image mode works; the fit starts at the inflection.**
+Halo-ridge droplet outline for brightfield movies (Otsu saw only background texture), fit window from the steepest
+point of the transient, a start-sensitivity check on every fusion fit, droplet radii and tau/R, Bluelake TIFF frame
+interval and pixel size, h5py fallback for Lumicks .h5, and a two-mode-test fix (absolute time faked a second mode).
+
+## [1.6.468] - 2026-10-02
+### Added — **in-vitro fluorescence: per-droplet boundaries (`segment_ivf_droplets(method='droplet')`), the new
+default in the panel and navigator.** Each droplet bounded at half its own height; fused objects 92 → 3 and
+non-convex 550 → 15 against multi-Otsu on the Abhradeep RG5 fields.
+
 ## [1.6.467] - 2026-10-01
 ### Added — **A second segmentation pass recovers dim puncta a bright neighbour hid.**
 The Felzenszwalb region merge folds regions whose means differ by less than 5% of the crop's dynamic range, and one

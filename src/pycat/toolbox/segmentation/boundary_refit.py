@@ -343,16 +343,24 @@ def refit_regional_boundaries(raw_image, object_mask, cell_mask, ball_radius, le
     foreground = (flat > sk.filters.threshold_otsu(flat[cell]) * otsu_factor) & cell
     markers, _n = ndi.label(seeds)
     markers = np.where(cell, markers, 0)
-    regions = sk.segmentation.watershed(-flat, markers, mask=foreground | (markers > 0))
-    contours, _m = ndi.label(fallback)
+    # ONE partition decides both candidate boundaries of every detection. Two detections can share
+    # one half-height contour (their blobs join at half height). Taken whole, that contour let the
+    # first detection claim its neighbour's pixels, and the neighbour's region, written only where
+    # still free, came out as a hollow shell around it -- the annular "rings" around some
+    # condensates (50 of 1610 detections on the large/irregular fields at 1.6.469). Here each
+    # detection's region and contour are both its own share of the same watershed, so they cannot
+    # overlap a neighbour's.
+    share = sk.segmentation.watershed(-flat, markers, mask=foreground | fallback | (markers > 0))
+    regions = np.where(foreground | (markers > 0), share, 0)
     out = np.zeros(seeds.shape, dtype=np.int32)
     took_regional = []
     for index, window in enumerate(ndi.find_objects(markers), start=1):
         if window is None:
             continue
         region = regions == index
-        own = np.unique(contours[(markers == index) & fallback])
-        own = np.isin(contours, own[own != 0]) if (own != 0).any() else markers == index
+        own = (share == index) & fallback
+        if not own.any():
+            own = markers == index
         compact = sk.measure.regionprops(region.astype(np.uint8))[0].solidity >= min_solidity
         regional = compact and region.sum() <= max_growth * max(int(own.sum()), 1)
         took_regional.append(index) if regional else None

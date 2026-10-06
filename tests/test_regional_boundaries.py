@@ -122,3 +122,32 @@ def test_segmentation_fills_the_callers_provenance_map_in_both_modes():
                                                  multiscale=False, punctate_gate=False,
                                                  boundary_source=source)
         assert np.array_equal(source > 0, refined.astype(bool)), mode
+
+
+
+# A bright core and a dimmer neighbour on a dim irregular body: (seed, core amp, core sigma, neighbour dx,
+# dy, amp, sigma, body amp, body sigma x, sigma y, body dx, dy). Found by search; before 1.6.470 each
+# came out as a core plus a crescent (solidity 0.67-0.76), or split one detection in three.
+_SHELL_SCENES = [
+    (2, 165.1, 1.87, 4.83, -2.18, 165.5, 3.97, 139.9, 5.01, 8.31, 2.81, -3.74),
+    (24, 462.5, 3.09, 5.31, 5.49, 246.9, 3.08, 79.8, 12.91, 9.35, 8.22, 0.63),
+    (34, 294.4, 2.23, 4.11, 1.51, 163.8, 3.19, 131.7, 9.36, 8.94, -2.72, 3.67),
+]
+
+
+@pytest.mark.parametrize('scene', _SHELL_SCENES, ids=lambda s: f'scene{s[0]}')
+def test_two_seeds_sharing_one_half_max_contour_never_leave_a_shell(scene):
+    """Two detections whose blobs join at half height share one fallback contour. Taken whole, it let
+    the first claim its neighbour's pixels, and the neighbour's region, written only where still free,
+    came out as a crescent or shell around it -- the 'rings' around condensates. Each detection must
+    now come out as one compact object."""
+    t, a1, s1, dx, dy, a2, s2, ab, sbx, sby, bx, by = scene
+    rng = np.random.default_rng(t)
+    img = (60 + rng.normal(0, 2, YY.shape) + _gauss(100, 100, s1, a1) + _gauss(100 + dy, 100 + dx, s2, a2)
+           + ab * np.exp(-((YY - 100 - by) ** 2 / (2 * sby ** 2) + (XX - 100 - bx) ** 2 / (2 * sbx ** 2))))
+    seeds = _disc(100, 100, 2) | _disc(100 + round(dy), 100 + round(dx), 2)
+    out = refit_regional_boundaries(img, seeds, np.ones(img.shape, bool), ball_radius=6)
+    lab, n = ndi.label(out)
+    assert n == 2
+    from skimage.measure import regionprops
+    assert min(p.solidity for p in regionprops(lab)) >= 0.8
