@@ -1,3 +1,16 @@
+## [1.6.475] - 2026-10-08
+### Added — **in-vitro fluorescence batch results are linked and brushable too.**
+The in-vitro batch (droplet segmentation, field summary, size distribution) already ran end to end — verified on two
+Abhradeep images with a recording as the panel makes it (143 and 135 droplets; batch droplet mask identical to the
+panel's). Its results were not linkable: batch wrote only the raw partition table, with no ids or bboxes.
+- **Batch writes** `<image>_droplet_df.csv` — the same brush-ready table the panel shows (size `area_um2`,
+  `circularity`, bbox, identity; `invitro.partition.brush_ready_droplet_table`, now shared by both) — plus
+  `<image>_measured_image.tiff` and `<image>_droplet_labels.tiff`. Droplets also reach `consolidated_long.csv`.
+- **The batch results dock** shows the panel's two droplet plots over every image (intensity vs size, intensity vs
+  circularity), droplets in the plot builder, the droplet table and a per-image field-statistics table. Selecting a
+  droplet opens its image in napari centred and outlined; clicking a droplet in the image selects it back.
+- Ids are unique across images (278 droplets, 278 ids on the two-image check).
+
 ## [1.6.474] - 2026-10-08
 ### Fixed — **a batch run can no longer die on a log line.**
 On Windows, with PyCAT's output going to a pipe or a file, Python encodes it as cp1252; one progress message

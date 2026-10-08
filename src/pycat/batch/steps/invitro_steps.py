@@ -46,6 +46,19 @@ def replay_ivf_preprocess(state: dict, image_path: Path, params: dict, output_di
     print(f"[PyCAT Batch]   In vitro fluorescence preprocessing done ({method}).")
 
 
+def _write_brushable_droplets(state, image_path, output_dir, per_droplet_df, mask, img, mpx):
+    """The per-droplet table the in-vitro panel shows (`invitro.partition.brush_ready_droplet_table`: size,
+    circularity, bbox, identity) as ``<stem>_droplet_df.csv``, plus the image it was measured on and the
+    droplet labels, so the brushable batch results (`utils.batch_brushing`) can plot every image's droplets
+    and open the right image at a clicked droplet."""
+    from pycat.toolbox.invitro.partition import brush_ready_droplet_table
+    source = state['data_instance'].data_repository.get('file_path') or str(image_path)
+    droplets = brush_ready_droplet_table(per_droplet_df, np.asarray(mask).astype(np.int32), mpx, source)
+    droplets.to_csv(output_dir / f"{image_path.stem}_droplet_df.csv", index=False)
+    _save_array(np.asarray(img, dtype=np.float32), output_dir / f"{image_path.stem}_measured_image.tiff")
+    _save_array(np.asarray(mask).astype(np.uint32), output_dir / f"{image_path.stem}_droplet_labels.tiff")
+
+
 def replay_ivf_field_summary(state: dict, image_path: Path, params: dict, output_dir: Path):
     """Replay in vitro field summary + partition coefficient from the droplet mask."""
     from pycat.toolbox.invitro_tools import field_summary, partition_coefficient_local
@@ -94,6 +107,7 @@ def replay_ivf_field_summary(state: dict, image_path: Path, params: dict, output
     if isinstance(part.get('per_droplet_df'), pd.DataFrame):
         part['per_droplet_df'].to_csv(
             output_dir / f"{image_path.stem}_ivf_partition.csv", index=False)
+        _write_brushable_droplets(state, image_path, output_dir, part['per_droplet_df'], mask, img, mpx)
     _kp_label = 'Kp' if part.get('is_true_kp') else 'raw ratio (no dark reference)'
     print(f"[PyCAT Batch]   IVF field summary: Phi={summ.get('volume_fraction', float('nan')):.3f}, "
           f"n={summ.get('n_droplets', 0)}, {_kp_label}="

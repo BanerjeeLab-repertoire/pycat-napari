@@ -83,7 +83,8 @@ def mount_batch_workspace(output_dir, source_paths, central_manager, viewer=None
     tables = assemble_batch_object_tables(output_dir, source_paths)
     cell_df = tables.get('cell')
     puncta_df = tables.get('puncta')
-    if service is None or (cell_df is None and puncta_df is None):
+    droplet_df = tables.get('droplet')
+    if service is None or (cell_df is None and puncta_df is None and droplet_df is None):
         return None
     if puncta_df is not None:
         puncta_df = with_cell_context(puncta_df, cell_df)
@@ -103,15 +104,61 @@ def mount_batch_workspace(output_dir, source_paths, central_manager, viewer=None
     if puncta_df is not None and {'cell_intensity_total', 'condensate_intensity_total'} <= set(puncta_df.columns):
         ws.add_plot(counted_condensates(puncta_df), 'cell_intensity_total', 'condensate_intensity_total',
                     'batch.condensate.vs_cell', title="Condensates: intensity vs their cell's total")
-    ws.add_plot_builder({'Cells': cell_df, 'Condensates': puncta_df}, 'batch.builder')
+    if droplet_df is not None:
+        _add_droplet_plots(ws, droplet_df)
+    ws.add_plot_builder({'Cells': cell_df, 'Condensates': puncta_df, 'Droplets': droplet_df}, 'batch.builder')
     if viewer is not None:
         from pycat.ui.batch_navigator import BatchImageNavigator
-        ws.add_view_widget(BatchImageNavigator(viewer, output_dir, {'cell': cell_df, 'condensate': puncta_df},
+        ws.add_view_widget(BatchImageNavigator(viewer, output_dir, {'cell': cell_df, 'condensate': puncta_df,
+                                                                    'droplet': droplet_df},
                                                service, 'batch.image'))
     elif cell_df is not None:
         ws.add_offline_crop_view(cell_df, 'batch.cell.crop', title='Object image (from batch)')
+    elif droplet_df is not None:
+        ws.add_offline_crop_view(droplet_df, 'batch.droplet.crop', title='Droplet image (from batch)')
     if cell_df is not None:
         ws.add_table(cell_df, 'batch.cell.table', title='Cells (all images)')
     if puncta_df is not None:
         ws.add_table(puncta_df, 'batch.condensate.table', title='Condensates (all images)')
+    if droplet_df is not None:
+        ws.add_table(droplet_df, 'batch.droplet.table', title='Droplets (all images)')
+        fields = field_summaries(output_dir, source_paths)
+        if fields is not None:
+            ws.add_table(fields, 'batch.field.table', title='Field statistics (per image)')
     return ws
+
+
+def droplet_intensity_column(droplet_df):
+    """The droplet intensity the in-vitro panel plots: dense-phase intensity when measured, else the mean
+    intensity, else the partition ratio."""
+    for col in ('I_dense', 'mean_intensity', 'partition_coefficient'):
+        if col in droplet_df.columns:
+            return col
+    return None
+
+
+def _add_droplet_plots(ws, droplet_df):
+    """The in-vitro panel's two droplet plots, over every image: intensity vs size, intensity vs
+    circularity."""
+    intensity = droplet_intensity_column(droplet_df)
+    if intensity is None:
+        return
+    if 'area_um2' in droplet_df.columns:
+        ws.add_plot(droplet_df, 'area_um2', intensity, 'batch.droplet.size', title='Droplets: intensity vs size')
+    if 'circularity' in droplet_df.columns:
+        ws.add_plot(droplet_df, 'circularity', intensity, 'batch.droplet.circ',
+                    title='Droplets: intensity vs circularity')
+
+
+def field_summaries(output_dir, source_paths):
+    """One row per image from each image's ``<stem>_ivf_field_summary.csv`` (with the image's name), or
+    None when the batch wrote none."""
+    rows = []
+    for src in source_paths:
+        stem = pathlib.Path(src).stem
+        csv = pathlib.Path(output_dir) / stem / f'{stem}_ivf_field_summary.csv'
+        if csv.is_file():
+            df = pd.read_csv(csv)
+            df.insert(0, 'image', stem)
+            rows.append(df)
+    return pd.concat(rows, ignore_index=True) if rows else None

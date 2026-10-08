@@ -854,3 +854,33 @@ def partition_coefficient_field(
         n_saturated_droplets=n_sat_droplets,
         per_droplet_df=pd.DataFrame(rows),
     )
+
+
+def brush_ready_droplet_table(part_df, mask_int, mpx, source_path=None):
+    """The per-droplet table made brush-ready, additively: ``area_um2``, ``circularity`` and the bbox, keyed
+    by ``droplet_label`` (robust to row order), a ``label`` column (= ``droplet_label``) and an identity
+    stamped from ``source_path`` (``condensate_analysis``). Shared by the in-vitro panel (which also binds the
+    rows to its mask layer) and batch replay, so both produce the same table. A table without
+    ``droplet_label`` is returned unchanged; the caller's table is never mutated."""
+    import math
+    from pycat.utils.entity_ref import finalize_entity_table
+    from pycat.utils.object_ref import bbox_columns_from_regionprops
+
+    if part_df is None or len(part_df) == 0 or 'droplet_label' not in part_df.columns:
+        return part_df
+    part_df = part_df.copy()
+    props = {int(p.label): p for p in sk.measure.regionprops(np.asarray(mask_int).astype(np.int32))}
+    boxes = {lbl: bbox_columns_from_regionprops(p) for lbl, p in props.items()}
+
+    def _circ(p):
+        if p is None or getattr(p, 'perimeter', 0) <= 0:
+            return float('nan')
+        return min(1.0, 4.0 * math.pi * p.area / (p.perimeter ** 2))
+
+    labels = [int(v) for v in part_df['droplet_label']]
+    part_df['area_um2'] = [(props[lbl].area * mpx ** 2) if lbl in props else float('nan') for lbl in labels]
+    part_df['circularity'] = [_circ(props.get(lbl)) for lbl in labels]
+    for key in ('bbox_y0', 'bbox_x0', 'bbox_y1', 'bbox_x1'):
+        part_df[key] = [boxes[lbl][key] if lbl in boxes else -1 for lbl in labels]
+    part_df['label'] = labels                          # the condensate_analysis spec keys on 'label'
+    return finalize_entity_table(part_df, 'condensate_analysis', source_path=source_path)

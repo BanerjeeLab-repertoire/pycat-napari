@@ -274,7 +274,7 @@ def consolidated_columns(condition_fields, provenance_cols=_DEFAULT_PROVENANCE_C
 #: explicit allowlist rather than "any ``*_df``" so a non-object table (``timing_df``,
 #: ``line_profile_df``, a single-row summary) is not silently melted as if its columns were per-object
 #: measurements. A caller with another object table names it.
-DEFAULT_OBJECT_TABLES = ('cell_df', 'puncta_df')
+DEFAULT_OBJECT_TABLES = ('cell_df', 'puncta_df', 'droplet_df')   # droplet_df: in-vitro batch (1.6.475)
 
 
 def records_from_data_repository(repo, object_tables=DEFAULT_OBJECT_TABLES):

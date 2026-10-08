@@ -613,40 +613,20 @@ def _ivf_source_path(ui, img_layer_name):
 
 
 def _finalize_droplet_table(part_df, mask_int, mpx, mask_layer, source_path):
-    """**Make the per-droplet table brush-ready, additively.** Adds ``area_um2`` (size), ``circularity``,
-    and the bbox — all keyed by ``droplet_label`` (robust to row order) — then stamps identity
-    (``condensate_analysis``) and binds the rows to the droplet mask layer, so a row ↔ a labeled droplet.
+    """**Make the per-droplet table brush-ready, additively** (`invitro.partition.brush_ready_droplet_table`,
+    shared with batch replay) and bind the rows to the droplet mask layer, so a row <-> a labeled droplet.
     No existing droplet number changes."""
-    import math
-    import skimage as sk
-    from pycat.utils.entity_ref import attach_layer_id, finalize_entity_table
-    from pycat.utils.object_ref import bbox_columns_from_regionprops
+    from pycat.toolbox.invitro.partition import brush_ready_droplet_table
+    from pycat.utils.entity_ref import attach_layer_id
     from pycat.utils.layer_tags import layer_tag_id
 
     if part_df is None or len(part_df) == 0 or 'droplet_label' not in part_df.columns:
         return part_df
-    part_df = part_df.copy()                           # augment a copy; never mutate the caller's stored table
-
-    props = {int(p.label): p for p in sk.measure.regionprops(mask_int)}
-    boxes = {lbl: bbox_columns_from_regionprops(p) for lbl, p in props.items()}
-
-    def _circ(p):
-        if p is None or getattr(p, 'perimeter', 0) <= 0:
-            return float('nan')
-        return min(1.0, 4.0 * math.pi * p.area / (p.perimeter ** 2))
-
-    labels = [int(v) for v in part_df['droplet_label']]
-    part_df['area_um2'] = [(props[l].area * mpx ** 2) if l in props else float('nan') for l in labels]
-    part_df['circularity'] = [_circ(props.get(l)) for l in labels]
-    for key in ('bbox_y0', 'bbox_x0', 'bbox_y1', 'bbox_x1'):
-        part_df[key] = [boxes[l][key] if l in boxes else -1 for l in labels]
-    part_df['label'] = labels                          # the condensate_analysis spec keys on 'label'
-
+    part_df = brush_ready_droplet_table(part_df, mask_int, mpx, source_path)
     try:
         layer_tag_id(mask_layer)                       # ensure the mask carries a stable pycat_layer_id
     except Exception as exc:                           # broad-ok: optional_probe — reveal falls back to the layer name
         debug_log('invitro_fluor: could not stamp the droplet mask layer id', exc)
-    part_df = finalize_entity_table(part_df, 'condensate_analysis', source_path=source_path)
     attach_layer_id(part_df, mask_layer)
     return part_df.drop(columns=['label'])             # redundant with droplet_label for display
 

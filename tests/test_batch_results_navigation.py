@@ -152,3 +152,68 @@ def test_the_plot_builder_redraws_on_any_two_columns(qtbot):
     pb.set_axes('T', 'c', 'a')
     assert (pb.plot.x_col, pb.plot.y_col) == ('c', 'a') and len(pb.plot._points) == 2
     pb.close()
+
+
+# ── In-vitro droplets: the same linking, from the in-vitro batch ─────────────────────────────────────────
+
+def _droplet_scene():
+    mask = np.zeros((40, 40), np.int32)
+    mask[5:11, 5:11] = 1
+    mask[20:30, 18:28] = 2
+    img = np.where(mask > 0, 200.0, 20.0).astype(np.float32)
+    part = pd.DataFrame({'droplet_label': [1, 2], 'I_dense': [200.0, 210.0], 'partition_coefficient': [10.0, 10.5]})
+    return mask, img, part
+
+
+@pytest.mark.base
+def test_the_droplet_table_is_brush_ready_the_same_way_for_panel_and_batch():
+    from pycat.toolbox.invitro.partition import brush_ready_droplet_table
+    mask, _img, part = _droplet_scene()
+    before = part.copy()
+    t = brush_ready_droplet_table(part, mask, 0.1, source_path='C:/x/image 1.tif')
+    pd.testing.assert_frame_equal(part, before)                      # the caller's table is not touched
+    assert list(t['bbox_y0']) == [5, 20] and list(t['bbox_x1']) == [11, 28]
+    assert t['area_um2'].round(4).tolist() == [0.36, 1.0]
+    assert t[ENTITY_ID_COLUMN].nunique() == 2 and list(t['label']) == [1, 2]
+
+
+@pytest.mark.base
+def test_the_in_vitro_batch_writes_what_the_results_dock_links(tmp_path):
+    from pycat.batch.steps.invitro_steps import _write_brushable_droplets
+    from pycat.data.data_modules import BaseDataClass
+    from pycat.utils.consolidated_table import records_from_output_dir
+    mask, img, part = _droplet_scene()
+    di = BaseDataClass()
+    di.data_repository['file_path'] = str(tmp_path / 'image 1.tif')
+    _write_brushable_droplets({'data_instance': di}, tmp_path / 'image 1.tif', tmp_path, part, mask, img, 0.1)
+    for name in ('droplet_df.csv', 'measured_image.tiff', 'droplet_labels.tiff'):
+        assert (tmp_path / f'image 1_{name}').is_file()
+    kinds = [k for k, _ in records_from_output_dir(tmp_path, 'image 1')]
+    assert kinds == ['droplet']                                      # reaches the consolidated table too
+
+
+@pytest.mark.base
+def test_a_selected_droplet_opens_its_image_and_a_click_selects_it_back(tmp_path):
+    import tifffile
+    from pycat.toolbox.invitro.partition import brush_ready_droplet_table
+    from pycat.ui.batch_navigator import BatchImageNavigator, SELECTION_LAYER
+    mask, img, part = _droplet_scene()
+    rows = []
+    for stem in ('image 1', 'image 2'):
+        d = tmp_path / stem
+        d.mkdir()
+        tifffile.imwrite(str(d / f'{stem}_measured_image.tiff'), img)
+        tifffile.imwrite(str(d / f'{stem}_droplet_labels.tiff'), mask.astype(np.uint32))
+        t = brush_ready_droplet_table(part, mask, 0.1, source_path=str(tmp_path / f'{stem}.tif'))
+        t[SOURCE_PATH_COLUMN] = str(tmp_path / f'{stem}.tif')
+        rows.append(t)
+    droplets = pd.concat(rows, ignore_index=True)
+    service = SelectionService(defer=lambda fn: fn(), debounce=lambda fn: fn())
+    viewer = _Viewer()
+    nav = BatchImageNavigator(viewer, tmp_path, {'droplet': droplets}, service, 'batch.image')
+    eid = droplets[ENTITY_ID_COLUMN].iloc[3]                         # image 2, droplet 2
+    _select(service, eid)
+    assert nav.current_stem == 'image 2' and viewer.layers['Droplets [image 2]'].visible
+    rect = viewer.layers[SELECTION_LAYER].data[0]
+    assert rect[:, 0].min() == 18 and rect[:, 1].max() == 30
+    assert nav.pick_at((7.0, 7.0)) == droplets[ENTITY_ID_COLUMN].iloc[2]   # image 2, droplet 1

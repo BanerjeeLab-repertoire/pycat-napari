@@ -24,7 +24,11 @@ SELECTION_LAYER = 'Batch selection'
 # (output-file suffix, layer title, kind) — kind 'image' or the object kind its labels index
 _OUTPUTS = (('measured_image', 'Image', 'image'),
             ('labeled_cells', 'Cells', 'cell'),
-            ('condensate_labels', 'Condensates', 'condensate'))
+            ('condensate_labels', 'Condensates', 'condensate'),
+            ('droplet_labels', 'Droplets', 'droplet'))          # in-vitro batch
+# kind -> the table column whose values are that kind's label image values
+LABEL_COLUMNS = {'cell': 'label', 'condensate': 'global_punctum_label', 'droplet': 'droplet_label'}
+_PICK_ORDER = ('condensate', 'droplet', 'cell')                  # finest first
 
 
 def _bbox(row):
@@ -35,8 +39,8 @@ def _bbox(row):
 
 
 class BatchImageNavigator:
-    """``tables`` maps 'cell' / 'condensate' to the batch's concatenated tables (rows carry the entity id,
-    ``_pycat_source_path``, bbox, and ``label`` / ``global_punctum_label``)."""
+    """``tables`` maps 'cell' / 'condensate' / 'droplet' to the batch's concatenated tables (rows carry the
+    entity id, ``_pycat_source_path``, bbox, and the label column in `LABEL_COLUMNS`)."""
 
     def __init__(self, viewer, output_dir, tables, service, view_id='batch.image', *, read=None):
         self.viewer = viewer
@@ -49,7 +53,7 @@ class BatchImageNavigator:
         self._layers = {}             # stem -> {kind: layer}
         self.current_stem = None
         self._cb = None
-        for kind, label_col in (('cell', 'label'), ('condensate', 'global_punctum_label')):
+        for kind, label_col in LABEL_COLUMNS.items():
             df = tables.get(kind)
             if df is None or ENTITY_ID_COLUMN not in df.columns:
                 continue
@@ -143,12 +147,12 @@ class BatchImageNavigator:
             debug_log('batch_navigator: could not install the image click', exc)
 
     def pick_at(self, position):
-        """Select the condensate (finest first) or cell under ``position`` in the shown image. Returns the
-        entity id selected, or None."""
+        """Select the object under ``position`` in the shown image, finest kind first (condensate, droplet,
+        cell). Returns the entity id selected, or None."""
         if self.current_stem is None or self.service.is_busy:
             return None
         layers = self._layers.get(self.current_stem, {})
-        for kind in ('condensate', 'cell'):
+        for kind in _PICK_ORDER:
             layer = layers.get(kind)
             if layer is None:
                 continue
