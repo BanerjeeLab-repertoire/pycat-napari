@@ -160,6 +160,10 @@ def replay_open_image(state: dict, image_path: Path, params: dict, output_dir: P
     image, microns_per_pixel = _load_image(seg_path, channel=seg_channel if seg_path == image_path else 0)
 
     data_instance = BaseDataClass()
+    # The image's own path, as the GUI records it on load. Every object table stamps its entity ids from
+    # it (`entity_ref.source_path_of`); without it every batch image stamped 'unknown/...', so cell 1 of
+    # every image had ONE id and brushing the batch results lit up the wrong image's objects.
+    data_instance.data_repository['file_path'] = str(image_path)
     data_instance.data_repository['microns_per_pixel'] = microns_per_pixel
     data_instance.data_repository['microns_per_pixel_sq'] = microns_per_pixel ** 2
     data_instance.data_repository['cell_diameter'] = params.get('cell_diameter', 100)

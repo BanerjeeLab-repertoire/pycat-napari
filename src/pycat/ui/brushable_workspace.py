@@ -354,6 +354,88 @@ class BatchCropView:
             debug_log('brushable_workspace: batch crop unsubscribe failed', exc)
 
 
+class PlotBuilder:
+    """A brushable scatter with a table chooser and x / y column choosers. Each change replaces the
+    underlying `BrushablePlot` (same view id), so brushing keeps working across axis changes."""
+
+    def __init__(self, tables, service, view_id):
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
+        from PyQt5.QtWidgets import QComboBox, QHBoxLayout
+
+        self.tables = {k: v for k, v in tables.items() if v is not None and len(v)}
+        self.service = service
+        self.view_id = str(view_id)
+        self.plot = None
+        self.widget = QWidget()
+        lay = QVBoxLayout(self.widget)
+        lay.setContentsMargins(0, 0, 0, 0)
+        row = QHBoxLayout()
+        self.table_cb, self.x_cb, self.y_cb = QComboBox(), QComboBox(), QComboBox()
+        for lbl, cb in (('table', self.table_cb), ('x', self.x_cb), ('y', self.y_cb)):
+            row.addWidget(QLabel(lbl))
+            row.addWidget(cb, 1)
+        lay.addLayout(row)
+        self.figure = Figure(figsize=(4, 3), tight_layout=True)
+        self.canvas = FigureCanvasQTAgg(self.figure)
+        lay.addWidget(self.canvas)
+        self.table_cb.addItems(list(self.tables))
+        self.table_cb.currentTextChanged.connect(self._table_changed)
+        self.x_cb.currentTextChanged.connect(lambda *_: self.redraw())
+        self.y_cb.currentTextChanged.connect(lambda *_: self.redraw())
+        self._table_changed(self.table_cb.currentText())
+
+    def numeric_columns(self, name):
+        df = self.tables.get(name)
+        if df is None:
+            return []
+        return [c for c in df.columns if not str(c).startswith('_pycat') and not str(c).startswith('bbox')
+                and getattr(df[c].dtype, 'kind', '') in 'iuf']
+
+    def _table_changed(self, name):
+        cols = self.numeric_columns(name)
+        for cb, default in ((self.x_cb, 0), (self.y_cb, 1)):
+            cb.blockSignals(True)
+            cb.clear()
+            cb.addItems(cols)
+            if len(cols) > default:
+                cb.setCurrentIndex(default)
+            cb.blockSignals(False)
+        self.redraw()
+
+    def set_axes(self, table, x_col, y_col):
+        """Choose table and axes programmatically (as the combo boxes do)."""
+        self.table_cb.setCurrentText(table)
+        self.x_cb.setCurrentText(x_col)
+        self.y_cb.setCurrentText(y_col)
+        self.redraw()
+
+    def redraw(self):
+        df = self.tables.get(self.table_cb.currentText())
+        x, y = self.x_cb.currentText(), self.y_cb.currentText()
+        if self.plot is not None:
+            self.plot.close()
+            self.plot = None
+        self.figure.clear()
+        if df is None or not x or not y:
+            return
+        ax = self.figure.add_subplot(111)
+        self.plot = BrushablePlot(ax, df, x, y, self.service, self.view_id)
+        try:
+            self.canvas.draw_idle()
+        except Exception:                                # broad-ok: optional_probe — no live canvas headless — nothing to redraw
+            pass
+
+    def apply_selection(self, state):
+        if self.plot is not None:
+            self.plot.apply_selection(state)
+
+    def close(self):
+        if self.plot is not None:
+            self.plot.close()
+            self.plot = None
+
+
 def _vertical_stack():
     holder = QWidget()
     layout = QVBoxLayout(holder)
@@ -454,6 +536,25 @@ class BrushableWorkspace(QWidget):
             self._viewer_cb = _pick
         except Exception as exc:                        # broad-ok: optional_probe — no viewer callbacks headless — tiers still reveal
             debug_log('brushable_workspace: could not install the viewer pick handler', exc)
+
+    def add_plot_builder(self, tables, view_id, *, title='Plot any two columns'):
+        """A brushable scatter whose table and axes the user picks (``tables``: name -> DataFrame). Changing a
+        choice redraws the plot; brushing works the same as any other plot. Returns the `PlotBuilder`."""
+        builder = PlotBuilder(tables, self.service, view_id)
+        if title:
+            self._plots_layout.addWidget(QLabel(f"<b>{title}</b>"))
+        self._plots_layout.addWidget(builder.widget)
+        self._views.append(builder)
+        return builder
+
+    def add_view_widget(self, view, widget=None, *, title=None):
+        """Track an extra ``SelectionView`` (for teardown) and optionally place its widget on the left."""
+        if title:
+            self._plots_layout.addWidget(QLabel(f"<b>{title}</b>"))
+        if widget is not None:
+            self._plots_layout.addWidget(widget)
+        self._views.append(view)
+        return view
 
     def add_offline_crop_view(self, df, view_id, *, title=None):
         """Add the batch 'image' — a `BatchCropView` that shows the selected object's crop read offline from

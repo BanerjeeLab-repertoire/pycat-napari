@@ -794,14 +794,16 @@ def attach_excluded_objects(df, data_instance, cell_mask, image, cell_label, pro
     """Add ``local_cnr``, ``ring_rejected`` and ``below_contrast_floor``, and append this cell's objects
     that condensate segmentation REMOVED -- optical halo fragments (`segmentation.halo`) and objects under
     the minimum contrast floor (`segmentation.contrast_floor`) -- as flagged rows. They are reported so a
-    count difference is explainable and the floor can be judged, but they are not objects: no label in
-    the mask (``label`` and ``global_punctum_label`` 0) and never in the per-cell summaries, which are
-    computed before this runs."""
+    count difference is explainable and the floor can be judged, but they are not objects: never in the
+    per-cell summaries (computed before this runs), and no label in the mask (``global_punctum_label`` 0).
+    Each gets its own NEGATIVE ``label`` (-1, -2, ... per cell) so its entity id is its own and brushing
+    one never selects the others."""
     repo = data_instance.data_repository
     cnr_map = repo.get('local_cnr_map')
     df = df.assign(local_cnr=_local_cnr_of(labeled_puncta, cnr_map, len(df)) if len(df) else [],
                    ring_rejected=False, below_contrast_floor=False)
     parts = [df]
+    n_removed = 0
     for key, flag, source in _EXCLUSION_MAPS:
         mask = repo.get(key)
         if mask is None or mask.shape != cell_mask.shape:
@@ -812,11 +814,13 @@ def attach_excluded_objects(df, data_instance, cell_mask, image, cell_label, pro
         rows = normalise_bbox_columns(pd.DataFrame(
             sk.measure.regionprops_table(removed, intensity_image=image, properties=properties)))
         rows = rows.assign(**{'micron area': rows['area'] * repo['microns_per_pixel_sq'],
-                              'cell label': cell_label, 'label': 0, 'global_punctum_label': 0,
+                              'cell label': cell_label, 'global_punctum_label': 0,
+                              'label': -np.arange(n_removed + 1, n_removed + len(rows) + 1),
                               'shape_filtered': False, 'boundary_source': source,
                               'local_cnr': _local_cnr_of(removed, cnr_map, int(removed.max())),
                               'ring_rejected': False, 'below_contrast_floor': False})
         rows[flag] = True
+        n_removed += len(rows)
         parts.append(rows)
     return pd.concat(parts, ignore_index=True) if len(parts) > 1 else df
 

@@ -54,6 +54,14 @@ def replay_condensate_analysis(state: dict, image_path: Path, params: dict, outp
 
     _save_array(cell_labeled_puncta.astype(np.uint16),
                 output_dir / f"{image_path.stem}_cell_labeled_puncta.tiff")
+    # For the brushable batch results (`utils.batch_brushing`): the image the condensates were measured on
+    # and each condensate's own label (`global_punctum_label`), in the same pixel space as the tables'
+    # bboxes, so a clicked plot point opens on the right pixels and outlines the right object.
+    _save_array(np.asarray(image, dtype=np.float32), output_dir / f"{image_path.stem}_measured_image.tiff")
+    _global_labels = data_instance.data_repository.get('puncta_labels_global')
+    if _global_labels is not None:
+        _save_array(np.asarray(_global_labels).astype(np.uint32),
+                    output_dir / f"{image_path.stem}_condensate_labels.tiff")
 
     if cell_df is not None:
         cell_df.to_csv(output_dir / f"{image_path.stem}_cell_df.csv", index=False)

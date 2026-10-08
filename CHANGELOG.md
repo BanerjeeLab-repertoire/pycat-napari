@@ -1,3 +1,26 @@
+## [1.6.474] - 2026-10-08
+### Fixed — **a batch run can no longer die on a log line.**
+On Windows, with PyCAT's output going to a pipe or a file, Python encodes it as cp1252; one progress message
+containing an arrow raised `UnicodeEncodeError` and ended the batch before the first image. `BatchWorker.run` now
+makes the console streams escape what they cannot encode, and gives a console-less app (`pythonw`) a null stream.
+Verified with a full 2D cellular batch under a cp1252 pipe.
+
+### Added — **batch results are linked to the images (brushable, like the VPT workflow).**
+After a batch, the results dock plots and tables every image's cells and condensates, and every point, row and
+object is one selection:
+- **Plots:** cell total fluorescence vs number of condensates; each condensate's total intensity vs its cell's total
+  intensity (`condensate_intensity_total`, `cell_intensity_total`, joined per image); Csat; dilute phase; and a plot
+  builder for any two columns of either table.
+- **To the image:** selecting a cell or condensate (plot point or table row) opens THAT image's batch outputs in
+  napari ("Image / Cells / Condensates [<image>]", loaded once, other images hidden), centres on the object and
+  outlines it. Clicking an object in the shown image selects it in the plots and tables.
+- **Ids:** batch now records each image's path, so every cell and condensate has an id unique across the batch
+  (before, all images stamped 'unknown/...' and cell 1 of every image was one id). Halo / below-floor rows each get
+  their own negative label, so their ids are distinct too.
+- **Batch writes** `<image>_measured_image.tiff` (the image condensates were measured on) and
+  `<image>_condensate_labels.tiff` (each condensate's `global_punctum_label`), in the tables' pixel space.
+- Without a viewer the dock falls back to the offline object crop, as before.
+
 ## [1.6.473] - 2026-10-06
 ### Fixed — **scale reconciliation, and Meet's "mask split into two" (ring rejection spec, Phase D).**
 - **`segmentation/reconcile.py`:** each coarse detection pass is folded in object by object instead of a boolean OR —
