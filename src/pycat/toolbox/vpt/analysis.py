@@ -18,7 +18,7 @@ from pycat.toolbox.condensate_physics_tools import MIN_TRACK_LENGTH_FRAMES
 from pycat.toolbox.vpt.host import segment_host_condensate, erode_host_mask
 from pycat.toolbox.vpt.detection import detect_beads_stack
 from pycat.toolbox.vpt.populations import split_bead_populations, aggregate_population_stats
-from pycat.toolbox.vpt.drift import drift_correct_com
+from pycat.toolbox.vpt.measured_drift import measure_and_apply_if_real
 from pycat.toolbox.vpt.viscosity import viscosity_from_diffusion
 
 
@@ -58,7 +58,7 @@ def run_vpt_analysis(
     dict with keys:
         host_mask         : eroded labeled host mask (2D int)
         detections_df     : raw per-frame bead detections
-        tracks_df         : linked, drift-corrected trajectories
+        tracks_df         : linked trajectories at the detected centroids (+ drift_y_um/drift_x_um)
         msd_df            : ensemble MSD vs lag
         fit               : diffusion fit dict (D, alpha, ...)
         eta_Pa_s          : Stokes-Einstein viscosity
@@ -108,9 +108,9 @@ def run_vpt_analysis(
     # 4-6. Primary population: link → drift-correct → MSD → viscosity
     tracks = _link(primary, linker, max_linking_distance_um,
                    max_frame_gap, microns_per_pixel)
-    tracks = drift_correct_com(tracks)
+    tracks, msd_tracks, drift = measure_and_apply_if_real(tracks, microns_per_pixel)   # centroids kept
     msd_df = compute_msd(
-        tracks, frame_interval_s=frame_interval_s,
+        msd_tracks, frame_interval_s=frame_interval_s,
         min_track_length=min_track_length)
     fit = fit_anomalous_diffusion(msd_df)
     eta = viscosity_from_diffusion(
@@ -129,7 +129,7 @@ def run_vpt_analysis(
             napari_show_warning(f"Aggregate tracking skipped: {_e}")
 
     return dict(
-        host_mask=host_eroded, detections_df=detections, tracks_df=tracks,
+        host_mask=host_eroded, detections_df=detections, tracks_df=tracks, drift=drift,
         msd_df=msd_df, fit=fit, eta_Pa_s=eta,
         n_tracks=int(tracks['track_id'].nunique()) if not tracks.empty else 0,
         aggregate_detections_df=aggregates,

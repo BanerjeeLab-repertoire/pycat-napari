@@ -186,7 +186,7 @@ def _default_notify(message):
 
 
 def _msd_overlay_hooks(ax, fig, per_track_df, tid_to_line, tid_to_coords,
-                       on_pick_track, line_registry):
+                       on_pick_track, line_registry, fallback_curve=None):
     """Selection overlays for an MSD spaghetti axes whose background is a ``LineCollection``.
 
     Shared by the standalone plot and the consolidated panel so Gap-4 rendering is implemented once.
@@ -195,8 +195,14 @@ def _msd_overlay_hooks(ax, fig, per_track_df, tid_to_line, tid_to_coords,
     hit-tester and exposes ``promote`` / ``demote_line`` so a linked-selection dispatcher can highlight
     a curve from another view — including one that was NOT in the representative sample (it is pulled
     from ``per_track_df`` on demand). The background collection is never touched.
+
+    ``fallback_curve(tid) -> (xy, note) | None`` supplies a curve for a track that has NONE in
+    ``per_track_df`` — one shorter than the minimum track length, which is most tracks in a fragmented
+    movie. It is drawn dashed with markers and labelled with ``note`` (e.g. "below the minimum length, not
+    in the fit"), so a bead clicked in the image always shows up in the MSD panel.
     """
     promoted = set()
+    notes = {}                               # {tid: Text} — labels on fallback (short-track) curves
 
     def _promote(tid):
         tid = int(tid)
@@ -205,13 +211,26 @@ def _msd_overlay_hooks(ax, fig, per_track_df, tid_to_line, tid_to_coords,
             return existing
         xy = tid_to_coords.get(tid)
         if xy is None:
-            if per_track_df is None or 'track_id' not in getattr(per_track_df, 'columns', ()):
+            have = per_track_df is not None and 'track_id' in getattr(per_track_df, 'columns', ())
+            g = per_track_df[per_track_df['track_id'] == tid] if have else ()
+            if len(g):
+                g = g.sort_values('lag_s')
+                xy = np.column_stack([np.asarray(g['lag_s'], float), np.asarray(g['msd_um2'], float)])
+            elif fallback_curve is not None:
+                got = fallback_curve(tid)
+                if got is None:
+                    return None
+                xy, note = got
+                (ln,) = ax.plot(xy[:, 0], xy[:, 1], color='#4c72b0', alpha=0.18, lw=0.8, zorder=1,
+                                ls='--', marker='o', ms=4)
+                notes[tid] = ax.text(0.98, 0.03, note, transform=ax.transAxes, ha='right', va='bottom',
+                                     fontsize=8, color='#c86400', zorder=6,
+                                     bbox=dict(boxstyle='round,pad=0.2', fc='white', ec='none', alpha=0.8))
+                tid_to_line[tid] = ln
+                promoted.add(tid)
+                return ln
+            else:
                 return None
-            g = per_track_df[per_track_df['track_id'] == tid]
-            if not len(g):
-                return None
-            g = g.sort_values('lag_s')
-            xy = np.column_stack([np.asarray(g['lag_s'], float), np.asarray(g['msd_um2'], float)])
             tid_to_coords[tid] = xy          # so it is hit-testable too
         (ln,) = ax.plot(xy[:, 0], xy[:, 1], color='#4c72b0', alpha=0.18, lw=0.8, zorder=1)
         tid_to_line[tid] = ln
@@ -228,6 +247,12 @@ def _msd_overlay_hooks(ax, fig, per_track_df, tid_to_line, tid_to_coords,
             pass
         tid_to_line.pop(tid, None)
         promoted.discard(tid)
+        note = notes.pop(tid, None)
+        if note is not None:
+            try:
+                note.remove()
+            except (ValueError, NotImplementedError):
+                pass                         # already gone with an ax.clear()
         return True
 
     state = {'prev': None}
@@ -563,6 +588,7 @@ def _draw_centered_tracks(ax, tracks_df, max_tracks=400, only_tids=None,
 
     # Promote a track not drawn (other bucket / sampled out) so a selection still
     # lands; demote restores the faint base. Mirrors the MSD overlay's promote/demote.
+    promoted = set()          # ids pulled in by a selection — NOT part of the page as drawn
     def _promote(tid):
         tid = int(tid)
         ln = lines.get(tid)
@@ -576,6 +602,7 @@ def _draw_centered_tracks(ax, tracks_df, max_tracks=400, only_tids=None,
             coords[tid] = xy
         (ln,) = ax.plot(xy[:, 0], xy[:, 1], **_CENTERED_BASE)
         lines[tid] = ln
+        promoted.add(tid)
         return ln
 
     def _demote(tid):
@@ -589,10 +616,7 @@ def _draw_centered_tracks(ax, tracks_df, max_tracks=400, only_tids=None,
         return True
 
     if registry is not None:
-        registry['lines'] = lines
-        registry['coords'] = coords
-        registry['promote'] = _promote
-        registry['demote'] = _demote
+        registry.update(lines=lines, coords=coords, promote=_promote, demote=_demote, promoted=promoted)
         registry.setdefault('state', {'prev': None})
         try:
             registry['canvas'] = ax.figure.canvas

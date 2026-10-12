@@ -283,7 +283,10 @@ class _VptResultsDockMixin:
         drawn = set()
         for attr in ('_centered_registry', '_msd_line_registry'):
             reg = getattr(self, attr, None) or {}
-            drawn |= set(int(k) for k in (reg.get('coords') or {}).keys())
+            # A curve PROMOTED by a selection is not part of the page as drawn. The highlight runs before the
+            # pager is asked, so counting promoted curves made every clicked track look "already visible" and
+            # the ensemble page never moved to the track's bucket.
+            drawn |= set(int(k) for k in (reg.get('coords') or {}).keys()) - set(reg.get('promoted') or ())
         return drawn
 
     def _vpt_page_to_selected_track(self, track_id):
@@ -308,6 +311,29 @@ class _VptResultsDockMixin:
         size = max(1, int(st['bucket_size']))
         st['page'] = all_tids.index(tid) // size + 1  # 1-based; page 0 is the ensemble, buckets follow
         self._vpt_render_page()                       # re-render; the existing re-highlight path then fires
+
+    def _vpt_short_track_msd(self, track_id):
+        """The MSD of a track that has no curve in the panel — shorter than the minimum track length, so it
+        is excluded from the fit (most tracks in a fragmented movie). Computed on demand from the track
+        alone so a bead clicked in the image still shows in the MSD panel, labelled as not fitted.
+        Returns ``(xy, note)`` or None."""
+        from pycat.toolbox.condensate_physics_tools import per_track_msd_curves
+        st = getattr(self, '_vpt_results', None) or {}
+        tracks = st.get('tracks')
+        if tracks is None or 'track_id' not in tracks:
+            return None
+        g = tracks[tracks['track_id'] == int(track_id)]
+        if len(g) < 2:
+            return None
+        span = int(g['frame'].max() - g['frame'].min())
+        curve = per_track_msd_curves(g, max_lag=max(1, span), frame_interval_s=float(st.get('frame_dt') or 1.0),
+                                     min_track_length=2)
+        curve = curve[curve['msd_um2'] > 0] if len(curve) else curve
+        if not len(curve):
+            return None
+        curve = curve.sort_values('lag_s')
+        xy = np.column_stack([curve['lag_s'].to_numpy(float), curve['msd_um2'].to_numpy(float)])
+        return xy, f"track {int(track_id)}: {len(g)} frames\ntoo short — not in the fit"
 
     def _vpt_update_pager_label(self):
         st = self._vpt_results
@@ -380,7 +406,8 @@ class _VptResultsDockMixin:
                                self._msd_line_registry.get('lines', {}),
                                self._msd_line_registry.get('coords', {}),
                                lambda tid: self._select_track(tid, source='plot'),
-                               self._msd_line_registry)
+                               self._msd_line_registry,
+                               fallback_curve=self._vpt_short_track_msd)
         except Exception as e:                       # broad-ok: ui_cleanup — brushing wiring is best-effort
             print(f"[PyCAT VPT] MSD brushing wiring failed: {e}")
 

@@ -1,3 +1,33 @@
+## [1.6.476] - 2026-10-12
+### Changed — **VPT drift is measured directly, tested, and applied only when it is real; it never moves a bead.**
+The old correction (`drift_correct_com`) chained the mean frame-to-frame step of whatever tracks spanned each frame
+pair, ran unconditionally, and wrote the corrected positions over the detected ones.
+- **Measured directly** (`vpt/measured_drift.py`): each bead has one home position and each frame one shared offset,
+  fitted jointly (robust least squares), so a frame's drift is anchored to every bead seen in it, not to a running
+  sum. On the 1000-frame G3BP1 bead movie it agrees with whole-frame image registration to 0.2 px RMS (the drift
+  there is real: 3.2 px, about 210 nm, by both).
+- **Applied only when real:** two independent halves of the beads must agree on it at least 3× above their
+  disagreement, and it must exceed 2× the localization precision (below that it is under the MSD's own noise floor).
+- **Shown, with the option to apply:** Step 4 shows the verdict, the net drift and a drift-vs-frame plot ("Measured
+  drift" dock); "Apply measured drift to MSD / viscosity" is ticked only when it is real and can be changed without
+  relinking.
+- **Never on the display:** the stored and exported tracks keep the detected intensity centroids, with the drift
+  beside them (`drift_y_um`/`drift_x_um`). The correction exists only in the copy the MSD / viscosity use. After
+  each link a display check measures the drawn positions against the beads' intensity centroids and warns if the
+  median is over 1 px (0.33 px on the G3BP1 movie).
+- `drift_correct_com` (kept for compatibility) is idempotent: a second call no longer overwrites the centroids.
+- **Batch follows the same rule.** The batch VPT step did no drift correction at all; it now measures the drift,
+  subtracts it for the MSD only when it is real (and not when the recording says the box was off), and writes
+  `drift_real`, `drift_peak_px` and `drift_applied` into `<image>_vpt_microrheology.csv`. The headless
+  `run_vpt_analysis` measures and applies the same way and returns the measurement as `drift`.
+
+### Fixed — **clicking a bead always shows its track in the linked plots.**
+- On the ensemble page, the selection highlight ran before the pager and made every clicked track look "already
+  drawn", so the plots never moved to the track's bucket. Curves promoted by a selection no longer count as drawn.
+- A track shorter than the minimum track length (8,493 of 8,799 tracks on the G3BP1 movie) has no MSD curve, so
+  nothing lit in the MSD panel. Its own MSD is now computed on demand and drawn dashed, labelled "too short — not
+  in the fit"; the centred trajectory and the table row highlight as before.
+
 ## [1.6.475] - 2026-10-08
 ### Added — **in-vitro fluorescence batch results are linked and brushable too.**
 The in-vitro batch (droplet segmentation, field summary, size distribution) already ran end to end — verified on two

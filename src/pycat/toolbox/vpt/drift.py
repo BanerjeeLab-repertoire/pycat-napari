@@ -117,8 +117,14 @@ def drift_correct_com(tracks_df: pd.DataFrame, mode: str = 'com',
         return tracks_df
 
     df = tracks_df.sort_values(['track_id', 'frame']).copy()
-    df['y_um_raw'] = df['y_um']
-    df['x_um_raw'] = df['x_um']
+    if 'y_um_raw' in df and 'x_um_raw' in df:
+        # Idempotent: a second call corrects from the CENTROIDS, never from an already-corrected position,
+        # and never overwrites the centroid columns with corrected values.
+        df['y_um'] = df['y_um_raw']
+        df['x_um'] = df['x_um_raw']
+    else:
+        df['y_um_raw'] = df['y_um']
+        df['x_um_raw'] = df['x_um']
 
     mode = (mode or 'com').lower()
     if mode == 'none':

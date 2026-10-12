@@ -86,3 +86,15 @@ def test_no_results_dock_is_a_clean_noop():
     d._vpt_results = None
     d._vpt_page_to_selected_track(35)                  # existing contract: no dock → nothing happens
     assert d.renders == 0
+
+
+def test_a_promoted_curve_does_not_count_as_drawn():
+    """1.6.476: the highlight runs BEFORE the pager is asked, and promoting the clicked track added it to the
+    registry — so every clicked track looked 'already visible' and the ensemble page never moved."""
+    d = _Dock(_ids(), page=0, bucket_size=10, drawn_page0=[5, 77])
+    d._centered_registry["coords"][35] = None          # promoted by the selection highlight...
+    d._centered_registry["promoted"] = {35}             # ...and recorded as such
+    d._msd_line_registry = {"coords": {35: None}, "promoted": {35}}
+    d._vpt_page_to_selected_track(35)
+    assert d._vpt_results["page"] == 4 and d.renders == 1
+

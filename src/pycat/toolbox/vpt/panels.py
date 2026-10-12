@@ -571,24 +571,23 @@ class _VptPanelsMixin:
             "lost the bead rather than the bead being absent.")
         form.addRow("Min track length:", self._min_track)
 
-        # Drift-correction mode (#9). COM subtraction is standard for
-        # microrheology but removes REAL collective motion (internal flow,
-        # sedimentation, bulk translation) along with stage drift — so the choice
-        # is explicit and recorded, not always-on.
-        self._drift_mode = QComboBox()
-        self._drift_mode.addItem("Ensemble COM (standard)", "com")
-        self._drift_mode.addItem("Immobile-reference (flow-safe)", "immobile_reference")
-        self._drift_mode.addItem("None (keep collective motion)", "none")
-        self._drift_mode.setToolTip(
-            "How to remove drift before the MSD:\n"
-            "• Ensemble COM — subtract the mean displacement of all beads "
-            "(classic microrheology). Removes stage drift AND any real bulk flow.\n"
-            "• Immobile-reference — estimate drift from only the most stationary "
-            "tracks, so genuinely flowing/diffusing beads don't bias the "
-            "correction. Safer when real motion is present.\n"
-            "• None — no correction; use when collective flow IS the signal "
-            "(e.g. internal-flow studies).")
-        form.addRow("Drift correction:", self._drift_mode)
+        # Drift (1.6.476). Linking MEASURES the drift directly from the beads and tests whether it is real
+        # (measured_drift.py); the result is shown here and the box below is ticked only when it is. The
+        # correction is applied to the MSD / viscosity alone — the tracks, the export and every marker drawn
+        # on the image keep the bead's detected centroid, whatever this box says.
+        self._drift_apply = QCheckBox("Apply measured drift to MSD / viscosity")
+        self._drift_apply.setChecked(False)
+        self._drift_apply.setToolTip(
+            "Linking measures the drift directly: every bead has one home position and every frame one\n"
+            "shared offset, fitted jointly (no running sum of steps). It is called REAL only when two\n"
+            "independent halves of the beads agree on it well above their noise AND it exceeds the\n"
+            "localization precision. This box is ticked automatically when it is real; untick it to keep\n"
+            "collective motion (e.g. internal-flow studies). Positions on the image are never moved.")
+        form.addRow(self._drift_apply)
+        self._drift_readout = QLabel("Drift: measured after linking.")
+        self._drift_readout.setWordWrap(True)
+        self._drift_readout.setStyleSheet("color:#aaa;font-size:9pt;")
+        form.addRow(self._drift_readout)
 
         # Out-of-plane handling (#10). A defocused bead's axial fluctuations can
         # masquerade as in-plane motion and bias viscosity. Recovered out-of-plane

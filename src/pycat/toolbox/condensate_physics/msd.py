@@ -786,9 +786,9 @@ def _classify_msd_motion(D, alpha, sigma_loc_um, tau, msd):
         # does not move. A reader takes 'superdiffusion' as an active or directed process. It
         # is the stage.
         #
-        # `drift_correct_com` (vpt_tools) subtracts the common-mode motion of all tracks and
-        # IS applied in the VPT pipeline. This warning is for the residual — and for anyone
-        # fitting an MSD that did not come through that pipeline.
+        # The VPT pipeline measures drift from the beads (vpt/measured_drift.py) and subtracts it
+        # for the MSD when it is real. This warning is for the residual — and for anyone fitting an
+        # MSD that did not come through that pipeline, or who left the correction off.
         napari_show_warning(
             f"MSD: alpha = {alpha:.2f} — reported as SUPERDIFFUSION. **Check for residual "
             f"stage drift before believing that.**\n\n"
@@ -799,9 +799,10 @@ def _classify_msd_motion(D, alpha, sigma_loc_um, tau, msd):
             f"D = 0.00027 \u00b5m\u00b2/s, and **10 nm/s of stage drift takes alpha from 1.0 "
             f"to 1.53 — with R\u00b2 unchanged at 0.993.** A reader takes 'superdiffusion' as "
             f"an active or directed process; it may simply be the stage.\n\n"
-            f"The VPT pipeline applies `drift_correct_com`, which subtracts the common-mode "
-            f"motion of all tracks. If this MSD did not come through that pipeline, or if "
-            f"drift persists after it, alpha is not interpretable as a motion type.")
+            f"The VPT pipeline measures drift directly from the beads and subtracts it when it is "
+            f"real (Step 4 shows the measurement; the apply box controls it). If this MSD did not "
+            f"come through that pipeline, if the box was unticked, or if drift persists after it, "
+            f"alpha is not interpretable as a motion type.")
     else:
         motion_type = 'Brownian'
 

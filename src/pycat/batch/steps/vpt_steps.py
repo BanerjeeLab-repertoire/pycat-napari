@@ -28,6 +28,7 @@ def replay_vpt_microrheology(state: dict, image_path: Path, params: dict, output
     from pycat.toolbox.dynamic_spatial_tools import link_trajectories
     from pycat.toolbox.condensate_physics_tools import compute_msd, fit_anomalous_diffusion
     from pycat.toolbox.vpt_tools import viscosity_from_diffusion
+    from pycat.toolbox.vpt.measured_drift import measure_and_apply_if_real
     from pycat.utils.pixel_size import pixel_size_um, has_real_pixel_size
     from pycat.utils.frame_interval import frame_interval_s
     import pandas as pd
@@ -62,7 +63,12 @@ def replay_vpt_microrheology(state: dict, image_path: Path, params: dict, output
 
     beads = detect_beads_stack(stack, microns_per_pixel=mpx, threshold=float(params.get('threshold', 0.02)))
     tracks = link_trajectories(beads, max_displacement_um=float(params.get('max_displacement_um', 2.0)))
-    msd = compute_msd(tracks, frame_interval_s=dt_s, min_track_length=min_track_length)
+    # Same rule as the panel: drift is measured from the beads and subtracted for the MSD only when it is real
+    # (and not when the recording says the user switched it off). The stored tracks keep the centroids.
+    tracks, msd_tracks, drift = measure_and_apply_if_real(tracks, mpx)
+    if params.get('drift_mode') == 'none':
+        msd_tracks = tracks
+    msd = compute_msd(msd_tracks, frame_interval_s=dt_s, min_track_length=min_track_length)
     fit = fit_anomalous_diffusion(msd, frame_interval_s=dt_s)
     eta = viscosity_from_diffusion(fit['D_um2_per_s'], bead_radius_um, temperature_C)
 
@@ -74,7 +80,8 @@ def replay_vpt_microrheology(state: dict, image_path: Path, params: dict, output
     row = {'viscosity_Pa_s': eta, 'D_um2_per_s': fit.get('D_um2_per_s'), 'alpha': fit.get('alpha'),
            'motion_type': fit.get('motion_type'), 'r_squared': fit.get('r_squared'), 'n_tracks': n_tracks,
            'bead_radius_um': bead_radius_um, 'temperature_C': temperature_C, 'frame_interval_s': dt_s,
-           'microns_per_pixel': mpx, 'scale_valid': True}
+           'microns_per_pixel': mpx, 'scale_valid': True, 'drift_real': drift['real'],
+           'drift_peak_px': drift['peak_px'], 'drift_applied': msd_tracks is not tracks}
     pd.DataFrame([row]).to_csv(output_dir / f"{image_path.stem}_vpt_microrheology.csv", index=False)
     print(f"[PyCAT Batch]   VPT microrheology: eta = {eta:.4g} Pa.s "
           f"(D = {fit.get('D_um2_per_s'):.4g} um2/s, {n_tracks} tracks).")

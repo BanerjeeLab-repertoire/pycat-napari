@@ -60,10 +60,11 @@ from pycat.toolbox.vpt.msd_adapter import _VptMsdMixin
 
 
 from pycat.toolbox.vpt.results_dock import _VptResultsDockMixin
+from pycat.toolbox.vpt.drift_adapter import _VptDriftMixin
 
 
 class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin,
-                              _VptNapariMixin, _VptResultsDockMixin):
+                              _VptNapariMixin, _VptResultsDockMixin, _VptDriftMixin):
     def __init__(self, viewer, central_manager):
         self.viewer          = viewer
         self.central_manager = central_manager
@@ -679,7 +680,7 @@ class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin,
 
     def _on_link(self):
         from pycat.toolbox.vpt_tools import (
-            _link, drift_correct_com, split_bead_populations,
+            _link, split_bead_populations,
             aggregate_population_stats, reclassify_by_temporal_stability,
             select_bead_population)
         det = self._dr().get('vpt_detections')
@@ -705,12 +706,9 @@ class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin,
                 aggregates = pops['aggregate']
             else:
                 primary, aggregates = det, det.iloc[0:0]
-            _drift_mode = self._drift_mode.currentData() if hasattr(self, '_drift_mode') else 'com'
-            ptracks = drift_correct_com(
-                _link(primary, self._linker_name(), self._max_link.value(),
-                      self._max_gap.value(), self._mpx(),
-                      progress_callback=progress),
-                mode=_drift_mode)
+            ptracks, drift = self._with_measured_drift(_link(       # drift beside the centroids, never on them
+                primary, self._linker_name(), self._max_link.value(), self._max_gap.value(), self._mpx(),
+                progress_callback=progress))
             # Temporal stability pass: a dim track that persists stably across
             # frames is a real (faint) bead, not an out-of-focus blink — promote
             # it back to singlet. Blinking dim tracks stay yellow. This is a
@@ -735,7 +733,7 @@ class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin,
             astats = (aggregate_population_stats(aggregates, total_by_frame=total_by_frame)
                       if len(aggregates) else None)
             return dict(primary=ptracks, aggregate_tracks=atracks,
-                        aggregate_stats=astats, aggregates=aggregates)
+                        aggregate_stats=astats, aggregates=aggregates, drift=drift)
 
         w = _VPTWorker(_job)
         def _done(res):
@@ -818,10 +816,7 @@ class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin,
             # its track_id. Clicking a point resolves to that track_id and drives
             # the linked-selection dispatcher. One point per bead per frame so a
             # bead is clickable on whatever frame the user is viewing.
-            try:
-                self._add_pickable_bead_points(tracks, _img_layer, mpp)
-            except Exception as _e:
-                print(f"[PyCAT VPT] pickable bead layer failed: {_e}")
+            self._picker_drift_and_display_check(tracks, _img_layer, mpp, res.get('drift'))
 
             # Secondary aggregate population
             atracks = res.get('aggregate_tracks')
@@ -847,9 +842,11 @@ class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin,
                 'max_linking_distance_um': self._max_link.value(),
                 'max_frame_gap': self._max_gap.value(),
                 'microrheology_population': pop_which,
-                'n_aggregate_tracks': n_agg_tracks})
+                'n_aggregate_tracks': n_agg_tracks,
+                'drift_real': bool((res.get('drift') or {}).get('real')),
+                'drift_peak_px': float((res.get('drift') or {}).get('peak_px', 0.0))})
             msg = (f"Linked {tracks['track_id'].nunique()} primary trajectories "
-                   f"(drift-corrected) from the {pop_which} population.")
+                   f"from the {pop_which} population.")
             if n_agg_tracks:
                 msg += f" Aggregate population: {n_agg_tracks} tracks."
             self._update_tracklen_hist(tracks)
@@ -934,6 +931,7 @@ class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin,
         tracks = self._dr().get('vpt_tracks')
         if tracks is None or tracks.empty:
             napari_show_warning("No trajectories found — run Step 4 first."); return
+        tracks = self._tracks_for_msd(tracks)        # drift subtracted for the MSD only, when ticked
 
         try:
             msd_df = compute_msd(
@@ -1026,8 +1024,8 @@ class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin,
                                  if hasattr(self, '_radius_note') else ''),
             'temperature_C': self._temp_C.value(),
             'min_track_length': self._min_track.value(),
-            'drift_mode': (self._drift_mode.currentData()
-                           if hasattr(self, '_drift_mode') else 'com'),
+            'drift_mode': ('measured' if (hasattr(self, '_drift_apply')
+                                          and self._drift_apply.isChecked()) else 'none'),
             'promote_stable_to_singlet': (self._promote_stable.isChecked()
                                           if hasattr(self, '_promote_stable') else True),
             'D_um2_per_s': D, 'alpha': alpha, 'eta_Pa_s': eta})
