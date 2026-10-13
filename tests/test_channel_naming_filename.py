@@ -39,8 +39,9 @@ def test_two_files_named_by_fluorophore_get_distinct_names_no_disambiguator():
 def test_real_metadata_still_beats_the_filename():
     # the file says GFP but the OME Fluor says DAPI — trust the acquisition metadata, not the name
     info = identify_channel(channel_index=0, fluorophore_name='DAPI', file_stem='Image1-GFP')
-    assert info['label'] == 'DAPI'
-    assert info['source'] == 'name'
+    assert info['source'] == 'name' and info['bucket'] == 'blue'
+    # 1.7.002: the metadata name is kept as a hint; the label is what the hardware knows (here only the colour)
+    assert info['label'] == 'Blue' and info['fluorophore_hint'] == 'DAPI'
 
 
 def test_a_stem_with_no_known_fluorophore_keeps_the_users_text_not_a_generic_word():
@@ -63,3 +64,35 @@ def test_backward_compatible_without_a_stem_the_behaviour_is_unchanged():
     assert pix['source'] == 'pixels' and pix['label'] == 'Fluorescence'
     pos = identify_channel(channel_index=1)
     assert pos['source'] == 'position'
+
+
+# ── 1.7.002: metadata fluorophore names are not trusted as labels ───────────────────────────────────────────────
+# An Andor rep typed 'GFP' into the 488 setting name, so every 488 acquisition on that system claims GFP — whether
+# the dye was GFP, Alexa 488 or fluorescein. The hardware only knows the laser line.
+
+def test_an_instrument_setting_name_is_labelled_by_its_laser_line():
+    info = identify_channel(channel_index=0, channel_name='488_GFP_CF40um_iXon EMCCD',
+                            excitation_wavelength=488, emission_wavelength=521)
+    assert info['label'] == '488' and info['layer_name'] == 'C0-488'
+    assert info['bucket'] == 'green' and info['fluorophore_hint'] == 'EGFP'
+
+
+def test_the_leading_laser_line_is_used_when_no_wavelength_is_recorded():
+    info = identify_channel(channel_index=1, channel_name='594_mCherry_CF40')
+    assert info['label'] == '594' and info['bucket'] == 'red'
+
+
+def test_emission_only_is_labelled_by_emission():
+    assert identify_channel(channel_index=0, emission_wavelength=520)['label'] == 'Em520'
+
+
+def test_a_fluorophore_in_the_FILE_NAME_is_still_the_label():
+    info = identify_channel(channel_index=1, file_stem='Image1-GFP')
+    assert info['label'] == 'EGFP' and info['source'] == 'filename'
+
+
+def test_an_acquisition_mode_of_brightfield_beats_a_nominal_wavelength():
+    """The Andor brightfield channel records a nominal 500 nm emission; without the mode it was named Green."""
+    info = identify_channel(channel_index=2, channel_name='test', excitation_wavelength=500,
+                            emission_wavelength=500, acquisition_mode='Brightfield')
+    assert info['label'] == 'Brightfield' and info['bucket'] == 'transmitted'

@@ -53,7 +53,7 @@ def _scene(object_radii, positions, shape=(220, 220), amplitude=900.0,
 
 
 # ── object_scale ────────────────────────────────────────────────────────────────
-@pytest.mark.core
+@pytest.mark.base
 def test_spectrum_reports_the_radius_that_was_placed():
     image, _truth, cell = _scene([6, 6, 6, 6],
                                  [(70, 70), (70, 150), (150, 70), (150, 150)])
@@ -65,7 +65,7 @@ def test_spectrum_reports_the_radius_that_was_placed():
     assert 4.0 <= spectrum['r_dominant'] <= 9.0, spectrum
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_spectrum_does_not_report_the_cell_itself():
     """The failure mode that ruled out a Laplacian-of-Gaussian scale-space probe.
 
@@ -82,7 +82,7 @@ def test_spectrum_does_not_report_the_cell_itself():
         f"radius {cell_radius} — it is measuring the cell, not the objects")
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_spectrum_separates_a_two_population_field():
     """A field of small AND large objects must show area at BOTH ends.
 
@@ -101,7 +101,7 @@ def test_spectrum_separates_a_two_population_field():
     assert area_fraction_above(spectrum, 10.0) < 0.98, spectrum  # and the small ones
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_single_scale_field_gets_a_single_pass():
     image, _truth, cell = _scene([6, 6, 6, 6],
                                  [(70, 70), (70, 150), (150, 70), (150, 150)])
@@ -111,7 +111,7 @@ def test_a_single_scale_field_gets_a_single_pass():
     assert len(plan['ball_radii']) == 1
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_two_scale_field_gets_a_second_larger_pass():
     image, _truth, cell = _scene(
         [4, 4, 4, 4, 4, 16, 16],
@@ -124,7 +124,7 @@ def test_a_two_scale_field_gets_a_second_larger_pass():
     assert plan['ball_radii'][1] > plan['ball_radii'][0]
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_users_own_scale_is_never_overridden():
     """`ball_radii[0]` must always be the caller's, so the extra pass is purely
     ADDITIVE and a result stays reproducible from the drawn annotation."""
@@ -138,7 +138,7 @@ def test_the_users_own_scale_is_never_overridden():
         assert plan['ball_radii'][0] == max(2, int(np.ceil(1.5 * measured_r)))
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_an_empty_cell_yields_no_spectrum_rather_than_a_guess():
     shape = (120, 120)
     cell = _cell(shape, 45)
@@ -153,7 +153,7 @@ def test_an_empty_cell_yields_no_spectrum_rather_than_a_guess():
 
 
 # ── boundary_refit ──────────────────────────────────────────────────────────────
-@pytest.mark.core
+@pytest.mark.base
 def test_refit_grows_an_undercovered_object_toward_the_truth():
     image, truth, cell = _scene([12], [(110, 110)])
     eroded = ndi.binary_erosion(truth, np.ones((11, 11)))     # a "core-only" mask
@@ -164,7 +164,7 @@ def test_refit_grows_an_undercovered_object_toward_the_truth():
     assert after > 0.75, f"re-fit recovered only {after:.2f} of the true object"
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_refit_shrinks_an_overcovered_object_toward_the_truth():
     """Boundaries must be able to come IN as well as go out — the same pipeline
     over-covers small elongated objects while under-covering large round ones."""
@@ -175,14 +175,14 @@ def test_refit_shrinks_an_overcovered_object_toward_the_truth():
     assert int(refitted.sum()) >= 0.5 * int(truth.sum())
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_refit_never_changes_the_object_count():
     image, truth, cell = _scene([6, 6, 6], [(70, 70), (70, 150), (150, 110)])
     refitted = refit_object_boundaries(image, truth, cell)
     assert ndi.label(refitted)[1] == ndi.label(truth)[1]
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_refit_does_not_merge_neighbours():
     """Two close objects both flooding outward must stay two objects — this is
     what the watershed basins in the re-fit are for."""
@@ -192,14 +192,14 @@ def test_refit_does_not_merge_neighbours():
     assert ndi.label(refitted)[1] == 2
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_refit_stays_inside_the_cell():
     image, truth, cell = _scene([10], [(110, 110)])
     refitted = refit_object_boundaries(image, truth, cell)
     assert not (refitted & ~cell).any()
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_refit_of_nothing_is_nothing():
     image, _truth, cell = _scene([6], [(110, 110)])
     empty = np.zeros(image.shape, bool)

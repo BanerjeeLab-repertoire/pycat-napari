@@ -472,6 +472,41 @@ def _ims_instrument(attrs):
     return inst
 
 
+def _ims_frame_interval(hf):
+    """The frame interval from an IMS file's own per-time-point timestamps (``DataSetInfo/TimeInfo``,
+    ``TimePoint1`` ... ``TimePointN`` = 'YYYY-MM-DD HH:MM:SS.fff').
+
+    Imaris/Andor Fusion record a wall-clock stamp for every time point, but nothing read them: a 180-frame,
+    60-s-interval time series loaded with NO frame interval, and the time-series panel fell back to 1.0 s --
+    every rate it reported was per MINUTE while labelled per second. Returns ``(median_s, iqr_s, n)`` from the
+    consecutive differences, or ``None`` when fewer than two stamps parse."""
+    from datetime import datetime
+    try:
+        attrs = hf['DataSetInfo']['TimeInfo'].attrs
+    except (KeyError, AttributeError):
+        return None
+    stamps = []
+    i = 1
+    while f'TimePoint{i}' in attrs:
+        s = _safe_str(attrs.get(f'TimePoint{i}'))
+        try:
+            stamps.append(datetime.strptime(s.strip(), '%Y-%m-%d %H:%M:%S.%f'))
+        except (TypeError, ValueError, AttributeError):
+            try:
+                stamps.append(datetime.strptime(s.strip(), '%Y-%m-%d %H:%M:%S'))
+            except (TypeError, ValueError, AttributeError):
+                return None
+        i += 1
+    if len(stamps) < 2:
+        return None
+    import numpy as _np
+    d = _np.diff([t.timestamp() for t in stamps])
+    if not len(d) or _np.median(d) <= 0:
+        return None
+    q1, q3 = _np.percentile(d, (25, 75))
+    return float(_np.median(d)), float(q3 - q1), len(stamps)
+
+
 def extract_ims_metadata(file_path, reader=None, width_px=None):
     """Extract normalised metadata from an Imaris .ims file.
 
@@ -548,6 +583,14 @@ def extract_ims_metadata(file_path, reader=None, width_px=None):
                     common['bit_depth'] = int(_np.dtype(dt).itemsize * 8)
             except Exception:
                 pass
+
+        # The frame interval from the file's own per-time-point timestamps.
+        _fi = _ims_frame_interval(hf)
+        if _fi is not None:
+            common['frame_interval_s'], common['frame_interval_iqr_s'], _n_stamps = _fi
+            common['frame_interval_source'] = 'ims_timeinfo'
+            if common.get('n_timepoints') is None:
+                common['n_timepoints'] = _n_stamps
 
         # Per-channel records (item 4): same schema as the OME channels list, so raw['channels'] is consistent
         # across formats. Additive — top-level excitation/emission fill from channel 0 only when Image had none.

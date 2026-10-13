@@ -158,6 +158,67 @@ def _match_wavelength(emission_nm: Optional[float]) -> Optional[tuple[str, str]]
     return None
 
 
+_TRANSMITTED_MODES = re.compile(r"bright\s*field|transmi|\bdic\b|phase|\bbf\b", re.I)
+#: A 3-digit laser line at the start of an instrument setting name ('488_GFP_CF40um', '638_Cy5') -- the one
+#: number in such a name that IS a hardware fact.
+_LEADING_LINE = re.compile(r"^\s*(\d{3})(?!\d)")
+
+
+def _wavelength_label(excitation_nm, emission_nm, channel_name, fallback):
+    """The label for a channel identified from ACQUISITION METADATA (1.7.002).
+
+    A fluorophore name in metadata is an instrument SETTING NAME someone typed: an Andor rep wrote 'GFP' into the
+    488 setting, so every 488 acquisition on that system claims to be GFP, whether the dye was GFP, Alexa 488 or
+    fluorescein. The hardware only knows the laser line. So metadata-derived fluorescence channels are labelled
+    by what the hardware knows: the excitation wavelength ('488'), else a leading laser line in the setting name,
+    else the emission ('Em521'), else the spectral bucket's colour name. The matched fluorophore is kept as
+    ``fluorophore_hint`` -- a hint, never the label. (A fluorophore in the FILE NAME is the experimenter's own
+    statement and is still used as the label.)"""
+    try:
+        v = float(excitation_nm)
+        if 300 <= v <= 900:
+            return f"{int(round(v))}"
+    except (TypeError, ValueError):
+        pass
+    m = _LEADING_LINE.match(channel_name or '')
+    if m and 300 <= int(m.group(1)) <= 900:
+        return m.group(1)
+    try:
+        v = float(emission_nm)
+        if 300 <= v <= 900:
+            return f"Em{int(round(v))}"
+    except (TypeError, ValueError):
+        pass
+    return fallback
+
+
+#: Pixel-classified modality -> (label, bucket) for the Tier 2c guess.
+_MODALITY_LABEL = {
+    'fluorescence': ('Fluorescence', 'unknown'),
+    'brightfield':  ('Brightfield', 'transmitted'),
+    'dic':          ('DIC', 'transmitted'),
+    'phase':        ('Phase', 'transmitted'),
+    'transmitted':  ('Transmitted', 'transmitted'),
+}
+
+
+def _mode_identity(acquisition_mode):
+    """(label, bucket) when the acquisition MODE says transmitted light -- a hardware fact that outranks any
+    name/wavelength (an Andor brightfield channel records a nominal 500 nm and was otherwise named Green)."""
+    if acquisition_mode and _TRANSMITTED_MODES.search(str(acquisition_mode)):
+        return ("Brightfield" if re.search(r"bright", str(acquisition_mode), re.I) else "Transmitted"), "transmitted"
+    return None
+
+
+def _hardware_label(label, bucket, source, excitation, emission, name):
+    """(label, fluorophore_hint): a metadata-derived FLUORESCENCE identity is relabelled by what the hardware
+    knows (see ``_wavelength_label``); the matched fluorophore name survives only as the hint."""
+    if source not in ("name", "wavelength") or bucket in ("transmitted", "unknown"):
+        return label, None
+    colour = {"blue": "Blue", "green": "Green", "red": "Red", "far_red": "FarRed"}.get(bucket, label)
+    return _wavelength_label(excitation, emission, name, fallback=colour), (label if source == "name" else None)
+
+
 def channel_needs_identity(channel_info) -> bool:
     """True when a channel has NO usable identity — it fell all the way through the fluorophore / channel-name
     / filename / emission / pixel tiers to the last-resort POSITION guess ('C0-Blue'-style). That is the only
@@ -176,6 +237,7 @@ def identify_channel(
     excitation_wavelength: Optional[float] = None,
     pixel_frame=None,
     file_stem: Optional[str] = None,
+    acquisition_mode: Optional[str] = None,
 ) -> dict:
     """
     Identify a channel's display label using a three-tier strategy.
@@ -200,6 +262,9 @@ def identify_channel(
         The source file's stem ('Image1-GFP'). Matched below real metadata but above the pixel/
         position guess; its distinguishing text is kept when nothing else matches, so a derived
         name is never worse than the one the user gave the file.
+    acquisition_mode : str, optional
+        IMS ``MicroscopeMode`` etc.; a transmitted-light mode wins (``_mode_identity``). Metadata-derived
+        fluorescence is labelled by excitation wavelength, its name returned as ``fluorophore_hint``.
 
     Returns
     -------
@@ -209,9 +274,9 @@ def identify_channel(
         bucket   : str   — spectral bucket: blue/green/red/far_red/transmitted/unknown
         layer_name : str — full suggested napari layer name, e.g. "C0-DAPI"
     """
-    # Tier 1: explicit fluorophore name
-    result = _match_fluorophore_name(fluorophore_name)
+    # Tier 0: transmitted-light acquisition mode; Tier 1: explicit fluorophore name
     source = "name"
+    result = _mode_identity(acquisition_mode) or _match_fluorophore_name(fluorophore_name)
 
     # Tier 1b: generic channel name (some software only populates this)
     if result is None:
@@ -247,13 +312,6 @@ def identify_channel(
             from pycat.utils.channel_modality import classify_channel_from_pixels
             modality, conf = classify_channel_from_pixels(pixel_frame)
             if modality is not None and conf >= 0.5:
-                _MODALITY_LABEL = {
-                    'fluorescence': ('Fluorescence', 'unknown'),
-                    'brightfield':  ('Brightfield', 'transmitted'),
-                    'dic':          ('DIC', 'transmitted'),
-                    'phase':        ('Phase', 'transmitted'),
-                    'transmitted':  ('Transmitted', 'transmitted'),
-                }
                 result = _MODALITY_LABEL.get(modality)
                 source = "pixels"
         except Exception:
@@ -268,6 +326,8 @@ def identify_channel(
             result = (f"Ch{channel_index}", "unknown")
 
     label, bucket = result
+    label, fluorophore_hint = _hardware_label(label, bucket, source, excitation_wavelength, emission_wavelength,
+                                              channel_name or fluorophore_name)
 
     # Never produce a name WORSE than the input: if only the modality (pixels) or a bare position was
     # found but the file stem carries real text, keep it (the bucket is retained so the colormap tracks).
@@ -285,6 +345,7 @@ def identify_channel(
         "bucket": bucket,
         "layer_name": layer_name,
         "raw_name": channel_name or fluorophore_name,
+        "fluorophore_hint": fluorophore_hint,
     }
 
 
@@ -383,6 +444,7 @@ def extract_channel_info_from_ims(reader, channel_index: int, file_stem=None) ->
     chan_name  = None
     emission   = None
     excitation = None
+    mode       = None
 
     def _decode(v):
         try:
@@ -420,6 +482,7 @@ def extract_channel_info_from_ims(reader, channel_index: int, file_stem=None) ->
                         or _first_float(attrs.get("EmissionWavelength")))
             excitation = (_first_float(attrs.get("LSMExcitationWavelength"))
                           or _first_float(attrs.get("ExcitationWavelength")))
+            mode = _decode(attrs.get("MicroscopeMode"))
         except Exception:
             pass
 
@@ -447,4 +510,5 @@ def extract_channel_info_from_ims(reader, channel_index: int, file_stem=None) ->
         emission_wavelength=emission,
         excitation_wavelength=excitation,
         file_stem=file_stem,
+        acquisition_mode=mode,
     )

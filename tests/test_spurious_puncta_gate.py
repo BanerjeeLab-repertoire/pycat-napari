@@ -223,7 +223,7 @@ def test_a_condensate_dominated_cell_is_not_mistaken_for_an_empty_one():
         f"by the objects it is supposed to find.")
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_background_estimate_is_unbiased_on_clean_noise():
     """...and the fix must not move the clean case, because that is what the
     noise-only rejection above stands on."""
@@ -235,7 +235,7 @@ def test_the_background_estimate_is_unbiased_on_clean_noise():
     assert abs(sigma - 0.00020) < 0.00002, sigma
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_background_estimate_ignores_a_bright_population():
     """Directly: adding a bright population must not move the background estimate."""
     from pycat.toolbox.segmentation.intensity import robust_cell_background

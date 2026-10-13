@@ -1,3 +1,40 @@
+## [1.7.002] - 2026-10-13
+### Changed — **channels named from metadata are labelled by laser line, not by a fluorophore the metadata claims.**
+An instrument setting name is text someone typed: an Andor rep put "GFP" into the 488 setting, so every 488
+acquisition on that system claimed to be GFP — whether the dye was GFP, Alexa 488 or fluorescein. The hardware
+only knows the laser line. Metadata-derived fluorescence channels are now labelled by excitation wavelength (`C0-488`,
+`C1-638`), else a leading laser line in the setting name, else emission (`Em520`), else the colour (`Green`); the
+matched dye is kept as `fluorophore_hint`. A fluorophore in the FILE NAME is the experimenter's own statement and is
+still the label. The IMS `MicroscopeMode` is now honoured: the Andor brightfield channel (name "test", nominal 500 nm)
+was named **Green** with a green colormap; it is `Brightfield`. Batch recordings keep their own recorded names.
+
+### Changed — **time-series in vitro: segment once, measure every channel, quantify the kinetics.**
+Optimised on `sub-HHrz-Trial-4.ims` (Andor, 180 frames × 60 s, 1024²): droplets present from frame 0 (substrate,
+638 nm, bleaches) and a reaction (488 nm) that starts at background and lights droplet by droplet.
+- **Step 3 segments with the validated 2D droplet method by default**, on a channel visible in every frame (the
+  panel now says so). On frame 0 it finds 519 droplets where the old Multi-Otsu found 327 (dim droplets missed,
+  neighbours fused). Frames are segmented in threads: 180 frames in ~3 min instead of ~14, identical labels.
+- **Step 4 measures every ticked channel in the same droplets** (brightfield unticked by default), each against the
+  droplet's OWN dilute phase — the median of a ring 2–6 px outside it that never enters another droplet — so the
+  camera offset (~500 counts here) and field drift cancel: `mean_`, `bg_`, `net_<channel>` per droplet per frame.
+- **New Step 5b — reaction kinetics & heterogeneity**: per droplet, model-free baseline, plateau, onset / half / 90 %
+  times, maximum rate and whether it responded; a heterogeneity summary (spread of the timing, size dependence); and
+  the heterogeneity as a curve (spread of each droplet's progress, fraction activated, frame by frame), plotted.
+  On the HHrz movie: 580 of 589 droplets respond, half-time median 33 min (IQR 23 min); the progress spread is ~0.1
+  at the start, peaks at ~0.6 at 20–30 min and is 0.04 by two hours. Much of the early spread is SIZE: half-time
+  rank-correlates with droplet area (ρ = 0.62) — smallest quarter 12 min, largest quarter 38 min.
+
+### Fixed
+- **IMS files carried no frame interval**, so the time-series panel used 1.0 s per frame — every rate per minute,
+  labelled per second. The interval is now read from the file's own per-time-point stamps (60.01 s here).
+- **Time-series field trajectories rescaled every frame to [0, 1]** before computing partition and C_sat — the bug the
+  2D path fixed in 1.5.424, and worse over time: each frame got its own unit, dividing out the change being measured.
+  They now use raw counts.
+- **Reading a lazy IMS layer from several threads killed PyCAT with no error** (the reader is not thread-safe). Every
+  IMS read now takes a lock, and the new measurement reads frames on one thread and computes in parallel.
+- **Fifteen tests marked `core` needed scipy/scikit-image** (`test_object_scale_and_refit.py`, two in
+  `test_spurious_puncta_gate.py`), failing both CI-lane guards since 1.6.460; they are `base` tests and now say so.
+
 ## [1.7.0] - 2026-10-12
 ### Changed — **PyCAT runs on PySide6 (Qt 6) and no longer depends on PyQt5.**
 Per `docs/audits/PyCAT_Qt6_Migration_Spec.md`. napari has deprecated its PyQt5 backend, so a new user's first sight

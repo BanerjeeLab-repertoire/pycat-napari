@@ -69,8 +69,9 @@ def test_metadata_still_wins_over_pixels():
     # an explicit fluorophore name must take precedence over pixel inference
     info = identify_channel(channel_index=0, fluorophore_name='DAPI',
                             pixel_frame=_transmitted())
-    assert info['source'] == 'name'
-    assert 'DAPI' in info['label']
+    assert info['source'] == 'name' and info['bucket'] == 'blue'
+    # 1.7.002: a metadata fluorophore name is a hint, not the label (no wavelength here -> the colour)
+    assert info['fluorophore_hint'] == 'DAPI' and info['label'] == 'Blue'
 
 
 # ── Filename cleaning + confident naming (1.6.56) ────────────────────────────

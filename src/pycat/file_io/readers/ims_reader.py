@@ -16,6 +16,8 @@ import contextlib
 import io
 import sys
 
+import threading
+
 import numpy as np
 
 from pycat.file_io.stack_access import to_unit_float32
@@ -132,6 +134,12 @@ def _ims_pixel_size_um(reader, width_px):
     return microns_per_pixel
 
 
+#: One lock for every IMS frame read. imaris_ims_file_reader is NOT thread-safe, and the quiet-read context swaps
+#: sys.stdout: reading a lazy IMS layer from several threads at once (the time-series measurement did, 1.7.002) killed
+#: the process outright with no traceback. napari's async slicing can read from another thread too.
+_IMS_READ_LOCK = threading.RLock()
+
+
 class _ImsReaderTYX:
     """Lazy (T, Y, X) IMS view backed directly by imaris_ims_file_reader.ims."""
     def __init__(self, reader, c, suppress_ctx=None):
@@ -144,7 +152,7 @@ class _ImsReaderTYX:
         self.ndim = 3
 
     def _read_frame(self, t):
-        with self._ctx():
+        with _IMS_READ_LOCK, self._ctx():
             raw = self._reader[int(t), self._c, 0, :, :]
         return _ims_frame_2d(raw)
 
@@ -183,7 +191,7 @@ class _ImsReaderZYX:
         self.ndim = 3
 
     def _read_plane(self, z):
-        with self._ctx():
+        with _IMS_READ_LOCK, self._ctx():
             raw = self._reader[self._t, self._c, int(z), :, :]
         return _ims_frame_2d(raw)
 
@@ -221,7 +229,7 @@ class _ImsReaderTZYX:
         self.ndim = 4
 
     def _read_plane(self, t, z):
-        with self._ctx():
+        with _IMS_READ_LOCK, self._ctx():
             raw = self._reader[int(t), self._c, int(z), :, :]
         return _ims_frame_2d(raw)
 
