@@ -1,3 +1,24 @@
+## [1.7.003] - 2026-10-13
+### Fixed — **the test suite is green again; nine failures had shipped since 1.6.460.**
+None changed what PyCAT measures. Two were pins that the 1.6.460 boundary re-fit had made stale *by being right*:
+- **In-vitro `spot` droplets and time-series condensate areas moved TOWARD the truth, and nobody re-pinned them.**
+  Both paths run `segment_subcellular_objects`, whose raw-image boundary re-fit (1.6.460, on by default) places each
+  edge at the object's own half-maximum. On the in-vitro fixture (truth 113 px) `spot` went 159 -> 107 px, IoU
+  <= 0.71 -> 0.947; on the time-series fixture (puncta of 36 and 25 px) the areas went from ~40-55 % over to cell 2
+  exact and cell 1 within 11 %. Bisected to 0928340; re-pinned with the truth recorded beside the numbers.
+- `refit_regional_boundaries`' `source_out` is a documented OUT parameter (allowed, with the reason);
+  `flag_irregular_puncta` / `attach_boundary_source` wrote a column into the caller's DataFrame and now return a
+  new one (`df.assign`) — the only caller already used the return value.
+- The object-size estimator's 3-class-Otsu fallback caught `Exception` under an invented `broad-ok` category; it
+  now catches the `ValueError` both skimage and its own guard raise.
+- Five functions had crept over 120 lines (`replay_upscaling`, `replay_preprocessing`, `replay_open_image`,
+  `replay_condensate_segmentation`, `estimate_object_size_px`); each is split along a seam it already had —
+  every comment moved with its code, and `replay_condensate_segmentation` no longer spells out its ten recorded
+  parameters twice. `image_processing_tools.py` was over its ceiling by one wrapped import line.
+- `brightfield_droplet_mask` makes no layer (its masks become an aspect-ratio trace) and is listed as such; the
+  workflow-layout check read `ui_modules.py`, from which the layouts moved, and now checks the assignment where it
+  lives.
+
 ## [1.7.002] - 2026-10-13
 ### Changed — **channels named from metadata are labelled by laser line, not by a fluorophore the metadata claims.**
 An instrument setting name is text someone typed: an Andor rep put "GFP" into the 488 setting, so every 488

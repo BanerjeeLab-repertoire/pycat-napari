@@ -747,9 +747,8 @@ def flag_irregular_puncta(df, data_instance):
     solidity < IRREGULAR_MAX_SOLIDITY. The object scale is ``ball_radius / 1.5`` (its definition)."""
     ball_radius = float(data_instance.data_repository.get('ball_radius') or 0)
     object_area = np.pi * (ball_radius / 1.5) ** 2
-    df['shape_filtered'] = ((df['area'] > IRREGULAR_AREA_FACTOR * object_area)
-                            & (df['solidity'] < IRREGULAR_MAX_SOLIDITY)) if object_area > 0 else False
-    return df
+    return df.assign(shape_filtered=((df['area'] > IRREGULAR_AREA_FACTOR * object_area)
+                                     & (df['solidity'] < IRREGULAR_MAX_SOLIDITY)) if object_area > 0 else False)
 
 
 _BOUNDARY_NAMES = {1: 'regional', 2: 'half-max'}   # boundary_refit.BOUNDARY_REGIONAL / _LEVEL
@@ -774,8 +773,7 @@ def attach_boundary_source(df, labeled_puncta, data_instance):
             coded = counts[lab, 1:]
             if coded.sum() >= 0.5 * counts[lab].sum() and coded.sum() > 0:
                 names[i] = _BOUNDARY_NAMES[int(np.argmax(coded)) + 1]
-    df['boundary_source'] = names
-    return df
+    return df.assign(boundary_source=names)
 
 
 _EXCLUSION_MAPS = (('ring_rejected_map', 'ring_rejected', 'ring rejected'),

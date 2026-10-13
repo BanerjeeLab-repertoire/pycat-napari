@@ -55,7 +55,10 @@ def test_the_analysis_output_is_byte_identical_on_a_fixed_scene():
     # Re-pinned at 1.6.396: the 1.6.376-S4 fix made the Felzenszwalb region merge actually run (it had been a
     # silent no-op), so these condensate areas shifted by a few px each — still one condensate per cell, cell
     # areas unchanged. Was [54, 39, 56, 39, 52, 37] / mask-sum 277 under the buggy no-op merge.
-    _AREA = [52, 39, 52, 37, 49, 39]
+    # Re-pinned at 1.7.003: the 1.6.460 raw-image boundary re-fit (half-maximum edges, on by default) moved them
+    # TOWARD the truth — the puncta are 6x6 = 36 px and 5x5 = 25 px. Was [52, 39, 52, 37, 49, 39] (~40-55% over);
+    # now cell 2 is exact and cell 1 within 11%.
+    _AREA = [32, 25, 34, 25, 32, 25]
     assert list(df['total_condensate_area_px']) == _AREA
     assert list(df['cell_area_px']) == [392, 400, 392, 400, 392, 400]
     assert list(df['n_condensates']) == [1, 1, 1, 1, 1, 1]
@@ -74,7 +77,7 @@ def test_the_analysis_output_is_byte_identical_on_a_fixed_scene():
     # the returned condensate mask stack (sum == total condensate area across all frames)
     assert cstack.shape == (3, 64, 64)
     assert cstack.dtype == np.uint8
-    assert int(cstack.sum()) == sum(_AREA)          # 268
+    assert int(cstack.sum()) == sum(_AREA)          # 173
 
 
 def test_the_analysis_is_deterministic():

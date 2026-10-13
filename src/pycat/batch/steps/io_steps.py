@@ -125,39 +125,9 @@ def _replay_split_file_companion(state: dict, image_path: Path, params: dict) ->
     return True
 
 
-def replay_open_image(state: dict, image_path: Path, params: dict, output_dir: Path):
-    """
-    Load the image and populate the per-file state dict.
-
-    If the original GUI session recorded a channel_assignment (from a
-    multi-channel file where the user assigned names to each channel via
-    the channel naming dialog), this is used to resolve which channel
-    index backs the "Segmentation Image" and "Fluorescence Image" roles,
-    and — for files with 3+ fluorophores — every recorded channel is also
-    loaded individually and made available in
-    state['channels_by_name'][layer_name] for use by any future replay
-    step that needs a specific additional channel (e.g. a second
-    condensate marker or a colocalization channel).
-
-    This generalizes to any number of channels — 2, 3, 4, or more — since
-    the lookup is driven entirely by the recorded layer names rather than
-    a fixed seg/fluor pair.
-
-    Split-file recordings (separate 'open_image' steps) are handled up front
-    by _replay_split_file_companion; see its docstring.
-    """
+def _new_data_instance(image_path, image, microns_per_pixel, params):
+    """The per-file data repository replay_open_image starts from: path, scale and recorded sizes."""
     from pycat.data.data_modules import BaseDataClass
-
-    if _replay_split_file_companion(state, image_path, params):
-        return
-
-    channel_assignment = params.get('channel_assignment')
-
-    seg_channel = _resolve_channel_for_layer(channel_assignment, 'Segmentation', default=0)
-    fluor_channel = _resolve_channel_for_layer(channel_assignment, 'Fluorescence', default=0)
-
-    seg_path = _source_path_for_recorded_channel(image_path, channel_assignment, seg_channel)
-    image, microns_per_pixel = _load_image(seg_path, channel=seg_channel if seg_path == image_path else 0)
 
     data_instance = BaseDataClass()
     # The image's own path, as the GUI records it on load. Every object table stamps its entity ids from
@@ -181,6 +151,42 @@ def replay_open_image(state: dict, image_path: Path, params: dict, output_dir: P
     # covers the (should-never-happen) case where something reads ball_radius
     # before finalize runs.
     data_instance.data_repository['ball_radius'] = params.get('ball_radius', 50)
+    return data_instance
+
+
+def replay_open_image(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """
+    Load the image and populate the per-file state dict.
+
+    If the original GUI session recorded a channel_assignment (from a
+    multi-channel file where the user assigned names to each channel via
+    the channel naming dialog), this is used to resolve which channel
+    index backs the "Segmentation Image" and "Fluorescence Image" roles,
+    and — for files with 3+ fluorophores — every recorded channel is also
+    loaded individually and made available in
+    state['channels_by_name'][layer_name] for use by any future replay
+    step that needs a specific additional channel (e.g. a second
+    condensate marker or a colocalization channel).
+
+    This generalizes to any number of channels — 2, 3, 4, or more — since
+    the lookup is driven entirely by the recorded layer names rather than
+    a fixed seg/fluor pair.
+
+    Split-file recordings (separate 'open_image' steps) are handled up front
+    by _replay_split_file_companion; see its docstring.
+    """
+    if _replay_split_file_companion(state, image_path, params):
+        return
+
+    channel_assignment = params.get('channel_assignment')
+
+    seg_channel = _resolve_channel_for_layer(channel_assignment, 'Segmentation', default=0)
+    fluor_channel = _resolve_channel_for_layer(channel_assignment, 'Fluorescence', default=0)
+
+    seg_path = _source_path_for_recorded_channel(image_path, channel_assignment, seg_channel)
+    image, microns_per_pixel = _load_image(seg_path, channel=seg_channel if seg_path == image_path else 0)
+
+    data_instance = _new_data_instance(image_path, image, microns_per_pixel, params)
 
     state['image'] = image
     state['preprocessed'] = image.copy()

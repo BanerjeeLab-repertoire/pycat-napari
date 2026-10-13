@@ -218,6 +218,8 @@ _KNOWN_UNTAGGED = {
     'detect_out_of_focus',           # returns a per-frame verdict
     'detect_sedimentation',          # returns a verdict
     'detect_and_fit_fusions',        # returns fit results
+    'brightfield_droplet_mask',      # per-frame helper inside the fusion aspect-ratio trace; its masks
+                                     # become numbers (aspect ratio, radii), never a layer
     'matched_detection',             # a benchmark comparison, not a transform
     'manders_threshold_sensitivity', # a sensitivity sweep
     'scramble_pixels_within_mask',   # a NULL generator; tagging it would imply it is a real op

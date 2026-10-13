@@ -108,6 +108,9 @@ def test_no_TOOLBOX_function_writes_into_a_parameter_array():
         # single function; only the scope changed, which is what exposed it to this static check.
         '_start_new_tracks',
         '_apply_frame_assignment',
+        # 1.6.463 — `source_out` is an OUT parameter: documented as "receives, per output pixel, which
+        # boundary its object kept", optional, and named for it. The caller allocates it to be filled.
+        'refit_regional_boundaries',
     }
 
     toolbox = pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat" / "toolbox"

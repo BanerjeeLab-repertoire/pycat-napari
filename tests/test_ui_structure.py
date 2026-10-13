@@ -119,10 +119,14 @@ def test_analysis_workflow_layouts_present():
     """Each analysis UI class must still build its workflow layout attribute
     (condensate_layout, timeseries..., etc.). A refactor that drops one would
     break that whole workflow silently."""
-    src = _read_ui_source()
+    # The workflow layouts moved to analysis_methods_ui.py in the UI decomposition; ui_modules.py only
+    # re-exports. Check for the ASSIGNMENT, not a mention -- a passing reference is not a built layout.
+    import re
+    with open(os.path.join(os.path.dirname(_UI_MODULES), "analysis_methods_ui.py"), encoding="utf-8") as f:
+        src = f.read()
     for layout_attr in ("condensate_layout", "object_coloc_layout",
                         "general_layout", "fibril_layout"):
-        assert f"self.{layout_attr}" in src, (
+        assert re.search(rf"self\.{layout_attr}\s*=", src), (
             f"Workflow layout '{layout_attr}' no longer assigned — a workflow "
             f"UI may have been broken by a refactor.")
 

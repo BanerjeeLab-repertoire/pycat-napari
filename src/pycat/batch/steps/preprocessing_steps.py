@@ -13,6 +13,61 @@ from pycat.batch.steps._common import (
     _get_data, _derive_split_companion_path, _source_path_for_recorded_channel, _load_image, _resolve_channel_for_layer, _save_array, _raw_counts, _normalize_to_float, _resolve_image_layer, _ivf_droplet_mask_and_image, _active_layer_channel_role)
 
 
+def _preprocess_raw(arr, ball_radius, window_size, suppress_foreground, suppression_params):
+    """``pre_process_image`` on RAW counts, with the GUI's per-image radius cap (replay_preprocessing)."""
+    from pycat.toolbox.image_processing_tools import pre_process_image
+
+    # run_pre_process_image (the interactive path) caps ball_radius/window_size
+    # to 5% of the image's own smaller dimension (min 4px) to avoid a
+    # MemoryError from an oversized rolling-ball structuring element -- but
+    # that cap is a LOCAL variable there, never written back to
+    # data_repository, so the recorded ball_radius/window_size passed in are the
+    # PRE-cap values. Replaying with the uncapped values silently applies a
+    # larger ball_radius/window_size than the GUI actually used whenever the
+    # cap would have triggered (small images, or after upscaling pushes
+    # ball_radius close to/above the threshold) -- a different LoG sigma,
+    # WBNS scale and CLAHE tile size, and the exact MemoryError risk the cap
+    # exists to prevent. The cap must be recomputed per-image (not reused
+    # from the recording) since a batch image's shape can differ from what
+    # was used interactively.
+    _max_radius = max(4, int(min(np.asarray(arr).shape[-2:]) * 0.05))
+    _br = min(ball_radius, _max_radius)
+    _ws = min(window_size, _max_radius * 2)
+
+    # ── BATCH MUST PASS RAW COUNTS. It was pre-normalising, and that is the bug. ──
+    #
+    # **Gable's report: batch segments the same image differently from the recording.**
+    #
+    # ``pre_process_image`` **normalises internally** — ``img = img / img.max()``. It expects
+    # **raw counts**, and it divides. Batch was calling ``_normalize_to_float`` first, which
+    # does ``(x - min) / (max - min)`` — **it subtracts the pedestal too.** The subsequent
+    # ``/max`` inside ``pre_process_image`` is then a **no-op**, so the two callers hand the
+    # rolling ball genuinely different images::
+    #
+    #     INTERACTIVE   img / max            ->  range **[0.425, 1.0]**
+    #     BATCH         (img-min)/(max-min)  ->  range **[0.000, 1.0]**
+    #
+    # **And the rolling ball is NOT scale-invariant.** ``skimage.restoration.rolling_ball``
+    # rolls a ball in **(x, y, INTENSITY)**, and its ``radius`` applies to **all three axes**.
+    # Change the intensity range and the same radius fits the background differently.
+    #
+    # Measured — the mean of the background-subtracted image, same input, same radius:
+    #
+    #     interactive       **0.0205**
+    #     batch (before)    **0.0493**   <- **2.4x more background removed**
+    #     batch (fixed)     **0.0205**   <- bit-for-bit identical to the recording
+    #
+    # ``_raw_counts`` in this very file already documents that ``_normalize_to_float`` is
+    # *"fatal for any intensity measurement"* — a **14x** swing in partition coefficient — and
+    # says it *"is correct for SEGMENTATION"*. **That last part is wrong**, and this is why:
+    # the rolling ball's radius has an intensity component, so pedestal subtraction changes
+    # the segmentation too.
+    return np.asarray(pre_process_image(
+        _raw_counts(arr), _br, _ws,
+        suppress_foreground=suppress_foreground,
+        suppression_params=suppression_params)).astype(np.float32)
+
+
 def replay_preprocessing(state: dict, image_path: Path, params: dict, output_dir: Path):
     """
     Run pre_process_image on ONLY the layer the GUI recorded as active
@@ -22,8 +77,6 @@ def replay_preprocessing(state: dict, image_path: Path, params: dict, output_dir
     preprocessed the segmentation channel does not also silently preprocess
     the fluorescence channel.
     """
-    from pycat.toolbox.image_processing_tools import pre_process_image
-
     data_instance = state['data_instance']
     # ball_radius: when this batch has per-image auto-estimation active, the
     # LIVE data_instance value must win over the recorded params snapshot — it
@@ -58,55 +111,7 @@ def replay_preprocessing(state: dict, image_path: Path, params: dict, output_dir
     on_fluor, _fluor_key = _active_layer_channel_role(state, active_name)
 
     def _proc(arr):
-        # run_pre_process_image (the interactive path) caps ball_radius/window_size
-        # to 5% of the image's own smaller dimension (min 4px) to avoid a
-        # MemoryError from an oversized rolling-ball structuring element -- but
-        # that cap is a LOCAL variable there, never written back to
-        # data_repository, so the recorded ball_radius/window_size above are the
-        # PRE-cap values. Replaying with the uncapped values silently applies a
-        # larger ball_radius/window_size than the GUI actually used whenever the
-        # cap would have triggered (small images, or after upscaling pushes
-        # ball_radius close to/above the threshold) -- a different LoG sigma,
-        # WBNS scale and CLAHE tile size, and the exact MemoryError risk the cap
-        # exists to prevent. The cap must be recomputed per-image (not reused
-        # from the recording) since a batch image's shape can differ from what
-        # was used interactively.
-        _max_radius = max(4, int(min(np.asarray(arr).shape[-2:]) * 0.05))
-        _br = min(ball_radius, _max_radius)
-        _ws = min(window_size, _max_radius * 2)
-
-        # ── BATCH MUST PASS RAW COUNTS. It was pre-normalising, and that is the bug. ──
-        #
-        # **Gable's report: batch segments the same image differently from the recording.**
-        #
-        # ``pre_process_image`` **normalises internally** — ``img = img / img.max()``. It expects
-        # **raw counts**, and it divides. Batch was calling ``_normalize_to_float`` first, which
-        # does ``(x - min) / (max - min)`` — **it subtracts the pedestal too.** The subsequent
-        # ``/max`` inside ``pre_process_image`` is then a **no-op**, so the two callers hand the
-        # rolling ball genuinely different images::
-        #
-        #     INTERACTIVE   img / max            ->  range **[0.425, 1.0]**
-        #     BATCH         (img-min)/(max-min)  ->  range **[0.000, 1.0]**
-        #
-        # **And the rolling ball is NOT scale-invariant.** ``skimage.restoration.rolling_ball``
-        # rolls a ball in **(x, y, INTENSITY)**, and its ``radius`` applies to **all three axes**.
-        # Change the intensity range and the same radius fits the background differently.
-        #
-        # Measured — the mean of the background-subtracted image, same input, same radius:
-        #
-        #     interactive       **0.0205**
-        #     batch (before)    **0.0493**   <- **2.4x more background removed**
-        #     batch (fixed)     **0.0205**   <- bit-for-bit identical to the recording
-        #
-        # ``_raw_counts`` in this very file already documents that ``_normalize_to_float`` is
-        # *"fatal for any intensity measurement"* — a **14x** swing in partition coefficient — and
-        # says it *"is correct for SEGMENTATION"*. **That last part is wrong**, and this is why:
-        # the rolling ball's radius has an intensity component, so pedestal subtraction changes
-        # the segmentation too.
-        return np.asarray(pre_process_image(
-            _raw_counts(arr), _br, _ws,
-            suppress_foreground=suppress_foreground,
-            suppression_params=suppression_params)).astype(np.float32)
+        return _preprocess_raw(arr, ball_radius, window_size, suppress_foreground, suppression_params)
 
     if on_fluor:
         fluor = state.get('fluorescence_image', state['image'])
@@ -188,6 +193,70 @@ def _selected_upscale_roles(state: dict, selected_names) -> set:
         if best_role is not None:
             roles.add(best_role)
     return roles
+
+
+def _upscale_named_channels(state, image, roles, upscale_all, upscale_factor) -> bool:
+    """Upscale the selected ``channels_by_name`` / ``channels_processed_by_name`` entries in place (replay_upscaling).
+    True if any was upscaled."""
+    from pycat.toolbox.image_processing_tools import upscale_image_interp
+
+    did_upscale = False
+    # Update channels_by_name (raw) and channels_processed_by_name (if a named
+    # channel's preprocessing/background-removal already ran BEFORE upscaling —
+    # an unusual order, but one the recorded config is free to produce) too --
+    # only the named channels that were actually part of the selection.
+    #
+    # ALIAS SYNC: a split-file (or channel_assignment) recording points
+    # state['fluorescence_image'] / state['preprocessed_fluorescence'] at the
+    # SAME array object as a channels_by_name / channels_processed_by_name
+    # entry (see _replay_split_file_companion, replay_open_image,
+    # replay_preprocessing). Reassigning the dict entry here would otherwise
+    # leave that other reference stale (pre-upscale, wrong shape) while the
+    # dict holds the new (upscaled) array -- two state slots that are
+    # supposed to mean "the same channel" silently diverge, producing a
+    # shape-mismatch crash wherever a later step resolves the channel through
+    # the stale reference instead of the dict (reported by Meet Raval: a
+    # split-file recording's Cellpose/cell_analysis crashed with a 512 vs
+    # 1024 boolean-index mismatch). Every state slot pointing at the SAME
+    # pre-upscale array is updated to the SAME new array, keeping the
+    # identity relationship intact.
+    for channels_key, fluor_slot in (('channels_by_name', 'fluorescence_image'),
+                                     ('channels_processed_by_name', 'preprocessed_fluorescence')):
+        channel_dict = state.get(channels_key) or {}
+        for name, arr in list(channel_dict.items()):
+            if arr is None or arr is image:
+                continue
+            if not (upscale_all or ('channel', name) in roles):
+                continue
+            cr, cc = arr.shape[-2], arr.shape[-1]
+            if cr >= 2048 or cc >= 2048:
+                continue
+            arr_up = upscale_image_interp(arr, cr, cc, upscale_factor=upscale_factor)
+            arr_up = np.clip(arr_up, 0, None).astype(np.float32)
+            channel_dict[name] = arr_up
+            if state.get(fluor_slot) is arr:
+                state[fluor_slot] = arr_up
+            did_upscale = True
+    return did_upscale
+
+
+def _scale_repository_for_upscale(data_instance, upscale_factor):
+    """The data_repository sizes follow the upscale (replay_upscaling)."""
+    data_instance.data_repository['cell_diameter'] = (
+        _get_data(data_instance, 'cell_diameter', 100) * upscale_factor
+    )
+    data_instance.data_repository['ball_radius'] = (
+        _get_data(data_instance, 'ball_radius', 50) * upscale_factor
+    )
+    # run_upscaling_func also scales object_size (image_processing/upscaling.py) --
+    # replay previously only synced cell_diameter/ball_radius/microns_per_pixel_sq,
+    # leaving object_size stale at its pre-upscale value for every batch run.
+    data_instance.data_repository['object_size'] = (
+        _get_data(data_instance, 'object_size', 50) * upscale_factor
+    )
+    data_instance.data_repository['microns_per_pixel_sq'] = (
+        _get_data(data_instance, 'microns_per_pixel_sq', 1.0) / (upscale_factor ** 2)
+    )
 
 
 def replay_upscaling(state: dict, image_path: Path, params: dict, output_dir: Path):
@@ -273,63 +342,15 @@ def replay_upscaling(state: dict, image_path: Path, params: dict, output_dir: Pa
             state['fluorescence_image'] = np.clip(fluor_up, 0, None).astype(np.float32)
             did_upscale = True
 
-    # Update channels_by_name (raw) and channels_processed_by_name (if a named
-    # channel's preprocessing/background-removal already ran BEFORE upscaling —
-    # an unusual order, but one the recorded config is free to produce) too --
-    # only the named channels that were actually part of the selection.
-    #
-    # ALIAS SYNC: a split-file (or channel_assignment) recording points
-    # state['fluorescence_image'] / state['preprocessed_fluorescence'] at the
-    # SAME array object as a channels_by_name / channels_processed_by_name
-    # entry (see _replay_split_file_companion, replay_open_image,
-    # replay_preprocessing). Reassigning the dict entry here would otherwise
-    # leave that other reference stale (pre-upscale, wrong shape) while the
-    # dict holds the new (upscaled) array -- two state slots that are
-    # supposed to mean "the same channel" silently diverge, producing a
-    # shape-mismatch crash wherever a later step resolves the channel through
-    # the stale reference instead of the dict (reported by Meet Raval: a
-    # split-file recording's Cellpose/cell_analysis crashed with a 512 vs
-    # 1024 boolean-index mismatch). Every state slot pointing at the SAME
-    # pre-upscale array is updated to the SAME new array, keeping the
-    # identity relationship intact.
-    for channels_key, fluor_slot in (('channels_by_name', 'fluorescence_image'),
-                                     ('channels_processed_by_name', 'preprocessed_fluorescence')):
-        channel_dict = state.get(channels_key) or {}
-        for name, arr in list(channel_dict.items()):
-            if arr is None or arr is image:
-                continue
-            if not (upscale_all or ('channel', name) in roles):
-                continue
-            cr, cc = arr.shape[-2], arr.shape[-1]
-            if cr >= 2048 or cc >= 2048:
-                continue
-            arr_up = upscale_image_interp(arr, cr, cc, upscale_factor=upscale_factor)
-            arr_up = np.clip(arr_up, 0, None).astype(np.float32)
-            channel_dict[name] = arr_up
-            if state.get(fluor_slot) is arr:
-                state[fluor_slot] = arr_up
-            did_upscale = True
+    if _upscale_named_channels(state, image, roles, upscale_all, upscale_factor):
+        did_upscale = True
 
     # data_repository scaling: once per click in the GUI (the first processed
     # layer's scale factor -- but every layer shares the same fixed 2x factor,
     # so which one triggered it is immaterial); applied here once if ANYTHING
     # in this step actually got upscaled.
     if did_upscale and params.get('update_data_class', True):
-        data_instance.data_repository['cell_diameter'] = (
-            _get_data(data_instance, 'cell_diameter', 100) * upscale_factor
-        )
-        data_instance.data_repository['ball_radius'] = (
-            _get_data(data_instance, 'ball_radius', 50) * upscale_factor
-        )
-        # run_upscaling_func also scales object_size (image_processing/upscaling.py) --
-        # replay previously only synced cell_diameter/ball_radius/microns_per_pixel_sq,
-        # leaving object_size stale at its pre-upscale value for every batch run.
-        data_instance.data_repository['object_size'] = (
-            _get_data(data_instance, 'object_size', 50) * upscale_factor
-        )
-        data_instance.data_repository['microns_per_pixel_sq'] = (
-            _get_data(data_instance, 'microns_per_pixel_sq', 1.0) / (upscale_factor ** 2)
-        )
+        _scale_repository_for_upscale(data_instance, upscale_factor)
 
     _save_array(state['image'], output_dir / f"{image_path.stem}_upscaled.tiff")
     selected = params.get('selected_layers', params.get('active_layer', '?'))
@@ -361,7 +382,7 @@ def replay_calibration_correction(state: dict, image_path: Path, params: dict, o
     ref = to_unit_float32(ref_raw, ref_raw.dtype)
     if ref.ndim == 3:
         ref = np.median(ref, axis=0)
-    # RAW counts: the rolling ball's radius has an INTENSITY component (see _proc, above), and
+    # RAW counts: the rolling ball's radius has an INTENSITY component (see _preprocess_raw, above), and
     # `_normalize_to_float` subtracts the pedestal. The GUI passes the raw layer.
     img = _raw_counts(state.get('preprocessed', state['image']))
     if img.shape[-2:] != ref.shape[-2:]:

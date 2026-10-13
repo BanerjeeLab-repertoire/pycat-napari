@@ -28,11 +28,14 @@ def _scene():
 
 
 # (method, n_droplets, labelled_px, unrefined_px) — pinned on the fixed scene.
+# The scene's truth is 113 droplet px (8x8 + 7x7). `spot` re-pinned at 1.7.003: 159 -> 107 since 1.6.460, whose
+# raw-image boundary re-fit (on by default in segment_subcellular_objects) re-places each edge at the object's own
+# half-maximum. IoU against the truth went from <= 0.71 to 0.947 — the pin was stale, not the method.
 _EXPECTED = [
     ('otsu',      2,  113,  113),
     ('multiotsu', 11, 1724, 1724),
     ('sauvola',   16, 723,  723),
-    ('spot',      2,  159,  367),
+    ('spot',      2,  107,  367),
 ]
 
 

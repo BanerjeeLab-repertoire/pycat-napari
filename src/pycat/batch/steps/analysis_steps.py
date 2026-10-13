@@ -262,6 +262,27 @@ def _apply_recorded_contrast_floor(data_instance, refined_mask, original_image, 
     return above > 0
 
 
+def _global_image_stats(original_image, labeled_cells, min_spot_radius):
+    """Absolute-intensity punctate gate stats for replay_condensate_segmentation.
+
+    run_segment_subcellular_objects (the interactive path) computes this
+    ONCE globally, before any per-cell/per-crop renormalisation, and passes
+    it into every per-cell call -- it's what lets segment_subcellular_objects
+    tell "this cell is genuinely empty" apart from "this cell's noise got
+    stretched to look like signal" by CLAHE. Replay previously never
+    computed or passed it, so image_stats defaulted to None and the
+    phantom-cell gate was silently disabled for every batch run --
+    systematically more permissive on empty/noisy cells than the
+    interactive session, independent of any single recorded parameter.
+    compute_image_intensity_stats returns position-independent scalars
+    (bg_median/bg_sigma/smooth_sigma), so the same globally-computed dict
+    is valid for both the bbox-crop and full-image branches.
+    """
+    from pycat.toolbox.segmentation.intensity import compute_image_intensity_stats
+    return compute_image_intensity_stats(original_image, labeled_cells,
+                                         smooth_sigma=max(0.5, min_spot_radius / 2.0))
+
+
 def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, output_dir: Path):
     """
     Run segment_subcellular_objects cell-by-cell (the inner loop from
@@ -270,7 +291,6 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
     from pycat.toolbox.segmentation_tools import (
         segment_subcellular_objects, cell_mask_stretching
     )
-    from pycat.toolbox.segmentation.intensity import compute_image_intensity_stats
     import pandas as pd
 
     if state.get('no_cells'):
@@ -310,30 +330,27 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
     boundary_source = np.zeros(labeled_cells.shape, dtype=np.uint8)
     ring_rejected = np.zeros(labeled_cells.shape, dtype=bool)
 
-    # ── Absolute-intensity punctate gate ────────────────────────────────
-    # run_segment_subcellular_objects (the interactive path) computes this
-    # ONCE globally, before any per-cell/per-crop renormalisation, and passes
-    # it into every per-cell call -- it's what lets segment_subcellular_objects
-    # tell "this cell is genuinely empty" apart from "this cell's noise got
-    # stretched to look like signal" by CLAHE. Replay previously never
-    # computed or passed it, so image_stats defaulted to None and the
-    # phantom-cell gate was silently disabled for every batch run --
-    # systematically more permissive on empty/noisy cells than the
-    # interactive session, independent of any single recorded parameter.
-    # compute_image_intensity_stats returns position-independent scalars
-    # (bg_median/bg_sigma/smooth_sigma), so the same globally-computed dict
-    # is valid for both the bbox-crop and full-image branches below.
     min_spot_radius = params.get('min_spot_radius', 2)
     refit_kw = _condensate_refit_kwargs(params)
-    image_stats = compute_image_intensity_stats(
-        original_image, labeled_cells,
-        smooth_sigma=max(0.5, min_spot_radius / 2.0))
+    image_stats = _global_image_stats(original_image, labeled_cells, min_spot_radius)
 
     # Per-cell bounding boxes from auto_crop_roi step (if it ran).
     # Processing each cell in its own tight crop avoids operating on the
     # full 2048×2048 image for every cell — substantial speedup for images
     # with sparse cells surrounded by large background regions.
     cell_bboxes = state.get('cell_bboxes')   # {label: (y0,y1,x0,x1)} or None
+    # The recorded parameters, identical for the cropped and full-image branches below.
+    seg_kw = dict(
+        kurtosis_threshold=params.get('kurtosis_threshold', -3.0),
+        local_snr_threshold=params.get('local_snr_threshold', 1.0),
+        global_snr_threshold=params.get('global_snr_threshold', 1.0),
+        intensity_hwhm_scale=params.get('intensity_hwhm_scale', 1.17),
+        max_area_fraction=params.get('max_area_fraction', 0.25),
+        min_spot_radius=min_spot_radius, image_stats=image_stats,
+        punctate_gate=params.get('punctate_gate', True),
+        punctate_gate_sigma=params.get('punctate_gate_sigma', 5.0),
+        punctate_gate_abs_sigma=params.get('punctate_gate_abs_sigma', 3.0),
+        **refit_kw)
 
     for label in unique_labels:
         cell_mask_holder = (labeled_cells == label).astype(bool)
@@ -347,17 +364,7 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
 
             refined_crop, unrefined_crop = segment_subcellular_objects(
                 orig_crop, proc_crop, mask_crop, label, ball_radius, cell_df,
-                kurtosis_threshold=params.get('kurtosis_threshold', -3.0),
-                local_snr_threshold=params.get('local_snr_threshold', 1.0),
-                global_snr_threshold=params.get('global_snr_threshold', 1.0),
-                intensity_hwhm_scale=params.get('intensity_hwhm_scale', 1.17),
-                max_area_fraction=params.get('max_area_fraction', 0.25),
-                min_spot_radius=min_spot_radius,
-                image_stats=image_stats,
-                punctate_gate=params.get('punctate_gate', True),
-                punctate_gate_sigma=params.get('punctate_gate_sigma', 5.0),
-                punctate_gate_abs_sigma=params.get('punctate_gate_abs_sigma', 3.0),
-                **refit_kw, boundary_source=boundary_source[y0:y1, x0:x1],
+                **seg_kw, boundary_source=boundary_source[y0:y1, x0:x1],
                 ring_rejected=ring_rejected[y0:y1, x0:x1],
             )
             # Stitch results back into full-image mask
@@ -368,17 +375,7 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
             refined, unrefined = segment_subcellular_objects(
                 original_image.copy(), CMS_img.copy(),
                 cell_mask_holder, label, ball_radius, cell_df,
-                kurtosis_threshold=params.get('kurtosis_threshold', -3.0),
-                local_snr_threshold=params.get('local_snr_threshold', 1.0),
-                global_snr_threshold=params.get('global_snr_threshold', 1.0),
-                intensity_hwhm_scale=params.get('intensity_hwhm_scale', 1.17),
-                max_area_fraction=params.get('max_area_fraction', 0.25),
-                min_spot_radius=min_spot_radius,
-                image_stats=image_stats,
-                punctate_gate=params.get('punctate_gate', True),
-                punctate_gate_sigma=params.get('punctate_gate_sigma', 5.0),
-                punctate_gate_abs_sigma=params.get('punctate_gate_abs_sigma', 3.0),
-                **refit_kw, boundary_source=boundary_source, ring_rejected=ring_rejected,
+                **seg_kw, boundary_source=boundary_source, ring_rejected=ring_rejected,
             )
             total_puncta_mask |= unrefined
             total_refined_puncta_mask |= refined

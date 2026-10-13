@@ -43,6 +43,30 @@ def auto_object_size_valid(workflow: str) -> bool:
     return str(workflow) in AUTO_OBJECT_SIZE_VALID_WORKFLOWS
 
 
+def _brightest_class_threshold(tophat):
+    """The lower edge of the brightest of 3 Otsu classes of the positive top-hat response
+    (estimate_object_size_px; see its WHY MULTI-OTSU)."""
+    try:
+        positive = tophat[tophat > 0]
+        if positive.size < 10:
+            raise ValueError('too few positive top-hat pixels for multi-Otsu')
+        # 3 classes: background / ambiguous texture / real objects -- keep
+        # only the brightest class, discarding the middle one instead of
+        # forcing a single 2-class cut through it.
+        return sk.filters.threshold_multiotsu(positive, classes=3)[-1]
+    except ValueError:  # too few / too uniform values for 3 classes (skimage and the check above both raise this)
+        try:
+            return sk.filters.threshold_otsu(tophat[tophat > 0])
+        except Exception:
+            return sk.filters.threshold_otsu(tophat)
+
+
+def _equiv_diam(p):
+    # skimage renamed equivalent_diameter → equivalent_diameter_area (0.26+).
+    d = getattr(p, 'equivalent_diameter_area', None)
+    return d if d is not None else p.equivalent_diameter
+
+
 def estimate_object_size_px(image, workflow=None, min_area_px=4,
                             tophat_radius=None, return_diagnostics=False):
     """Estimate a representative object diameter (px) and ball_radius from a
@@ -141,28 +165,10 @@ def estimate_object_size_px(image, workflow=None, min_area_px=4,
         return (result if not return_diagnostics
                 else {**result, 'diagnostics': {'tophat': tophat}})
 
-    try:
-        positive = tophat[tophat > 0]
-        if positive.size < 10:
-            raise ValueError('too few positive top-hat pixels for multi-Otsu')
-        # 3 classes: background / ambiguous texture / real objects -- keep
-        # only the brightest class, discarding the middle one instead of
-        # forcing a single 2-class cut through it (see WHY MULTI-OTSU above).
-        thr = sk.filters.threshold_multiotsu(positive, classes=3)[-1]
-    except Exception:  # broad-ok: robustness_net -- too few/uniform values for 3 classes
-        try:
-            thr = sk.filters.threshold_otsu(tophat[tophat > 0])
-        except Exception:
-            thr = sk.filters.threshold_otsu(tophat)
-    fg = tophat > thr
+    fg = tophat > _brightest_class_threshold(tophat)
 
     labels = sk.measure.label(fg)
     props = sk.measure.regionprops(labels)
-
-    def _equiv_diam(p):
-        # skimage renamed equivalent_diameter → equivalent_diameter_area (0.26+).
-        d = getattr(p, 'equivalent_diameter_area', None)
-        return d if d is not None else p.equivalent_diameter
 
     diams = np.array([_equiv_diam(p) for p in props
                       if p.area >= min_area_px], dtype=float)
@@ -215,10 +221,6 @@ def estimate_object_size_px_brightfield(image, min_area_px=4,
     fg = ndi.binary_fill_holes(sk.morphology.binary_closing(
         fg, sk.morphology.disk(2)))
     labels = sk.measure.label(fg)
-
-    def _equiv_diam(p):
-        d = getattr(p, 'equivalent_diameter_area', None)
-        return d if d is not None else p.equivalent_diameter
     diams = np.array([_equiv_diam(p) for p in sk.measure.regionprops(labels)
                       if p.area >= min_area_px], dtype=float)
     if diams.size == 0:
