@@ -21,13 +21,13 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 # Skip the whole module cleanly if the GUI stack isn't present.
-pytest.importorskip("PyQt5", reason="PyQt5 not installed")
+pytest.importorskip("qtpy", reason="no Qt binding installed")
 napari = pytest.importorskip("napari", reason="napari not installed")
 
 
 @pytest.fixture(scope="module")
 def qapp():
-    from PyQt5.QtWidgets import QApplication
+    from qtpy.QtWidgets import QApplication
     app = QApplication.instance() or QApplication([])
     yield app
 

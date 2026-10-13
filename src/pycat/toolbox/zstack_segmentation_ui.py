@@ -25,12 +25,12 @@ from napari.utils.notifications import (
     show_info    as napari_show_info,
     show_warning as napari_show_warning,
 )
-from PyQt5.QtWidgets import (
+from qtpy.QtWidgets import (
     QVBoxLayout, QWidget, QPushButton, QGroupBox, QFormLayout,
     QCheckBox, QSpinBox, QDoubleSpinBox, QLabel, QProgressBar,
     QScrollArea, QSizePolicy,
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from qtpy.QtCore import Qt, QThread, Signal
 try:
     from pycat.ui.field_status import label_with_circle
 except Exception:
@@ -38,8 +38,8 @@ except Exception:
 
 
 class _ZWorker(QThread):
-    finished = pyqtSignal(object)
-    error    = pyqtSignal(str)
+    finished = Signal(object)
+    error    = Signal(str)
     def __init__(self, fn):
         super().__init__(); self._fn = fn
     def run(self):

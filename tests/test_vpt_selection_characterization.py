@@ -44,14 +44,14 @@ def immediate_qtimer(monkeypatch):
     Only the `QTimer` *attribute* is replaced, not the module: `vpt_ui` imports plenty else from
     `PyQt5.QtCore`, and swapping the whole module out just breaks the import under test.
     """
-    pytest.importorskip("PyQt5.QtCore")
+    pytest.importorskip("qtpy.QtCore")
 
     class _QTimer:
         @staticmethod
         def singleShot(_ms, fn):
             fn()
 
-    monkeypatch.setattr('PyQt5.QtCore.QTimer', _QTimer)
+    monkeypatch.setattr('qtpy.QtCore.QTimer', _QTimer)
     return _QTimer
 
 
@@ -181,8 +181,8 @@ def test_WITHOUT_Qt_the_release_falls_back_to_SYNCHRONOUS(monkeypatch):
     `from PyQt5.QtCore import QTimer` is an attribute lookup, so deleting the attribute is what
     makes the import raise — without disturbing everything else `vpt_ui` imports from that module.
     """
-    pytest.importorskip("PyQt5.QtCore")
-    monkeypatch.delattr('PyQt5.QtCore.QTimer')
+    pytest.importorskip("qtpy.QtCore")
+    monkeypatch.delattr('qtpy.QtCore.QTimer')
 
     d = _Dispatcher()
     select = _select_track_of(d)

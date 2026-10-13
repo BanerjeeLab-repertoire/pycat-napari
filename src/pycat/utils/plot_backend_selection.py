@@ -31,8 +31,15 @@ def pyqtgraph_available() -> bool:
 
 
 def qtwebengine_available() -> bool:
-    """QtWebEngine backs Plotly's full click-to-napari. Try both Qt bindings PyCAT may use."""
-    return _spec_available('PyQt5.QtWebEngineWidgets') or _spec_available('qtpy.QtWebEngineWidgets')
+    """QtWebEngine backs Plotly's full click-to-napari. Asked of the INSTALLED binding's own module: qtpy ships a
+    ``qtpy.QtWebEngineWidgets`` wrapper whether or not the binding has WebEngine, so probing qtpy's name (as this
+    used to) reported True on every install. (PyQt5: PyQtWebEngine; PySide6 >= 6.12: the PySide6-WebEngine
+    package.)"""
+    try:
+        from qtpy import API_NAME
+    except Exception:  # broad-ok: optional_probe — no Qt binding at all just means 'not available'
+        return False
+    return _spec_available(f'{API_NAME}.QtWebEngineWidgets')
 
 
 def choose_scatter_backend(n_points, *, threshold=DEFAULT_SCATTER_THRESHOLD, pyqtgraph=None) -> str:

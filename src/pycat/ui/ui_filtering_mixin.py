@@ -14,8 +14,8 @@ self.on_general_button_clicked, self._add_widget_to_layout_or_dock, etc.).
 import math
 
 import napari
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import (
+from qtpy.QtCore import Qt
+from qtpy.QtWidgets import (
     QPushButton, QLabel, QVBoxLayout, QHBoxLayout, QLineEdit, QWidget,
     QComboBox, QSlider, QScrollArea, QSizePolicy)
 

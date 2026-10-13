@@ -134,7 +134,7 @@ def install_show_results_action(central_manager):
     silently starting a long analysis. Installed from ``central_manager``; returns the ``QAction`` or ``None``
     (headless)."""
     try:
-        from PyQt5.QtWidgets import QAction
+        from qtpy.QtWidgets import QAction
     except Exception:      # broad-ok: optional_probe — no Qt (headless) → no action
         return None
     viewer = getattr(central_manager, "viewer", None)

@@ -548,7 +548,7 @@ def _build_spatial_randomness_form(ui_instance):
     the same construction order they were created inline.
     """
     import napari
-    from PyQt5.QtWidgets import (
+    from qtpy.QtWidgets import (
         QGroupBox, QFormLayout, QLabel, QSpinBox, QPushButton, QProgressBar,
         QComboBox, QSizePolicy)
 
@@ -672,8 +672,8 @@ def _add_spatial_randomness(ui_instance, layout=None, separate_widget=False):
     if layout is not None and not separate_widget:
         layout.addWidget(grp)
     else:
-        from PyQt5.QtWidgets import QVBoxLayout, QWidget, QScrollArea
-        from PyQt5.QtWidgets import QSizePolicy as _QSP
+        from qtpy.QtWidgets import QVBoxLayout, QWidget, QScrollArea
+        from qtpy.QtWidgets import QSizePolicy as _QSP
         w = QWidget(); vl = QVBoxLayout(w); vl.addWidget(grp)
         w.setSizePolicy(_QSP.Expanding, _QSP.Minimum)
         try:

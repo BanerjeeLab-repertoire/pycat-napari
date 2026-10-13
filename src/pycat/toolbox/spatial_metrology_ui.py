@@ -21,18 +21,18 @@ from napari.utils.notifications import (
     show_info    as napari_show_info,
     show_warning as napari_show_warning,
 )
-from PyQt5.QtWidgets import (
+from qtpy.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QGroupBox,
     QFormLayout, QCheckBox, QSpinBox, QDoubleSpinBox, QLabel,
     QProgressBar, QComboBox, QSizePolicy,
 )
-from PyQt5.QtCore import QThread, pyqtSignal
+from qtpy.QtCore import QThread, Signal
 
 
 class _SpatialWorker(QThread):
-    progress = pyqtSignal(int, int)
-    finished = pyqtSignal(object)    # dict of results per cell
-    error    = pyqtSignal(str)
+    progress = Signal(int, int)
+    finished = Signal(object)    # dict of results per cell
+    error    = Signal(str)
 
     def __init__(self, coords_df, labeled_cells, microns_per_pixel,
                  checks, roi_coords, roi_type, n_radial_bins, kwargs):
@@ -251,8 +251,8 @@ def _add_spatial_metrology(ui_instance, layout=None, separate_widget=False):
         _prefix = ''
     _step_hdr = None
     if _prefix:
-        from PyQt5.QtWidgets import QLabel as _QLabel
-        from PyQt5.QtCore import Qt as _Qt
+        from qtpy.QtWidgets import QLabel as _QLabel
+        from qtpy.QtCore import Qt as _Qt
         _step_hdr = _QLabel(
             f"<span style='font-weight:800;'>{_prefix.strip()}</span> "
             f"<span style='font-weight:600;'>Spatial Metrology</span>")
@@ -471,7 +471,7 @@ def _add_spatial_metrology(ui_instance, layout=None, separate_widget=False):
     if _step_hdr is not None:
         outer.addWidget(_step_hdr)
     # Optional block: reveal checkbox (off by default) shows/hides the analysis box.
-    from PyQt5.QtWidgets import QCheckBox as _QCheckBox
+    from qtpy.QtWidgets import QCheckBox as _QCheckBox
     _reveal_cb = _QCheckBox("Show spatial metrology (optional)")
     _reveal_cb.setChecked(False)
     _reveal_cb.setToolTip("Optional spatial statistics on condensate positions. "

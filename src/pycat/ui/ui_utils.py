@@ -18,9 +18,9 @@ Date
 # Third party imports
 import pandas as pd
 import napari
-from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QScrollArea, QWidget, QLabel, QTableView, 
+from qtpy.QtWidgets import (QDialog, QVBoxLayout, QScrollArea, QWidget, QLabel, QTableView, 
                              QPushButton, QMenu, QFileDialog, QApplication, QAbstractItemView)
-from PyQt5.QtCore import Qt, QAbstractTableModel
+from qtpy.QtCore import Qt, QAbstractTableModel
 
 
 class DataFrameModel(QAbstractTableModel):

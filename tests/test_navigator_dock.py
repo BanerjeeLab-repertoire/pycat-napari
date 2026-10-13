@@ -137,7 +137,7 @@ def test_the_plan_re_gates_on_a_viewer_event_and_the_run_reason_updates(qtbot):
 @pytest.mark.integration
 def test_the_navigator_shows_a_data_observations_section(qtbot):
     from types import SimpleNamespace
-    from PyQt5.QtWidgets import QLabel
+    from qtpy.QtWidgets import QLabel
     from pycat.ui.navigator_dock import build_navigator_widget
     from pycat.navigator.session import NavigatorSession
 
@@ -164,7 +164,7 @@ def test_the_guided_run_note_carries_the_gate_respecting_order():
 
 @pytest.mark.integration
 def test_the_save_as_template_button_persists_the_answered_plan(qtbot, tmp_path, monkeypatch):
-    from PyQt5.QtWidgets import QInputDialog, QPushButton
+    from qtpy.QtWidgets import QInputDialog, QPushButton
     from pycat.ui.navigator_dock import build_navigator_widget
     from pycat.navigator.session import NavigatorSession
     from pycat.utils.user_settings import UserSettings
@@ -255,7 +255,7 @@ def test_the_param_review_form_renders_and_edits_flow_to_the_review(qtbot):
     """Phase 2: the plan view surfaces the adapter-covered step's material parameter as an editable control,
     seeded at its grounded default; editing it updates the ParamReview the Run will pass."""
     from types import SimpleNamespace
-    from PyQt5.QtWidgets import QWidget, QVBoxLayout, QSpinBox
+    from qtpy.QtWidgets import QWidget, QVBoxLayout, QSpinBox
     from pycat.ui.navigator_dock import build_navigator_widget, _add_param_review
     from pycat.navigator.session import NavigatorSession
     from pycat.navigator.planner import Plan, PlanStep

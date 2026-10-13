@@ -5,8 +5,8 @@ MenuManager methods are thin wrappers that call these; the menu structure is unc
 """
 from __future__ import annotations
 
-from PyQt5.QtWidgets import QDoubleSpinBox, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QRadioButton, QPushButton, QLineEdit, QWidget, QComboBox, QSlider, QScrollArea, QSizePolicy, QAction, QTabWidget, QToolButton, QFrame
-from PyQt5.QtCore import Qt, QObject
+from qtpy.QtWidgets import QDoubleSpinBox, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QRadioButton, QPushButton, QLineEdit, QWidget, QComboBox, QSlider, QScrollArea, QSizePolicy, QAction, QTabWidget, QToolButton, QFrame
+from qtpy.QtCore import Qt, QObject
 
 
 
@@ -65,7 +65,7 @@ def _hide_napari_native_menus(self, hidden_default=True):
 
     # Build the leftmost toggle that shows / hides the napari menus.
     try:
-        from PyQt5.QtGui import QFont as _QFont
+        from qtpy.QtGui import QFont as _QFont
         self._napari_toggle_action = QAction('\u2630 napari',
                                              self.viewer.window._qt_window)
         self._napari_toggle_action.setToolTip(
@@ -209,9 +209,9 @@ def _disable_napari_open_actions(self):
         # Secondary: also sweep any QActions parented under the window
         # (older napari where actions ARE window children).
         try:
-            from PyQt5.QtGui import QAction as _QA
+            from qtpy.QtGui import QAction as _QA
         except Exception:
-            from PyQt5.QtWidgets import QAction as _QA
+            from qtpy.QtWidgets import QAction as _QA
         try:
             for act in window.findChildren(_QA):
                 try:

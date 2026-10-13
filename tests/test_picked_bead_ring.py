@@ -29,7 +29,7 @@ pytestmark = pytest.mark.base
 @pytest.fixture
 def immediate_qtimer(monkeypatch):
     """Run timer callbacks synchronously, and record that one was armed."""
-    pytest.importorskip("PyQt5.QtCore")
+    pytest.importorskip("qtpy.QtCore")
     armed = []
 
     class _QTimer:
@@ -64,7 +64,7 @@ def immediate_qtimer(monkeypatch):
         def singleShot(_ms, fn):
             fn()
 
-    monkeypatch.setattr('PyQt5.QtCore.QTimer', _QTimer)
+    monkeypatch.setattr('qtpy.QtCore.QTimer', _QTimer)
     return armed
 
 

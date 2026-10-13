@@ -64,6 +64,7 @@ PyCAT-Napari provides a comprehensive suite of tools for biological image analys
   > ⚠️ **Important**: PyCAT-Napari requires Python 3.12. Python 3.13 and newer are not yet supported. Earlier versions, including 3.9, are no longer supported as of v1.5.39. 
 - RAM: 8GB (16GB recommended; large time-series/Z-stack acquisitions benefit from more)
 - Disk Space: ~100MB (including dependencies); optional TrackMate integration downloads an additional ~500MB–1GB Fiji distribution on first use
+- **Qt**: PySide6 (installed automatically). Since 1.7.0 PyCAT talks to Qt only through [qtpy](https://github.com/spyder-ide/qtpy), so it no longer depends on PyQt5. Upgrading an older environment leaves PyQt5 installed beside PySide6; `run-pycat` launches on PySide6 anyway, and you can remove the old binding with `pip uninstall pyqt5 pyqt5-qt5 pyqt5-sip`. To launch on PyQt5 deliberately, set `QT_API=pyqt5`.
 - GPU: Not required — PyCAT runs entirely on CPU by default. An NVIDIA GPU with CUDA is optional and used automatically when available (Cellpose segmentation, and rolling-ball/morphological operations via the `[gpu]` extra) for faster processing.
 
 ## Getting Started
@@ -808,7 +809,7 @@ If you use PyCAT-Napari in your research, please cite:
    - **Fix:** confirm your Python with `python --version` (it must be `3.12.x`), and if not, recreate the environment: `conda create -n pycat-env python=3.12` then activate it before installing.
 
 6. **GUI Issues**
-   - Check PyQt5 installation
+   - Check the Qt installation: PyCAT uses PySide6 through qtpy (`python -c "import qtpy; print(qtpy.API_NAME)"` should print `PySide6`)
    - Update graphics drivers
    - Verify you're not running the program from jupyter notebook
 

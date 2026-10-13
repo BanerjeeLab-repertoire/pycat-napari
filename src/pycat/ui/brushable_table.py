@@ -25,8 +25,8 @@ select `label`) still works exactly as it does today, by position — and says s
 
 from __future__ import annotations
 
-from PyQt5.QtCore import QSortFilterProxyModel, Qt
-from PyQt5.QtWidgets import QAbstractItemView, QTableView
+from qtpy.QtCore import QSortFilterProxyModel, Qt
+from qtpy.QtWidgets import QAbstractItemView, QTableView
 
 from pycat.utils.entity_ref import ENTITY_ID_COLUMN, has_entity_ids, linkability_of
 from pycat.utils.general_utils import debug_log

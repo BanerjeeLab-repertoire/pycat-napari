@@ -26,18 +26,18 @@ from napari.utils.notifications import (
     show_info    as napari_show_info,
     show_warning as napari_show_warning,
 )
-from PyQt5.QtWidgets import (
+from qtpy.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QGroupBox, QFormLayout,
     QCheckBox, QSpinBox, QDoubleSpinBox, QLabel, QProgressBar,
     QScrollArea, QSizePolicy, QRadioButton, QComboBox, QLineEdit,
 )
-from PyQt5.QtCore import QThread, pyqtSignal, Qt
+from qtpy.QtCore import QThread, Signal, Qt
 
 
 class _VPTWorker(QThread):
-    finished = pyqtSignal(object)
-    error    = pyqtSignal(str)
-    progress = pyqtSignal(int, int)
+    finished = Signal(object)
+    error    = Signal(str)
+    progress = Signal(int, int)
     def __init__(self, fn):
         super().__init__(); self._fn = fn
     def run(self):

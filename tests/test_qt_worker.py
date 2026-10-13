@@ -114,10 +114,10 @@ def test_PROGRESS_from_the_worker_reaches_the_main_thread(qtbot):
         return len(seen)
 
     # The dialog is internal; observe the same crossing the dialog relies on.
-    from PyQt5.QtCore import QObject, pyqtSignal
+    from qtpy.QtCore import QObject, Signal
 
     class _Probe(QObject):
-        ping = pyqtSignal(int, int)
+        ping = Signal(int, int)
 
     probe = _Probe()
     probe.ping.connect(lambda d, t: seen.append(threading.current_thread().ident))
@@ -170,7 +170,7 @@ def test_materialize_off_thread_DECODES_and_returns_the_array(monkeypatch):
     # `materialize_off_thread` decodes through it — so this test needs Qt importable even though the
     # code path it exercises is the synchronous headless one. Skip cleanly on a no-Qt runner rather
     # than failing the headless core suite.
-    pytest.importorskip("PyQt5", reason="materialize_off_thread imports file_io, which needs PyQt5")
+    pytest.importorskip("qtpy", reason="materialize_off_thread imports file_io, which needs Qt")
     import pycat.file_io.file_io as fio
     from pycat.utils.qt_worker import materialize_off_thread
 
@@ -185,7 +185,7 @@ def test_materialize_off_thread_PASSES_kwargs_and_a_progress_callback(monkeypatc
     """`dtype=` (and any other kwarg) reach `materialize_stack`, and it always gets a callable
     `progress_callback` — a lazy decoder calls it per frame and must not get `None`."""
     import numpy as np
-    pytest.importorskip("PyQt5", reason="materialize_off_thread imports file_io, which needs PyQt5")
+    pytest.importorskip("qtpy", reason="materialize_off_thread imports file_io, which needs Qt")
     import pycat.file_io.file_io as fio
     from pycat.utils.qt_worker import materialize_off_thread
 
@@ -209,7 +209,7 @@ def test_materialize_off_thread_PASSES_kwargs_and_a_progress_callback(monkeypatc
 def test_materialize_off_thread_survives_a_viewer_with_no_qt_window(monkeypatch):
     """The `viewer=` is only for parenting the dialog. A fake viewer (or one whose `window` chain is
     absent) must not break the decode — the parent just resolves to None."""
-    pytest.importorskip("PyQt5", reason="materialize_off_thread imports file_io, which needs PyQt5")
+    pytest.importorskip("qtpy", reason="materialize_off_thread imports file_io, which needs Qt")
     import pycat.file_io.file_io as fio
     from pycat.utils.qt_worker import materialize_off_thread
 

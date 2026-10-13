@@ -32,14 +32,14 @@ def immediate_qtimer(monkeypatch):
     every later pick would be silently swallowed — a test that skipped this would
     characterize a deadlock rather than the guard.
     """
-    pytest.importorskip("PyQt5.QtCore")
+    pytest.importorskip("qtpy.QtCore")
 
     class _QTimer:
         @staticmethod
         def singleShot(_ms, fn):
             fn()
 
-    monkeypatch.setattr('PyQt5.QtCore.QTimer', _QTimer)
+    monkeypatch.setattr('qtpy.QtCore.QTimer', _QTimer)
     return _QTimer
 
 

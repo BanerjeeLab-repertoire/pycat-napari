@@ -30,12 +30,12 @@ import napari
 
 from pycat.utils.general_utils import debug_log
 from napari.utils.notifications import show_warning as napari_show_warning
-from PyQt5.QtWidgets import (
+from qtpy.QtWidgets import (
     QDoubleSpinBox,
     QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QRadioButton, QPushButton, 
     QLineEdit, QWidget, QComboBox, QSlider, QScrollArea, QSizePolicy, QAction,
     QTabWidget, QToolButton, QFrame)
-from PyQt5.QtCore import Qt, QObject
+from qtpy.QtCore import Qt, QObject
 
 # Local application imports
 from pycat.toolbox.image_processing_tools import (

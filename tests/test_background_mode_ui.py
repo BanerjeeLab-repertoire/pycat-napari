@@ -12,7 +12,7 @@ import pytest
 
 @pytest.mark.integration
 def test_the_region_mode_fires_the_guardrail_and_records_the_mode(qtbot, monkeypatch):
-    from PyQt5.QtWidgets import QComboBox, QPushButton, QVBoxLayout
+    from qtpy.QtWidgets import QComboBox, QPushButton, QVBoxLayout
     import napari
     import pycat.toolbox.partition_enrichment_tools as pet
 
@@ -60,7 +60,7 @@ def test_the_region_mode_fires_the_guardrail_and_records_the_mode(qtbot, monkeyp
             dd = QComboBox(); dd.addItems(['None', 'client', 'dense', 'bg_region']); return dd
         def _record(self, *a, **k): pass
 
-    from PyQt5.QtWidgets import QGroupBox
+    from qtpy.QtWidgets import QGroupBox
     stub = _Stub()
     root = QVBoxLayout()
     pet._add_client_enrichment(stub, layout=root, separate_widget=False)

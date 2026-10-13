@@ -10,7 +10,7 @@ Toolbox widget for fibril / filament quantification.  Four panels:
 """
 
 import napari
-from PyQt5.QtWidgets import (
+from qtpy.QtWidgets import (
     QVBoxLayout, QWidget, QGroupBox, QFormLayout, QLabel,
     QPushButton, QDoubleSpinBox, QSizePolicy, QTabWidget)
 

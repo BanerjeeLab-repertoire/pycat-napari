@@ -23,7 +23,7 @@ def open_comparative_figures_dialog(central_manager, viewer):
     """Pick a consolidated_long.csv, choose measurement / condition / unit, render the superplot with
     single-entity brushing, and show the summary numbers behind it."""
     import pandas as pd
-    from PyQt5.QtWidgets import (
+    from qtpy.QtWidgets import (
         QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QComboBox, QCheckBox,
         QPushButton, QLabel, QFileDialog, QTableWidget, QTableWidgetItem, QMessageBox)
     from matplotlib.figure import Figure
@@ -117,7 +117,7 @@ def _build_refine_row(refiner, redraw, parent):
     and re-applies presentation via the controller (never recomputing the comparison); Export writes the
     bundle of exactly what the preview shows. Returns a QWidget; its controls are exposed on ``._controls``
     for wiring/tests. This is UX over existing utilities — no new figure capability."""
-    from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QLabel, QComboBox, QLineEdit, QCheckBox,
+    from qtpy.QtWidgets import (QWidget, QHBoxLayout, QLabel, QComboBox, QLineEdit, QCheckBox,
                                  QPushButton, QFileDialog)
     w = QWidget(); row = QHBoxLayout(w); row.setContentsMargins(0, 0, 0, 0)
     row.addWidget(QLabel("Refine:"))
@@ -169,7 +169,7 @@ def _build_refine_row(refiner, redraw, parent):
 
 
 def _fill_table(table, summary):
-    from PyQt5.QtWidgets import QTableWidgetItem
+    from qtpy.QtWidgets import QTableWidgetItem
     cols = list(summary.columns)
     table.setColumnCount(len(cols)); table.setRowCount(len(summary))
     table.setHorizontalHeaderLabels(cols)

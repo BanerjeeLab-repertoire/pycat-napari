@@ -49,8 +49,8 @@ from pycat.utils.channel_naming import (
     extract_channel_info_from_ims,
     suggest_colormap,
 )
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QCheckBox, QRadioButton, QPushButton, QFileDialog, QLineEdit, QMessageBox
-from PyQt5.QtGui import QFont
+from qtpy.QtWidgets import QDialog, QVBoxLayout, QLabel, QCheckBox, QRadioButton, QPushButton, QFileDialog, QLineEdit, QMessageBox
+from qtpy.QtGui import QFont
 from pycat.file_io.dialogs import ChannelAssignmentDialog, LayerDataframeSelectionDialog  # moved from here, 1.6.146
 from pycat.file_io.dialogs import _DialogsMixin  # assign_channels_in_dialog moved out (file_io_decomposition)
 from pycat.file_io.stack_openers import _StackOpenersMixin  # format openers moved out, 1.6.146
@@ -66,9 +66,9 @@ from pycat.utils.errors import StackLoadCancelled  # noqa: F401  (re-exported)
 # NOTE: `napari.utils.notifications.show_warning` is NOT imported at module scope — it was,
 # as `napari_show_warning`, but it was DEAD (every one of its call sites re-imports it locally:
 # lines ~1887/1903/2143). Removing the module-scope copy trims one of this module's GUI import
-# routes. It is NOT enough to make file_io.py headless-importable on its own — the PyQt5 import
+# routes. It is NOT enough to make file_io.py headless-importable on its own — the Qt import
 # above (needed by the two QDialog subclasses defined below) and the module-scope `ui_utils`
-# import (which itself pulls napari + PyQt5) remain. Full headless import of this module is the
+# import (which itself pulls napari + Qt) remain. Full headless import of this module is the
 # FileIOClass decomposition (external audit 2026-07-14 #9 / handoff §3.2), not a one-line fix.
 # The reusable stack helpers are already Qt-free in stack_access.py; import them from THERE,
 # not through this module.
@@ -188,7 +188,7 @@ def derive_layer_name(base_file_name, file_path=None, channel_infos=None,
 #
 # ``_TiffPageStack``, ``_LazyArraySource`` and the OME file-set helpers they depend on
 # (``resolve_ome_file_set`` / ``build_ome_page_map``) were defined HERE — beside two ``QDialog``
-# subclasses, in a module that imports PyQt5 at module scope. **So reaching a TIFF lazy wrapper
+# subclasses, in a module that imports Qt at module scope. **So reaching a TIFF lazy wrapper
 # dragged in the whole GUI stack**, and the wrappers could not be exercised headlessly — which is
 # exactly what a perf harness or a CI perf gate wants to do. Their bodies never needed Qt; only
 # their address did.
@@ -529,7 +529,7 @@ class FileIOClass(_LoadingMixin, _SessionActionsMixin, _DialogsMixin, _ProgressM
         # the diameter-annotation layer inserts (which fire scale-alignment) have
         # settled before the fit reads layer.extent.world.
         try:
-            from PyQt5.QtCore import QTimer
+            from qtpy.QtCore import QTimer
             QTimer.singleShot(400, lambda: self._fit_view_to_layer())
         except Exception:
             self._fit_view_to_layer()

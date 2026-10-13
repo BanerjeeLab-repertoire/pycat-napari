@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import napari
 from napari.utils.notifications import show_warning as napari_show_warning
-from PyQt5.QtWidgets import (QAction, QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QHBoxLayout, QLabel,
+from qtpy.QtWidgets import (QAction, QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QHBoxLayout, QLabel,
                              QLineEdit, QPushButton, QRadioButton, QScrollArea, QSizePolicy, QSlider,
                              QTabWidget, QToolButton, QVBoxLayout, QWidget)
-from PyQt5.QtCore import Qt, QObject
+from qtpy.QtCore import Qt, QObject
 
 from pycat.utils.general_utils import debug_log
 
@@ -26,14 +26,14 @@ class _WheelScrollGuard(QObject):
     event to the enclosing QScrollArea so the panel scrolls instead.
 
     This replaces the older instance-attribute `wheelEvent` patch, which does
-    not work in PyQt5: Qt dispatches the C++ virtual `wheelEvent`, which never
+    not work under either Qt binding: Qt dispatches the C++ virtual `wheelEvent`, which never
     looks up a Python instance attribute, so the guard was silently bypassed
     (the control changed value AND swallowed the scroll).
     """
     def eventFilter(self, obj, event):
-        from PyQt5.QtCore import QEvent
+        from qtpy.QtCore import QEvent
         if event.type() == QEvent.Wheel and not obj.hasFocus():
-            from PyQt5.QtWidgets import QScrollArea, QApplication
+            from qtpy.QtWidgets import QScrollArea, QApplication
             p = obj.parentWidget()
             while p is not None:
                 if isinstance(p, QScrollArea):
@@ -61,7 +61,7 @@ def guard_wheel(control):
     combo). Safe to call at widget-creation time, before the control is placed
     inside a QScrollArea — the enclosing scroll area is located at event time.
     """
-    from PyQt5.QtCore import Qt
+    from qtpy.QtCore import Qt
     if control is None or getattr(control, '_pycat_scroll_guard', False):
         return
     control.setFocusPolicy(Qt.StrongFocus)
@@ -82,8 +82,8 @@ def _relax_min_widths(widget):
     to elide/wrap lets the layout compress gracefully. Call once on the root widget
     of any dock that lives inside a horizontal-scroll-disabled QScrollArea.
     """
-    from PyQt5.QtWidgets import (QComboBox as _QCB, QLabel as _QLbl)
-    for w in widget.findChildren((QPushButton, _QCB, QLineEdit)):
+    from qtpy.QtWidgets import (QComboBox as _QCB, QLabel as _QLbl)
+    for w in find_children_of_types(widget, (QPushButton, _QCB, QLineEdit)):
         try:
             w.setMinimumWidth(0)
             # Preferred (not Ignored): respects the size hint when there is room,
@@ -102,6 +102,21 @@ def _relax_min_widths(widget):
             pass
 
 
+def find_children_of_types(widget, types):
+    """``widget.findChildren`` for SEVERAL widget types, in tree order, each child once.
+
+    PyQt accepts a tuple of types (``findChildren((A, B))``); PySide6 does not — it raises TypeError. Every
+    analysis dock runs through the two helpers here, so under PySide6 that one call stopped 14 of the 19
+    analysis methods from opening. Querying one type at a time works on every binding."""
+    seen, out = set(), []
+    for t in types:
+        for w in widget.findChildren(t):
+            if id(w) not in seen:
+                seen.add(id(w))
+                out.append(w)
+    return out
+
+
 def _apply_scroll_guard(widget):
     """
     Recursively install a wheel-scroll guard on all interactive controls
@@ -111,9 +126,9 @@ def _apply_scroll_guard(widget):
 
     Call once on the root widget of any dock that lives inside a QScrollArea.
     """
-    from PyQt5.QtWidgets import (QAbstractSpinBox, QAbstractSlider,
+    from qtpy.QtWidgets import (QAbstractSpinBox, QAbstractSlider,
                                   QComboBox as _QCB)
-    controls = list(widget.findChildren((_QCB, QAbstractSpinBox, QAbstractSlider)))
+    controls = find_children_of_types(widget, (_QCB, QAbstractSpinBox, QAbstractSlider))
     if isinstance(widget, (_QCB, QAbstractSpinBox, QAbstractSlider)):
         controls.insert(0, widget)
     for w in controls:
@@ -228,7 +243,7 @@ class BaseUIClass:
         # Don't let long layer names balloon the dropdown (and the whole form)
         # past the dock width — size to a small minimum and let it shrink so the
         # right side of rows (spinbox controls, buttons) stays visible.
-        from PyQt5.QtWidgets import QSizePolicy as _QSP
+        from qtpy.QtWidgets import QSizePolicy as _QSP
         dropdown.setSizePolicy(_QSP.Ignored, _QSP.Fixed)
         try:
             dropdown.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
@@ -237,7 +252,7 @@ class BaseUIClass:
             pass
         # Prevent scroll wheel from accidentally changing the selection while
         # the user scrolls through the dock panel (event-filter based; the
-        # older instance-attribute wheelEvent patch never fired under PyQt5).
+        # older instance-attribute wheelEvent patch never fired under PyQt5 or PySide6).
         guard_wheel(dropdown)
 
         # The binding is what the dropdown WANTS, in tags. update_dropdown_items reads it.
@@ -638,7 +653,7 @@ class BaseUIClass:
                         continue
             if already_open:
                 try:
-                    from PyQt5.QtWidgets import QMessageBox
+                    from qtpy.QtWidgets import QMessageBox
                     QMessageBox.information(
                         None, "Already open",
                         f"\u201c{dock_name}\u201d is already open.\n\n"
@@ -706,7 +721,7 @@ class BaseUIClass:
         Circle is red (required) or yellow (optional) until a real layer is
         selected, then turns green. 'None' placeholders stay red/yellow.
         ``binding`` forwards to create_layer_dropdown (tag-match autopopulate; see its docstring)."""
-        from PyQt5.QtWidgets import QLabel, QWidget
+        from qtpy.QtWidgets import QLabel, QWidget
         try:
             from pycat.ui.field_status import StatusCircle
         except Exception:
@@ -801,7 +816,7 @@ class BaseUIClass:
             except Exception:
                 pass
             try:
-                from PyQt5.QtCore import QTimer
+                from qtpy.QtCore import QTimer
                 QTimer.singleShot(0, _update_circle)
             except Exception:
                 _update_circle()

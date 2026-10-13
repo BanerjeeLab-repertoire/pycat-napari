@@ -32,7 +32,7 @@ def _build_ts_upscale_check_ui(ui_instance):
     out of _add_ts_upscale_stack to keep that function under the complexity gate.
     """
     import napari
-    from PyQt5.QtWidgets import QFormLayout, QGroupBox, QLabel, QPushButton, QSizePolicy, QSpinBox
+    from qtpy.QtWidgets import QFormLayout, QGroupBox, QLabel, QPushButton, QSizePolicy, QSpinBox
 
     grp = QGroupBox("Upscale Stack (optional)")
     form = QFormLayout(grp)
@@ -99,11 +99,11 @@ def _add_ts_upscale_stack(ui_instance, layout=None, separate_widget=False):
     preprocess). Optional and gated: if the data already meets Cellpose's
     resolution needs, upscaling is unnecessary and the check says so.
     """
-    # QThread/pyqtSignal are for the NESTED _UpWorker class defined below in this
+    # QThread/Signal are for the NESTED _UpWorker class defined below in this
     # function — nesting already makes it lazy; it just needs the names in scope.
-    from PyQt5.QtCore import QThread, pyqtSignal
+    from qtpy.QtCore import QThread, Signal
     # GUI imported here, not at module scope — the analysis in this module needs none.
-    from PyQt5.QtWidgets import QFormLayout, QGroupBox, QLabel, QProgressBar, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout
+    from qtpy.QtWidgets import QFormLayout, QGroupBox, QLabel, QProgressBar, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout
     import napari
 
     grp, form, stack_dropdown, factor_spin = _build_ts_upscale_check_ui(ui_instance)
@@ -114,9 +114,9 @@ def _add_ts_upscale_stack(ui_instance, layout=None, separate_widget=False):
     form.addRow(run_btn); form.addRow(prog)
 
     class _UpWorker(QThread):
-        progress = pyqtSignal(int, int)
-        finished_ok = pyqtSignal(object, int)
-        error = pyqtSignal(str)
+        progress = Signal(int, int)
+        finished_ok = Signal(object, int)
+        error = Signal(str)
         def __init__(self, stack, factor):
             super().__init__(); self._stack = stack; self._factor = factor
         def run(self):
@@ -176,7 +176,7 @@ def _add_ts_upscale_stack(ui_instance, layout=None, separate_widget=False):
 
 def _lazy_widgets(ui_instance, form):
     """Build the lazy-preprocess panel widgets; return their handles."""
-    from PyQt5.QtWidgets import QCheckBox, QLabel, QPushButton, QSizePolicy
+    from qtpy.QtWidgets import QCheckBox, QLabel, QPushButton, QSizePolicy
     import napari
     import os as _os
     stack_dropdown = ui_instance.create_layer_dropdown(napari.layers.Image)
@@ -396,7 +396,7 @@ def _lazy_resolve_cache(ui_instance, w, layer_name, ball_radius, window_size):
         # If both caches exist, offer to reload instead of reprocessing
         if existing.get('preproc') or existing.get('bgrem'):
             sz = cache_size_mb(source_file)
-            from PyQt5.QtWidgets import QMessageBox
+            from qtpy.QtWidgets import QMessageBox
             reply = QMessageBox.question(
                 None, "Preprocessing Cache Found",
                 f"A cached preprocessed stack was found for this file\n"
@@ -609,7 +609,7 @@ def _lazy_start_bg(ctx, source):
 
 def _run_lazy_preprocess(ui_instance, w):
     """Validate, prepare the source, resolve cache, then dispatch to the chosen worker path."""
-    from PyQt5.QtWidgets import QLabel, QProgressBar
+    from qtpy.QtWidgets import QLabel, QProgressBar
     stack_dropdown = w.stack_dropdown
     layer_name = stack_dropdown.currentText()
     try:
@@ -699,7 +699,7 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
     Condensate Analysis widget can find them automatically.
     """
     # GUI imported here, not at module scope — the analysis in this module needs none.
-    from PyQt5.QtWidgets import QCheckBox, QFormLayout, QGroupBox, QLabel, QProgressBar, QPushButton, QSizePolicy, QWidget
+    from qtpy.QtWidgets import QCheckBox, QFormLayout, QGroupBox, QLabel, QProgressBar, QPushButton, QSizePolicy, QWidget
     import napari
 
     grp = QGroupBox("Lazy Stack Pre-processing")
@@ -713,7 +713,7 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
     form.addRow("", w.build_btn)
     form.addRow("", w.discard_btn)
     grp_widget = QWidget()
-    from PyQt5.QtWidgets import QVBoxLayout as _QVB
+    from qtpy.QtWidgets import QVBoxLayout as _QVB
     _l = _QVB(grp_widget)
     _l.addWidget(grp)
     ui_instance._add_widget_to_layout_or_dock(
@@ -723,7 +723,7 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
 
 def _ts_cond_input_widgets(ui_instance, ts_layout):
     """Build the input + option widgets for the time-series condensate panel."""
-    from PyQt5.QtWidgets import QCheckBox, QFormLayout, QGroupBox, QSizePolicy, QSpinBox
+    from qtpy.QtWidgets import QCheckBox, QFormLayout, QGroupBox, QSizePolicy, QSpinBox
     import napari
     ui_instance.add_text_label(ts_layout, 'Raw image stack (T, H, W):', font_size=9)
     stack_dropdown = ui_instance.create_layer_dropdown(napari.layers.Image)
@@ -799,7 +799,7 @@ def _ts_cond_input_widgets(ui_instance, ts_layout):
 
 def _ts_cond_refine_widgets(ts_layout):
     """Build the refinement-parameter + run-control widgets (and the shared state refs)."""
-    from PyQt5.QtWidgets import QCheckBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QProgressBar, QPushButton, QSizePolicy
+    from qtpy.QtWidgets import QCheckBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QProgressBar, QPushButton, QSizePolicy
     ref_group = QGroupBox("Refinement Parameters")
     ref_layout = QFormLayout(ref_group)
     ref_layout.setContentsMargins(9, 20, 9, 6)
@@ -833,7 +833,7 @@ def _ts_cond_refine_widgets(ts_layout):
         "implausibly large (likely segmentation artifacts or merged nuclei).")
 
     # Presets row — quick switching between experiment types
-    from PyQt5.QtWidgets import QHBoxLayout as _QHL2, QPushButton as _QPB2
+    from qtpy.QtWidgets import QHBoxLayout as _QHL2, QPushButton as _QPB2
     preset_row = _QHL2()
     preset_lbl = QLabel("Preset:")
     preset_lbl.setWordWrap(True)
@@ -1220,7 +1220,7 @@ def _add_run_timeseries_condensate_analysis(
                 layout=self.condensate_layout)
     """
     # GUI imported here, not at module scope — the analysis in this module needs none.
-    from PyQt5.QtWidgets import QCheckBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QProgressBar, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout, QWidget
+    from qtpy.QtWidgets import QCheckBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QProgressBar, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout, QWidget
     import napari
     from pycat.ui.ui_utils import show_dataframes_dialog
     ts_layout = QVBoxLayout()

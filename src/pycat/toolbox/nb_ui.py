@@ -11,7 +11,7 @@ sCMOS handling) is a planned extension.
 """
 
 import napari
-from PyQt5.QtWidgets import (
+from qtpy.QtWidgets import (
     QVBoxLayout, QWidget, QGroupBox, QFormLayout, QLabel, QPushButton,
     QSpinBox, QDoubleSpinBox, QSizePolicy)
 

@@ -14,8 +14,8 @@ self._add_widget_to_layout_or_dock, etc.).
 import math
 
 import napari
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import (
+from qtpy.QtCore import Qt
+from qtpy.QtWidgets import (
     QPushButton, QLabel, QVBoxLayout, QHBoxLayout, QLineEdit, QWidget,
     QComboBox, QSlider, QScrollArea, QSizePolicy, QCheckBox)
 
@@ -35,7 +35,7 @@ def _add_object_scale_controls(params_layout, widgets, make_spinbox):
     measurements behind the defaults. Split into its own builder to keep
     ``_build_condensate_refinement_params_group`` under the per-function length ratchet.
     """
-    from PyQt5.QtWidgets import QCheckBox
+    from qtpy.QtWidgets import QCheckBox
 
     widgets['multiscale'] = QCheckBox("Detect large objects (extra pass at their own scale)")
     widgets['multiscale'].setChecked(True)
@@ -108,7 +108,7 @@ def _build_condensate_refinement_params_group():
     ``(params_group_widget, widgets)`` where ``widgets`` maps each parameter's name (matching
     ``run_segment_subcellular_objects``'s keyword arguments) to its QDoubleSpinBox/QCheckBox.
     """
-    from PyQt5.QtWidgets import QDoubleSpinBox, QFormLayout, QGroupBox
+    from qtpy.QtWidgets import QDoubleSpinBox, QFormLayout, QGroupBox
 
     params_group = QGroupBox("Refinement Parameters")
     params_layout = QFormLayout()
@@ -185,7 +185,7 @@ def _build_condensate_refinement_params_group():
         "threshold above.")
     params_layout.addRow("Punctate gate — absolute (×σ):", w['punctate_gate_abs_sigma'])
 
-    from PyQt5.QtWidgets import QCheckBox as _QCheckBox
+    from qtpy.QtWidgets import QCheckBox as _QCheckBox
     w['punctate_gate'] = _QCheckBox("Punctate gate enabled")
     w['punctate_gate'].setChecked(True)
     w['punctate_gate'].setToolTip(
@@ -240,7 +240,7 @@ class _SegmentationWidgetsMixin:
         Unified cell segmentation widget with a method selector.
         Defaults to Cellpose; offers StarDist and Random Forest as alternatives.
         """
-        from PyQt5.QtWidgets import QButtonGroup, QRadioButton, QStackedWidget, QGroupBox
+        from qtpy.QtWidgets import QButtonGroup, QRadioButton, QStackedWidget, QGroupBox
 
         seg_layout = QVBoxLayout()
         self.add_text_label(seg_layout, 'Cell Segmentation', bold=True)
@@ -542,7 +542,7 @@ class _SegmentationWidgetsMixin:
 
         # Refinement parameters are hidden behind an off-by-default reveal
         # checkbox (advanced tuning; sensible defaults are used otherwise).
-        from PyQt5.QtWidgets import QCheckBox as _QCheckBox
+        from qtpy.QtWidgets import QCheckBox as _QCheckBox
         _refine_cb = _QCheckBox("Show refinement parameters")
         _refine_cb.setChecked(False)
         _refine_cb.setToolTip("Advanced tuning for condensate segmentation. "

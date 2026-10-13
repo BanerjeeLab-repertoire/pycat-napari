@@ -70,25 +70,25 @@ def run_with_progress(fn, *, title='Working', text='Working…', parent=None,
     caller's thread, so ``try/except`` around the call still works exactly as it did before.
     """
     try:
-        from PyQt5.QtCore import QThread, QObject, pyqtSignal, Qt
-        from PyQt5.QtWidgets import QProgressDialog
+        from qtpy.QtCore import QThread, QObject, Signal, Qt
+        from qtpy.QtWidgets import QProgressDialog
     except Exception:
         # No Qt: do the work, report nothing. There is no window to keep painting.
         return fn(_noop_progress)
 
-    from PyQt5.QtWidgets import QApplication
+    from qtpy.QtWidgets import QApplication
     if QApplication.instance() is None:
         # Qt is importable but there is no application (headless test, script). A QProgressDialog
         # without a QApplication is undefined behaviour; a synchronous call is not.
         return fn(_noop_progress)
 
-    from PyQt5.QtCore import QEventLoop, pyqtSlot
+    from qtpy.QtCore import QEventLoop, Slot
 
     box = {}
 
     class _Worker(QObject):
-        finished = pyqtSignal()
-        progressed = pyqtSignal(int, int)
+        finished = Signal()
+        progressed = Signal(int, int)
 
         def run(self):
             try:
@@ -114,7 +114,7 @@ def run_with_progress(fn, *, title='Working', text='Working…', parent=None,
     # A queued slot cannot be delivered until the loop is spinning, so "finished before we
     # waited" resolves to "delivered as soon as we wait" instead of a hang.
     class _Bridge(QObject):
-        @pyqtSlot(int, int)
+        @Slot(int, int)
         def on_progress(self, done, total):
             try:
                 if total > 0:
@@ -125,7 +125,7 @@ def run_with_progress(fn, *, title='Working', text='Working…', parent=None,
             except Exception:
                 pass
 
-        @pyqtSlot()
+        @Slot()
         def on_finished(self):
             thread.quit()
             dlg.hide()
@@ -214,11 +214,11 @@ def make_task_worker():
     classes each re-derived. Cached, so every caller shares one class."""
     global _TASK_WORKER_CLS
     if _TASK_WORKER_CLS is None:
-        from PyQt5.QtCore import QThread, pyqtSignal
+        from qtpy.QtCore import QThread, Signal
 
         class _TaskWorker(QThread):
-            finished = pyqtSignal(object)
-            error = pyqtSignal(str)
+            finished = Signal(object)
+            error = Signal(str)
 
             def __init__(self, fn, kwargs=None):
                 super().__init__()

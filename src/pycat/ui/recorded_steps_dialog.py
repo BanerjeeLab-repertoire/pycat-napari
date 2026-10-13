@@ -6,7 +6,7 @@ lives here. ``MenuManager._show_recorded_steps_dialog`` is a thin wrapper that c
 """
 from __future__ import annotations
 
-from PyQt5.QtWidgets import QDoubleSpinBox, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QRadioButton, QPushButton, QLineEdit, QWidget, QComboBox, QSlider, QScrollArea, QSizePolicy, QAction, QTabWidget, QToolButton, QFrame
+from qtpy.QtWidgets import QDoubleSpinBox, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QRadioButton, QPushButton, QLineEdit, QWidget, QComboBox, QSlider, QScrollArea, QSizePolicy, QAction, QTabWidget, QToolButton, QFrame
 
 
 
@@ -17,7 +17,7 @@ def _show_recorded_steps_dialog(self):
     step expands to reveal the layers/parameters it captured, so the user
     can review exactly what will be replayed.
     """
-    from PyQt5.QtWidgets import (QDialog, QTreeWidget, QTreeWidgetItem,
+    from qtpy.QtWidgets import (QDialog, QTreeWidget, QTreeWidgetItem,
                                   QHeaderView)
     from napari.utils.notifications import show_info as _info
 

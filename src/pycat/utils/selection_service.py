@@ -474,7 +474,7 @@ def _qt_defer(fn):
     every subsequent selection.
     """
     try:
-        from PyQt5.QtCore import QTimer
+        from qtpy.QtCore import QTimer
         QTimer.singleShot(0, fn)
     except Exception:
         fn()
@@ -493,7 +493,7 @@ def _qt_debounce(fn):
     fires is a feature that never happens (the same trap as the deferred release).
     """
     try:
-        from PyQt5.QtCore import QTimer
+        from qtpy.QtCore import QTimer
     except Exception:
         fn()
         return

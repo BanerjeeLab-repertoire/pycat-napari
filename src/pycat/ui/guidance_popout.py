@@ -12,8 +12,8 @@ run once content exists.
 """
 from __future__ import annotations
 
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import (QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea,
+from qtpy.QtCore import Qt
+from qtpy.QtWidgets import (QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea,
                             QVBoxLayout, QWidget)
 
 from pycat.navigator.guidance import section_guidance

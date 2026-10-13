@@ -15,7 +15,7 @@ numbers.
 """
 
 import napari
-from PyQt5.QtWidgets import (
+from qtpy.QtWidgets import (
     QVBoxLayout, QWidget, QGroupBox, QFormLayout, QLabel, QPushButton,
     QSpinBox, QDoubleSpinBox, QSizePolicy)
 
@@ -53,7 +53,7 @@ def _add_spida(ui_instance, layout=None, separate_widget=False):
                        "Subtracted before analysis.")
     form.addRow("White-noise background:", wn_spin)
 
-    from PyQt5.QtWidgets import QComboBox
+    from qtpy.QtWidgets import QComboBox
     modality_dd = QComboBox()
     modality_dd.addItems(['Confocal / laser-scanning', 'TIRF (camera)',
                           'Widefield (not recommended)'])

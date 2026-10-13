@@ -9,7 +9,7 @@ This is the missing central handle: every ``FieldRegistry`` registers here on co
 ``_clear_everything`` calls ``reset_all()`` to return every open method widget to its defaults.
 
 **Qt-free on purpose.** It holds registries WEAKLY and calls their ``.reset_all()``, nothing more — so the
-clear plumbing (and its tests) never drag in PyQt5, and a closed widget's registry drops out on its own
+clear plumbing (and its tests) never drag in Qt, and a closed widget's registry drops out on its own
 (no leak, no resetting a dead widget). Which fields reset is `FieldRegistry.reset_all`'s decision (OPTIONAL
 and EXPERT return to defaults; a REQUIRED value the user supplied, with no default, is left alone).
 """

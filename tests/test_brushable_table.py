@@ -23,9 +23,15 @@ pytestmark = pytest.mark.base
 
 @pytest.fixture(scope='module')
 def qapp():
-    QtWidgets = pytest.importorskip("PyQt5.QtWidgets")
+    QtWidgets = pytest.importorskip("qtpy.QtWidgets")
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     return app
+
+
+def _qt():
+    """Qt's enums, passed as Qt passes them. Under PySide6 a plain int is NOT accepted for (or equal to) most
+    of them — `sortByColumn(0, 0)` raises and `1 == Qt.Horizontal` is False — so tests use the enums."""
+    return pytest.importorskip("qtpy.QtCore").Qt
 
 
 def _stamped(order=(3, 1, 2)):
@@ -112,7 +118,7 @@ def test_the_SELECTION_SURVIVES_A_SORT(qapp):
     assert table.selected_entity_id() == cell_3
 
     # Now sort by label ascending: 1, 2, 3 — cell 3 moves to the LAST row.
-    table.view.sortByColumn(0, 0)     # Qt.AscendingOrder
+    table.view.sortByColumn(0, _qt().AscendingOrder)
 
     # A position-keyed table would now report the object at row 0 (cell 1).
     assert table.selected_entity_id() == cell_3, (
@@ -127,7 +133,7 @@ def test_an_INBOUND_selection_finds_the_right_row_after_a_sort(qapp):
     table, service = _table(qapp, df)
     cell_3 = _entity(df, 3)
 
-    table.view.sortByColumn(0, 0)     # ascending by label -> 1, 2, 3
+    table.view.sortByColumn(0, _qt().AscendingOrder)     # ascending by label -> 1, 2, 3
 
     from pycat.utils.selection_service import Selection
     service.select(Selection(entity_ids=(cell_3,), primary_id=cell_3,
@@ -211,7 +217,7 @@ def test_the_identity_columns_are_NOT_shown_to_the_user(qapp):
 
     df = _stamped()
     model = DataFrameModel(df)
-    shown = [model.headerData(c, 1, 0) for c in range(model.columnCount())]
+    shown = [model.headerData(c, _qt().Horizontal, _qt().DisplayRole) for c in range(model.columnCount())]
 
     assert shown == ['label', 'area'], f"identity columns leaked into the results table: {shown}"
     # ...while the DataFrame itself keeps them, because the machinery needs them.

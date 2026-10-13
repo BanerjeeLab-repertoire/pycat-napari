@@ -21,13 +21,13 @@ from napari.utils.notifications import (
     show_info    as napari_show_info,
     show_warning as napari_show_warning,
 )
-from PyQt5.QtWidgets import (
+from qtpy.QtWidgets import (
     QSizePolicy,
     QVBoxLayout, QWidget, QPushButton, QGroupBox, QFormLayout,
     QCheckBox, QSpinBox, QDoubleSpinBox, QLabel, QProgressBar,
     QTabWidget, QComboBox,
 )
-from PyQt5.QtCore import QThread, pyqtSignal
+from qtpy.QtCore import QThread, Signal
 
 
 # _PhysicsWorker is the shared background task-worker (redundancy_consolidation axis 3): a QThread emitting
@@ -40,11 +40,14 @@ _PhysicsWorker = _make_task_worker()
 
 def _fit_tab_height(tabs):
     """Cap tab widget to current tab content height, eliminating empty space."""
-    from PyQt5.QtCore import QTimer as _QT
+    from qtpy.QtCore import QTimer as _QT
     def _do():
-        w = tabs.currentWidget()
-        if w:
-            tabs.setMaximumHeight(tabs.tabBar().sizeHint().height() + w.sizeHint().height() + 12)
+        try:
+            w = tabs.currentWidget()
+            if w:
+                tabs.setMaximumHeight(tabs.tabBar().sizeHint().height() + w.sizeHint().height() + 12)
+        except RuntimeError:
+            pass             # the dock was replaced before this deferred fit ran (PySide6 raises on a deleted widget)
     tabs.currentChanged.connect(lambda _: _do())
     _QT.singleShot(0, _do)
 
@@ -604,15 +607,15 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
     outer.setContentsMargins(2, 2, 2, 2)
     # Top-level section header sized to match the enumerated step titles (14px).
     # Not a numbered checklist step, so no "Step N —" prefix — just the name.
-    from PyQt5.QtWidgets import QLabel as _QLabel
+    from qtpy.QtWidgets import QLabel as _QLabel
     _cp_hdr = _QLabel("<span style='font-weight:700;'>Condensate Biophysics</span>")
-    from PyQt5.QtCore import Qt as _Qt
+    from qtpy.QtCore import Qt as _Qt
     _cp_hdr.setTextFormat(_Qt.RichText)
     _cp_hdr.setStyleSheet("font-size: 14px; margin-top: 4px;")
     _cp_hdr.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Minimum)
     outer.addWidget(_cp_hdr)
     # Optional block: reveal checkbox (off by default) shows/hides the analyses.
-    from PyQt5.QtWidgets import QCheckBox as _CPCheckBox
+    from qtpy.QtWidgets import QCheckBox as _CPCheckBox
     _cp_reveal = _CPCheckBox("Show condensate biophysics (optional)")
     _cp_reveal.setChecked(False)
     _cp_reveal.setToolTip("Optional MSD/diffusion, intensity decomposition, "

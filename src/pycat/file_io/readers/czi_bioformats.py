@@ -128,7 +128,7 @@ def _install_forced_exit_on_quit():
     import atexit
     atexit.register(_force_exit)                 # the guarantee: runs before Python joins JVM threads
     try:
-        from PyQt5.QtWidgets import QApplication
+        from qtpy.QtWidgets import QApplication
         app = QApplication.instance()
         if app is not None:
             app.aboutToQuit.connect(_force_exit)  # best-effort earlier trigger

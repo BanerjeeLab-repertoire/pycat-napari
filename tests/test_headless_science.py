@@ -102,7 +102,7 @@ SCIENTIFIC_MODULES = [
     "timeseries/preprocessing",
 ]
 
-_FORBIDDEN_ROOTS = {"napari", "PyQt5", "PyQt6", "qtpy"}
+_FORBIDDEN_ROOTS = {"napari", "PyQt5", "PyQt6", "PySide2", "PySide6", "qtpy"}
 
 _TOOLBOX = pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat" / "toolbox"
 

@@ -26,8 +26,8 @@ from pycat.utils.channel_naming import (
     extract_channel_info_from_ims,
     suggest_colormap,
 )
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QCheckBox, QRadioButton, QPushButton, QFileDialog, QLineEdit, QMessageBox
-from PyQt5.QtGui import QFont
+from qtpy.QtWidgets import QDialog, QVBoxLayout, QLabel, QCheckBox, QRadioButton, QPushButton, QFileDialog, QLineEdit, QMessageBox
+from qtpy.QtGui import QFont
 from pycat.file_io.dialogs import ChannelAssignmentDialog, LayerDataframeSelectionDialog  # moved from here, 1.6.146
 from pycat.file_io.naming import (_lazy_contrast_limits, _tiff_pixel_size_um,  # moved out 1.6.146; re-exported
                                  _ome_pixel_size_um, _lazy_backing_label)  # noqa: F401

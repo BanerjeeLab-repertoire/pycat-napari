@@ -12,7 +12,7 @@ import pytest
 
 @pytest.mark.integration
 def test_molecular_counting_panel_default_r2_is_zero(qtbot):
-    from PyQt5.QtWidgets import QComboBox
+    from qtpy.QtWidgets import QComboBox
     import pycat.toolbox.molecular_counting_tools as mct
 
     class _UI:

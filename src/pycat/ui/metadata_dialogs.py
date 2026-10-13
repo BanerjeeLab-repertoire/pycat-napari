@@ -7,8 +7,8 @@ menu action and its label are unchanged. Moved VERBATIM.
 from __future__ import annotations
 
 import napari
-from PyQt5.QtWidgets import QDoubleSpinBox, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QRadioButton, QPushButton, QLineEdit, QWidget, QComboBox, QSlider, QScrollArea, QSizePolicy, QAction, QTabWidget, QToolButton, QFrame
-from PyQt5.QtCore import Qt, QObject
+from qtpy.QtWidgets import QDoubleSpinBox, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QRadioButton, QPushButton, QLineEdit, QWidget, QComboBox, QSlider, QScrollArea, QSizePolicy, QAction, QTabWidget, QToolButton, QFrame
+from qtpy.QtCore import Qt, QObject
 
 
 def _show_metadata_dialog(self):
@@ -17,7 +17,7 @@ def _show_metadata_dialog(self):
     Displays the curated 'common' fields by default, with a checkbox that
     reveals the full raw metadata dump. Also offers a JSON export button.
     """
-    from PyQt5.QtWidgets import (QDialog, QTableWidget, QTableWidgetItem, QHeaderView,
+    from qtpy.QtWidgets import (QDialog, QTableWidget, QTableWidgetItem, QHeaderView,
                                   QFileDialog)
     from napari.utils.notifications import (show_info as _info,
                                             show_warning as _warn)

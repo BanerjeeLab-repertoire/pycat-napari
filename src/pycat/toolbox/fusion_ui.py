@@ -29,12 +29,12 @@ from napari.utils.notifications import (
     show_info    as napari_show_info,
     show_warning as napari_show_warning,
 )
-from PyQt5.QtWidgets import (
+from qtpy.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QGroupBox, QFormLayout,
     QCheckBox, QSpinBox, QDoubleSpinBox, QLabel, QProgressBar, QComboBox,
     QScrollArea, QSizePolicy, QRadioButton,
 )
-from PyQt5.QtCore import Qt
+from qtpy.QtCore import Qt
 
 
 class DropletFusionUI:
@@ -156,7 +156,7 @@ class DropletFusionUI:
         layout.addWidget(grp)
 
     def _on_load_forces(self):
-        from PyQt5.QtWidgets import QFileDialog
+        from qtpy.QtWidgets import QFileDialog
         from pycat.file_io.frap_io import load_lumicks_fusion   # reads with h5py when pylake is absent
         path, _ = QFileDialog.getOpenFileName(
             None, "Open Lumicks C-Trap fusion .h5", "", "Lumicks HDF5 (*.h5)")

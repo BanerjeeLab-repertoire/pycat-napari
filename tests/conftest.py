@@ -38,11 +38,21 @@ import importlib.util
 import os
 import pathlib
 
+# ── One Qt binding per test process (1.7.0) ──────────────────────────────────────────────────────────────
+# qtpy picks PyQt5 first when it is installed; pytest-qt reads `qt_api` from pyproject (pyside6). In an env with
+# BOTH bindings that would put two Qt bindings in one process. Same rule as the launcher (run_pycat): PySide6
+# when installed unless QT_API says otherwise — and pytest-qt follows whatever qtpy uses. Run the suite on the
+# other binding with `QT_API=pyqt5 pytest`.
+if 'QT_API' not in os.environ and importlib.util.find_spec('PySide6') is not None:
+    os.environ['QT_API'] = 'pyside6'
+if 'QT_API' in os.environ:
+    os.environ.setdefault('PYTEST_QT_API', os.environ['QT_API'])
+
 import pytest
 
 # Packages the headless (`core`) CI deliberately does not install. A test module needing
 # any of these at import time is a GUI / file-IO test, not a core scientific one.
-_OPTIONAL_STACK = ("napari", "PyQt5", "qtpy", "aicsimageio", "cellpose", "torch")
+_OPTIONAL_STACK = ("napari", "PyQt5", "PySide6", "qtpy", "aicsimageio", "cellpose", "torch")
 
 
 @pytest.fixture(autouse=True)

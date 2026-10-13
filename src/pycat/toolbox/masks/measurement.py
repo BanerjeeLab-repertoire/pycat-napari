@@ -19,7 +19,7 @@ from pycat.utils.notify import show_warning as napari_show_warning
 # module for its array operations. If Qt is genuinely absent, the dialog class
 # becomes a stub that raises only if someone actually tries to open it.
 try:
-    from PyQt5.QtWidgets import (
+    from qtpy.QtWidgets import (
         QDialog, QVBoxLayout, QFormLayout, QCheckBox, QLineEdit, QPushButton,
         QScrollArea, QWidget, QSizePolicy)
     _QT_AVAILABLE = True
@@ -31,7 +31,7 @@ except Exception:                                    # pragma: no cover - headle
         GUI dialog without Qt is not, and says so clearly."""
         def __init__(self, *a, **k):
             raise RuntimeError(
-                "MeasurementDialog requires PyQt5, which is not available in this "
+                "MeasurementDialog requires a Qt binding (via qtpy), which is not available in this "
                 "environment. The array operations in this module work headlessly; "
                 "the GUI dialog does not.")
 

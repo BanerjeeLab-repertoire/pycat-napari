@@ -46,7 +46,7 @@ _WORKFLOW = _ROOT / ".github" / "workflows" / "core.yml"
 _HEADLESS_TEST = _ROOT / "tests" / "test_headless_science.py"
 
 # The GUI stack is excluded from the headless job ON PURPOSE — that is what it tests.
-_GUI = {"napari", "PyQt5", "PyQt6", "qtpy"}
+_GUI = {"napari", "PyQt5", "PyQt6", "PySide2", "PySide6", "qtpy"}
 
 # Lazily imported on purpose (heavy, optional, or GPU-only). These must NOT be at module
 # scope in a guarded module, and the headless test already enforces that.
@@ -208,8 +208,9 @@ _ALIAS = {
     "sklearn": "scikit_learn",
     "PIL": "pillow",
     "yaml": "pyyaml",
-    "qtpy": "pyqt5",
+    "qtpy": "qtpy",
     "PyQt5": "pyqt5",
+    "PySide6": "pyside6",
 }
 
 
@@ -292,7 +293,7 @@ def test_no_undeclared_module_scope_imports():
 
 _TESTS_DIR = _ROOT / "tests"
 _QT_FIXTURES = {"qtbot", "qapp", "qapp_args", "qtlog", "qtmodeltester"}
-_GUI_MODULES = {"napari", "PyQt5", "PyQt6", "qtpy", "pytestqt"}
+_GUI_MODULES = {"napari", "PyQt5", "PyQt6", "PySide2", "PySide6", "qtpy", "pytestqt"}
 #: The base scientific stack — present in the `base` lane but NOT the numpy-only `core` (minimal) lane. A
 #: `core` test whose file imports any of these at module scope dies at collection in the minimal lane.
 _BASE_SCIENTIFIC_MODULES = {"pandas", "scipy", "skimage", "matplotlib", "cv2", "sklearn", "seaborn", "networkx"}
@@ -341,7 +342,7 @@ def _is_headless_selected(func, module_marks):
 
 def _local_fixtures(tree):
     """Names of fixtures DEFINED in this file (a `@pytest.fixture`-decorated function). A file that
-    supplies its own Qt fixture — e.g. a `qapp` guarded by `importorskip('PyQt5')`, which SKIPS rather
+    supplies its own Qt fixture — e.g. a `qapp` guarded by `importorskip('qtpy')`, which SKIPS rather
     than errors when Qt is absent — is self-sufficient and headless-safe; it is not relying on pytest-qt."""
     names = set()
     for node in ast.walk(tree):
@@ -744,7 +745,7 @@ def _module_third_party(dotted, seen):
 # `core` test, or when a module-scope import names an absent optional-stack package or a GUI/IO-bound pycat
 # package. Those files never run there, so flagging them would be a false positive. Mirrored here (kept in sync
 # with the conftest's own lists) so this guard flags only what would ACTUALLY reach the minimal lane.
-_OPTIONAL_STACK_ABSENT = {"napari", "PyQt5", "qtpy", "aicsimageio", "cellpose", "torch"}
+_OPTIONAL_STACK_ABSENT = {"napari", "PyQt5", "PySide6", "qtpy", "aicsimageio", "cellpose", "torch"}
 _GUI_BOUND_PYCAT = ("pycat.data", "pycat.file_io", "pycat.run_pycat", "pycat.ui")
 
 

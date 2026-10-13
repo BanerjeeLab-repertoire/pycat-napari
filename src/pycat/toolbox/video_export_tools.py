@@ -42,13 +42,13 @@ from napari.utils.notifications import (
     show_info as napari_show_info,
     show_warning as napari_show_warning,
 )
-from PyQt5.QtWidgets import (
+from qtpy.QtWidgets import (
     QSizePolicy,
     QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QGroupBox,
     QFormLayout, QComboBox, QSpinBox, QDoubleSpinBox, QFileDialog,
     QProgressBar, QCheckBox,
 )
-from PyQt5.QtCore import QThread, pyqtSignal
+from qtpy.QtCore import QThread, Signal
 
 
 # ---------------------------------------------------------------------------
@@ -227,9 +227,9 @@ def export_stack_as_gif(
 # ---------------------------------------------------------------------------
 
 class VideoExportWorker(QThread):
-    progress = pyqtSignal(int, int)
-    finished = pyqtSignal(object)
-    error    = pyqtSignal(str)
+    progress = Signal(int, int)
+    finished = Signal(object)
+    error    = Signal(str)
 
     def __init__(self, kwargs: dict, parent=None):
         super().__init__(parent)

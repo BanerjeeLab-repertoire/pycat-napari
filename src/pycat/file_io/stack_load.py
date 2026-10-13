@@ -178,7 +178,7 @@ def _finalise_stack_load(viewer, central_manager, H, W, microns_per_pixel,
     # have flushed — otherwise the fit reads a stale extent and the image
     # opens tiny (whereas pressing Home later, once settled, fits correctly).
     try:
-        from PyQt5.QtCore import QTimer
+        from qtpy.QtCore import QTimer
         QTimer.singleShot(400, lambda: _fit_view_to_layer(viewer, central_manager))
     except Exception:
         _fit_view_to_layer(viewer, central_manager)

@@ -7,7 +7,7 @@ these; the menu action and its label are unchanged. Moved VERBATIM.
 from __future__ import annotations
 
 from napari.utils.notifications import show_warning as napari_show_warning
-from PyQt5.QtWidgets import QDoubleSpinBox, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QRadioButton, QPushButton, QLineEdit, QWidget, QComboBox, QSlider, QScrollArea, QSizePolicy, QAction, QTabWidget, QToolButton, QFrame
+from qtpy.QtWidgets import QDoubleSpinBox, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QRadioButton, QPushButton, QLineEdit, QWidget, QComboBox, QSlider, QScrollArea, QSizePolicy, QAction, QTabWidget, QToolButton, QFrame
 
 
 _SESSION_METHOD_SWITCH = {
@@ -31,7 +31,7 @@ _SESSION_METHOD_BY_DATA = {
 
 def _open_session_loader(self):
     """Open a folder browser to select a PyCAT output directory and reload."""
-    from PyQt5.QtWidgets import (QFileDialog, QDialog, QListWidget, QAbstractItemView)
+    from qtpy.QtWidgets import (QFileDialog, QDialog, QListWidget, QAbstractItemView)
     from pathlib import Path
     from napari.utils.notifications import (
         show_info as napari_show_info,
@@ -193,7 +193,7 @@ def _load_discovered_session(self, folder, sessions):
     and then ignored the answer anyway. The only question worth asking is *which session*, and
     only when there is more than one.
     """
-    from PyQt5.QtWidgets import QInputDialog
+    from qtpy.QtWidgets import QInputDialog
     from napari.utils.notifications import show_info as napari_show_info
     from pycat.file_io.session_loader import session_picker_labels, load_session
 

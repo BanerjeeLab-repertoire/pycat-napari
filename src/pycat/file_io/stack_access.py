@@ -7,7 +7,7 @@ Why this module exists
 the functions every analysis module needs in order to read a possibly-lazy stack safely.
 They are **pure numpy**: none of them touches AICSImage, Qt or napari.
 
-They used to live in ``file_io.py``, which imports ``AICSImage``, ``PyQt5``, ``napari``
+They used to live in ``file_io.py``, which imports ``AICSImage``, ``Qt``, ``napari``
 and ``pycat.ui.ui_utils`` at module scope. **Fifteen toolbox modules import from
 ``file_io`` purely to reach these helpers**, and therefore drag the entire GUI and
 file-format stack into memory just to iterate frames over an array they already hold.

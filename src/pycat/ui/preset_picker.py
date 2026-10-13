@@ -22,7 +22,7 @@ def build_preset_picker(workflow_id, *, available=None, on_apply=None, parent=No
     its reason); ``on_apply(PresetApplication)`` receives the chosen preset's populate-not-lock application.
     Exposes ``_apply_buttons`` (preset key → button) for a Qt-smoke test."""
     try:
-        from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QFrame
+        from qtpy.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QFrame
     except Exception:      # broad-ok: optional_probe — no Qt (headless) → no widget, callers guard on None
         return None
     from pycat.utils.analysis_presets import presets_for, preset_availability, PresetApplication

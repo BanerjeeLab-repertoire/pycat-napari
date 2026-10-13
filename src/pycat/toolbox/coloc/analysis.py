@@ -33,14 +33,14 @@ LAST_COLOC_DIAGNOSTICS = {}
 # Qt is imported lazily inside the dialog helper below: the colocalization
 # COEFFICIENTS in this module are pure numpy/scipy and must be testable headlessly.
 try:
-    from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QCheckBox,
+    from qtpy.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QCheckBox,
                                  QPushButton, QLabel)
     _QT_AVAILABLE = True
 except Exception:  # pragma: no cover - headless
     _QT_AVAILABLE = False
     class _NoQt:
         def __init__(self, *a, **k):
-            raise RuntimeError('This dialog requires PyQt5, which is not available. '
+            raise RuntimeError('This dialog requires a Qt binding (via qtpy), which is not available. '
                                'The colocalization coefficients work headlessly.')
     QDialog = QVBoxLayout = QHBoxLayout = QCheckBox = QPushButton = QLabel = _NoQt
 from pycat.utils.notify import show_warning as napari_show_error

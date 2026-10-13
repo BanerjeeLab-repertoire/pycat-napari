@@ -14,7 +14,7 @@ from pycat.utils.general_utils import debug_log
 import napari
 from napari.utils.notifications import show_info as napari_show_info
 from napari.utils.notifications import show_warning as napari_show_warning
-from PyQt5.QtWidgets import (
+from qtpy.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox, QLabel, QPushButton,
     QDoubleSpinBox, QSpinBox, QCheckBox, QWidget, QSizePolicy, QProgressBar,
 )
@@ -258,7 +258,7 @@ def _add_data_qc(ui_instance, layout=None, separate_widget=False):
         results = _state['results']
         if not results:
             napari_show_warning("Run the quality report first."); return
-        from PyQt5.QtWidgets import QFileDialog
+        from qtpy.QtWidgets import QFileDialog
         import pandas as pd
         path, _ = QFileDialog.getSaveFileName(
             None, "Save QC report (base name)",

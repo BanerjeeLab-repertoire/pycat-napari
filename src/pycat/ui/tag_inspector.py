@@ -14,10 +14,10 @@ def open_tag_inspector(self):
     the tagging system: you can always see *why* a tag is set and correct it.
     """
     try:
-        from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
+        from qtpy.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
             QComboBox, QTableWidget, QTableWidgetItem, QLabel, QPushButton,
             QLineEdit, QHeaderView, QWidget)
-        from PyQt5.QtCore import Qt
+        from qtpy.QtCore import Qt
         from pycat.utils import layer_tags as _LT
     except Exception as _e:
         print(f"[PyCAT tags] inspector unavailable: {_e}")
@@ -88,7 +88,7 @@ def open_tag_inspector(self):
                 it = QTableWidgetItem(str(val))
                 # Colour user_set rows so overrides are obvious.
                 if src == 'user_set':
-                    from PyQt5.QtGui import QColor
+                    from qtpy.QtGui import QColor
                     it.setForeground(QColor('#c8102e'))
                 it.setFlags(it.flags() & ~Qt.ItemIsEditable)
                 table.setItem(i, j, it)

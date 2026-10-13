@@ -115,7 +115,7 @@ def test_clear_everything_resets_the_active_field_registries():
 
 def test_field_registry_auto_registers_on_construction():
     """The wiring in `FieldRegistry.__init__` (needs Qt — skipped headlessly)."""
-    pytest.importorskip('PyQt5')
+    pytest.importorskip('qtpy')
     from pycat.ui.field_status import FieldRegistry
     before = len(active_field_registries())
     reg = FieldRegistry()

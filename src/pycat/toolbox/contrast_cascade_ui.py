@@ -8,7 +8,7 @@ import numpy as np
 import napari
 from napari.utils.notifications import show_info as napari_show_info
 from napari.utils.notifications import show_warning as napari_show_warning
-from PyQt5.QtWidgets import (
+from qtpy.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox, QLabel, QProgressBar, QPushButton,
     QSpinBox, QComboBox, QWidget, QSizePolicy,
 )
@@ -82,7 +82,7 @@ def _add_contrast_cascade(ui_instance, layout=None, separate_widget=False):
     dfm.addRow("Image:", diag_img_dd)
     diag_lbl_dd = ui_instance.create_layer_dropdown(napari.layers.Labels)
     dfm.addRow("Object labels:", diag_lbl_dd)
-    from PyQt5.QtWidgets import QDoubleSpinBox
+    from qtpy.QtWidgets import QDoubleSpinBox
     dim_thr = QDoubleSpinBox(); dim_thr.setRange(0.05, 0.95); dim_thr.setDecimals(2)
     dim_thr.setSingleStep(0.05); dim_thr.setValue(0.60)
     dim_thr.setToolTip("Objects dimmer than this fraction of the body's "

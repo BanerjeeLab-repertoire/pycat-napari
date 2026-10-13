@@ -31,7 +31,7 @@ import skimage as sk
 # the headless import of ALL of them, so none could be tested in CI.
 #
 # The dialog imports Qt inside `obcaDialog.__init__`; the analysis functions do not touch
-# it. `PyQt5` is a module-scope name for the class BODY (obcaDialog subclasses QDialog), so
+# it. `Qt` is a module-scope name for the class BODY (obcaDialog subclasses QDialog), so
 # the base class is resolved lazily too — see the class definition below.
 
 # Local application imports
@@ -663,7 +663,7 @@ def _make_obca_dialog_class():
     if _OBCA_DIALOG_CLS is not None:
         return _OBCA_DIALOG_CLS
 
-    from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QLabel, QCheckBox, QHBoxLayout,
+    from qtpy.QtWidgets import (QDialog, QVBoxLayout, QLabel, QCheckBox, QHBoxLayout,
                                  QPushButton)
 
     class obcaDialog(QDialog):
@@ -1007,7 +1007,7 @@ def run_obca(mask_layer1, mask_layer2, roi_mask_layer, data_instance):
     # Display dialog for user to select methods for analysis.
     # Qt is imported here, not at module scope — see _make_obca_dialog_class. QDialog is
     # needed for the Accepted/Rejected constants below, not just for the class.
-    from PyQt5.QtWidgets import QDialog
+    from qtpy.QtWidgets import QDialog
     dialog = _make_obca_dialog_class()()
     result = dialog.exec_()
 

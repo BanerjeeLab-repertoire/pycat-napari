@@ -29,8 +29,8 @@ from pycat.utils.pixel_size import pixel_size_um_or_default
 import pandas as pd
 import napari
 
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
-from PyQt5.QtWidgets import (
+from qtpy.QtCore import Qt, QThread, Signal
+from qtpy.QtWidgets import (
     QLabel, QScrollArea, QSizePolicy, QComboBox, QDoubleSpinBox, QSpinBox,
     QVBoxLayout, QWidget, QPushButton, QGroupBox, QFormLayout, QCheckBox,
     QProgressBar,
@@ -41,9 +41,9 @@ from napari.utils.notifications import (
 
 class _TSIVFWorker(QThread):
     """Generic background worker running a callable that takes a progress cb."""
-    progress = pyqtSignal(int, int)
-    finished_ok = pyqtSignal(object)
-    error = pyqtSignal(str)
+    progress = Signal(int, int)
+    finished_ok = Signal(object)
+    error = Signal(str)
 
     def __init__(self, fn):
         super().__init__()

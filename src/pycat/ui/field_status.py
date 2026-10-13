@@ -28,11 +28,11 @@ the circle colour, the tooltip, the per-step / whole-workflow reset, and the
 future easy/advanced visibility toggle.
 """
 
-from PyQt5.QtWidgets import (
+from qtpy.QtWidgets import (
     QLabel, QWidget, QHBoxLayout, QComboBox, QSpinBox, QDoubleSpinBox,
     QLineEdit, QCheckBox, QRadioButton,
 )
-from PyQt5.QtCore import Qt
+from qtpy.QtCore import Qt
 
 
 # ── roles ──────────────────────────────────────────────────────────────────
@@ -80,8 +80,8 @@ class StatusCircle(QLabel):
         self.update()
 
     def paintEvent(self, _event):
-        from PyQt5.QtGui import QPainter, QColor, QBrush, QPen
-        from PyQt5.QtCore import Qt as _Qt
+        from qtpy.QtGui import QPainter, QColor, QBrush, QPen
+        from qtpy.QtCore import Qt as _Qt
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
         if self._filled:
@@ -265,7 +265,7 @@ def status_row(form, registry, label, widget, role, default=None,
 
 # ── Step 1 (file I/O) + pixel-size gate ─────────────────────────────────────
 
-from PyQt5.QtWidgets import (QGroupBox, QFormLayout, QPushButton,
+from qtpy.QtWidgets import (QGroupBox, QFormLayout, QPushButton,
                              QSizePolicy)
 
 
@@ -373,9 +373,9 @@ def prompt_pixel_size_on_load(get_dr, parent=None, central_manager=None):
         return False
 
     try:
-        from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QLabel, QDoubleSpinBox,
+        from qtpy.QtWidgets import (QDialog, QVBoxLayout, QLabel, QDoubleSpinBox,
                                      QDialogButtonBox, QHBoxLayout)
-        from PyQt5.QtCore import Qt
+        from qtpy.QtCore import Qt
     except Exception:
         return False
 
@@ -675,7 +675,7 @@ def add_pixel_size_gate(layout, get_dr, on_set=None, central_manager=None):
 
 def add_reset_buttons(form, registry, step):
     """Add 'Reset this step' and 'Reset all' buttons to a step's form."""
-    from PyQt5.QtWidgets import QSizePolicy
+    from qtpy.QtWidgets import QSizePolicy
     row = QWidget(); hb = QHBoxLayout(row)
     hb.setContentsMargins(0, 0, 0, 0); hb.setSpacing(5)
     b1 = QPushButton("Reset this step")
@@ -696,7 +696,7 @@ def label_with_circle(text, optional=False, dropdown=None):
     or yellow (optional) until a real layer is selected, then turns green.
     If *dropdown* is given (a QComboBox), the circle updates automatically
     when its selection changes — wire it after calling addRow()."""
-    from PyQt5.QtWidgets import QWidget, QHBoxLayout, QLabel
+    from qtpy.QtWidgets import QWidget, QHBoxLayout, QLabel
     w=QWidget(); hb=QHBoxLayout(w); hb.setContentsMargins(0,0,0,0); hb.setSpacing(4)
     c=StatusCircle()
     init='yellow' if optional else 'red'
@@ -735,7 +735,7 @@ def button_with_circle(button, optional=False, watch_dropdowns=None,
     A ``reset()`` reverts the circle to its initial red/yellow; ``mark_done()`` marks it done. Both are
     attached to the returned wrapper (along with ``_status_circle``) for Clear wiring.
     """
-    from PyQt5.QtWidgets import QWidget, QHBoxLayout
+    from qtpy.QtWidgets import QWidget, QHBoxLayout
     from pycat.utils.marker_logic import resolve_marker
     w = QWidget(); hb = QHBoxLayout(w)
     hb.setContentsMargins(0, 0, 0, 0); hb.setSpacing(4)

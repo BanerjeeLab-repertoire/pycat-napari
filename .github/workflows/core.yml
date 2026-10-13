@@ -34,7 +34,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install the SCIENTIFIC deps only
-        # Deliberately NOT installing napari, PyQt5 or cellpose. If a scientific module
+        # Deliberately NOT installing napari, Qt (qtpy/PySide6) or cellpose. If a scientific module
         # needs them to import, that is the failure this job exists to catch — the fix is
         # to move the GUI import, not to add it here.
         #
@@ -100,7 +100,7 @@ jobs:
           # nothing but numpy, and coverage reported "Module pycat was never imported".
           #
           # `--no-deps` is essential. A plain `pip install -e .` would pull in the
-          # pyproject dependencies — napari, pyqt5, torch, cellpose — and defeat the
+          # pyproject dependencies — napari, PySide6, torch, cellpose — and defeat the
           # entire purpose of a headless job. This installs PyCAT itself and nothing else;
           # its compute dependencies are the explicit list above.
           pip install --no-deps -e .

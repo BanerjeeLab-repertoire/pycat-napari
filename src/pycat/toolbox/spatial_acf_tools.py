@@ -655,7 +655,7 @@ def _build_sacf_roi_inputs(ui_instance, sacf_layout):
     add them to ``sacf_layout``, and return their widgets and dropdowns.
     """
     import napari
-    from PyQt5.QtWidgets import QVBoxLayout, QWidget
+    from qtpy.QtWidgets import QVBoxLayout, QWidget
 
     # ── LIR inputs ─────────────────────────────────────────────────────────
     lir_widget = QWidget()
@@ -705,7 +705,7 @@ def _add_run_sacf_analysis(ui_instance, layout=None, separate_widget=False):
     # Qt, napari and ui_utils are imported HERE, not at module scope — the 13 analysis
     # functions in this module use none of them.
     import napari
-    from PyQt5.QtWidgets import (
+    from qtpy.QtWidgets import (
         QSizePolicy,
         QVBoxLayout, QLabel, QPushButton, QWidget, QComboBox, QButtonGroup,
         QRadioButton, QHBoxLayout,

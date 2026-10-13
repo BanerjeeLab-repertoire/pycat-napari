@@ -53,7 +53,7 @@ def test_the_export_button_writes_the_bundle(qtbot, tmp_path, monkeypatch):
     from pycat.ui.comparative_figures_ui import _build_refine_row
     from pycat.utils.figure_refine import FigureRefineController
     from pycat.utils.figure_spec import FigureSpec
-    from PyQt5.QtWidgets import QFileDialog
+    from qtpy.QtWidgets import QFileDialog
 
     fig = _comparative_fig()
     ctl = FigureRefineController(fig, FigureSpec(figure_size_in=tuple(fig.get_size_inches())),

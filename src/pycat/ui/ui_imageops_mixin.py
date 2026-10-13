@@ -11,8 +11,8 @@ via the mixin, so behaviour is unchanged.
 """
 
 import napari
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import (
+from qtpy.QtCore import Qt
+from qtpy.QtWidgets import (
     QPushButton, QLabel, QVBoxLayout, QHBoxLayout, QLineEdit, QWidget,
     QComboBox, QSlider, QScrollArea, QSizePolicy, QCheckBox)
 
@@ -73,7 +73,7 @@ class _ImageOpsWidgetsMixin:
         # cannot help it and measurably HURTS (interpolation blurs the bimodality
         # Otsu depends on). Rather than let the user guess, measure the objects and
         # say so.
-        from PyQt5.QtWidgets import QComboBox as _QComboBox, QLabel as _QLabel
+        from qtpy.QtWidgets import QComboBox as _QComboBox, QLabel as _QLabel
         _adv_row = QHBoxLayout()
         _adv_row.addWidget(_QLabel("Next segmentation method:"))
         self._upscale_method_dd = _QComboBox()
@@ -203,7 +203,7 @@ class _ImageOpsWidgetsMixin:
         pattern removal) or a SEPARATE image loaded via Add Image (a clear field
         of the same view). Exports the result as TIFF or MP4.
         """
-        from PyQt5.QtWidgets import (QRadioButton, QButtonGroup, QSpinBox,
+        from qtpy.QtWidgets import (QRadioButton, QButtonGroup, QSpinBox,
                                      QDoubleSpinBox, QFileDialog)
         import numpy as np
 
@@ -395,7 +395,7 @@ class _ImageOpsWidgetsMixin:
         and shows results; all the science is in the `core`-tested `toolbox/unmixing_tools`.
         """
         import numpy as np
-        from PyQt5.QtWidgets import QDoubleSpinBox
+        from qtpy.QtWidgets import QDoubleSpinBox
         from napari.utils.notifications import show_info as _info, show_warning as _warn
         from pycat.toolbox.unmixing_tools import (
             estimate_mixing_matrix, unmix, negative_fraction, clip_for_display, mixing_matrix_warnings)

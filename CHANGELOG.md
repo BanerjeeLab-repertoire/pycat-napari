@@ -1,3 +1,40 @@
+## [1.7.0] - 2026-10-12
+### Changed — **PyCAT runs on PySide6 (Qt 6) and no longer depends on PyQt5.**
+Per `docs/audits/PyCAT_Qt6_Migration_Spec.md`. napari has deprecated its PyQt5 backend, so a new user's first sight
+of PyCAT was a deprecation warning, and PyQt5 is GPL under a BSD-licensed package.
+- **Qt only through qtpy.** All 338 PyQt5 import lines (103 files) now import from `qtpy`, and `pyqtSignal`/`pyqtSlot`
+  are `Signal`/`Slot`. qtpy resolves to the installed binding, so the binding is one dependency line. A ratchet test
+  (`test_qt_through_qtpy`) allows zero direct binding imports and zero `pyqt*` names.
+- **Dependency:** `pyqt5` → `qtpy>=2.4` + `PySide6-Essentials>=6.12` (LGPL; the core Qt modules, all PyCAT and napari
+  need). `THIRD_PARTY_LICENSES.txt` updated. The `plotly-interactive` extra now pulls `PySide6-WebEngine` (WebEngine
+  became its own package in PySide6 6.12). pytest-qt runs on `pyside6`.
+- **Upgraded environments still have PyQt5** beside PySide6, and qtpy/napari pick PyQt5 first — so `run-pycat` now
+  launches on PySide6 whenever it is installed, unless `QT_API` is set (`QT_API=pyqt5` still works). The test
+  suite follows the same rule and keeps pytest-qt on the same binding.
+
+### Fixed — the differences the PySide6 smoke pass found
+- **14 of the 19 analysis methods did not open on PySide6**: the dock helpers every panel goes through called
+  `findChildren((A, B, C))`, a PyQt-only form. Now `base_ui.find_children_of_types` (guarded by the ratchet).
+- **The local-cache manager's folder checkbox would have unticked its children on PySide6**: `stateChanged` gives an
+  int, and PySide6's `Qt.Checked` is a plain Enum that never equals one. Converted with `Qt.CheckState(state)`.
+- Deferred tab-height fits no longer raise when their dock was replaced before they ran (PySide6 raises on a deleted
+  widget where PyQt5 did not).
+- **The window could open un-maximized on the first launch after the upgrade** (reported; the second launch was
+  maximized). The launcher re-asserted maximize for a fixed 2.5 s; it now keeps watching until the window has stayed
+  maximized for 1.5 s in a row (at least 2.5 s, at most 10 s), so a slow first launch's late relayout is caught.
+- Text is larger on scaled displays: Qt 6 honours Windows display scaling (150% → the 2560-px screen is 1707 logical
+  px), which Qt 5 ignored. Expected, not a regression.
+- `qtwebengine_available()` reported True on every install (it probed qtpy's wrapper module, which always exists); it
+  now asks the installed binding.
+
+### Verified, on both PySide6 6.12 and PyQt5 5.15
+Full test suite (pytest-qt now installed, so the ~50 widget tests run instead of erroring); a real `run-pycat` launch
+opening all 19 analysis methods with 0 exceptions, including in a simulated fresh install (PySide6-Essentials only,
+no PyQt5); a two-image cellular batch whose cell and condensate tables are identical to PyQt5's; batch brushing in
+every direction; the in-vitro batch; the VPT results dock and drift readout; drag-and-drop routing; the pyqtgraph and
+plotly backends. Not verified by a person at the keyboard: visual polish (fonts, high-DPI, stylesheets, native file
+dialogs).
+
 ## [1.6.476] - 2026-10-12
 ### Changed — **VPT drift is measured directly, tested, and applied only when it is real; it never moves a bead.**
 The old correction (`drift_correct_com`) chained the mean frame-to-frame step of whatever tracks spanned each frame

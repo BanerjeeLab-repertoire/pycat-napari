@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pycat-napari"
-version = "1.6.476"
+version = "1.7.0"
 description = "Python Condensate Analysis Toolbox - A napari-based tool for biomolecular condensate analysis"
 readme = "README.md"
 # 3.13 is BLOCKED UPSTREAM, not by PyCAT's own code (which compiles and passes core on 3.13).
@@ -88,7 +88,13 @@ dependencies = [
     "opencv-python-headless",
     "pandas",
     "pydantic",
-    "pyqt5",
+    # Qt (1.7.0): PyCAT imports Qt ONLY through qtpy, so the binding is this one line. PySide6 (LGPL) replaced
+    # PyQt5 (GPL, and deprecated by napari): a BSD-licensed package should not pull a GPL binding into every
+    # install. The Essentials wheel is the core Qt modules — all PyCAT and napari need (verified: full suite,
+    # every analysis method, batch, brushing). qtpy picks it up automatically; QT_API=pyqt5 still works if
+    # PyQt5 is installed instead.
+    "qtpy>=2.4",
+    "PySide6-Essentials>=6.12",
     "torch",
     "pywavelets",
     "scikit-image",
@@ -162,11 +168,12 @@ bioformats = [
 plotly = [
     "plotly",
 ]
-# The click->napari bridge for plotly. Heavy (~100 MB) and a common source of Qt install trouble;
-# install it only if the plotly click is actually wanted.
+# QtWebEngine for a future plotly click->napari bridge. Heavy (~100 MB). NOTE: no bridge uses it yet — the
+# only consumer is the availability probe (plot_backend_selection.qtwebengine_available). Since PySide6 6.12
+# WebEngine is its own package (PySide6-WebEngine), no longer part of PySide6-Addons.
 plotly-interactive = [
     "plotly",
-    "PyQtWebEngine",
+    "PySide6-WebEngine",
 ]
 # The native-Qt interactive plot backend (the "explore" backend). Same event loop as napari, so a
 # click is a Qt signal with no WebEngine bridge; fast at large N. Optional — PyCAT runs without it and
@@ -308,7 +315,7 @@ pythonpath = ["src"]
 # qt_api is consumed by pytest-qt (the `integration` lane and local `.[test]` runs). In the minimal
 # headless `core` lane pytest-qt is absent, so pytest emits a harmless "Unknown config option: qt_api"
 # warning there — acceptable, because that lane no longer ERRORS on Qt (the Qt tests are `integration`).
-qt_api = "pyqt5"
+qt_api = "pyside6"
 # Two test tiers. The scientific kernels must be verifiable WITHOUT a GUI stack --
 # a viscosity calculation, an MSD fit or a colocalization coefficient should be
 # checkable in a plain pytest run with no display, no Qt and no napari. Coupling them

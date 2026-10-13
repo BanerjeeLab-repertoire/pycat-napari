@@ -1,9 +1,9 @@
 """GUI-free lazy array sources (``_TiffPageStack``, ``_LazyArraySource``) — extracted from
 ``file_io.py`` so the TIFF lazy wrappers can be imported and perf-tested without dragging in
-PyQt5. **Qt/napari-free by contract** (enforced by ``tests/test_lazy_sources_headless.py``).
+Qt. **Qt/napari-free by contract** (enforced by ``tests/test_lazy_sources_headless.py``).
 
 ``file_io.py`` imports the GUI stack at module scope (two ``QDialog`` subclasses live there), so
-every wrapper defined beside them was reachable only by importing PyQt5 first. That made the
+every wrapper defined beside them was reachable only by importing Qt first. That made the
 wrappers impossible to exercise headlessly — which is exactly what a performance harness or a CI
 perf gate wants to do. The wrappers themselves never needed Qt: their bodies use ``tifffile``,
 ``numpy`` and two already-shared helpers. Only their address did.

@@ -21,12 +21,12 @@ from napari.utils.notifications import (
     show_info    as napari_show_info,
     show_warning as napari_show_warning,
 )
-from PyQt5.QtWidgets import (
+from qtpy.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QGroupBox, QFormLayout,
     QCheckBox, QSpinBox, QDoubleSpinBox, QLabel, QComboBox, QProgressBar, QScrollArea,
     QSizePolicy,
 )
-from PyQt5.QtCore import Qt
+from qtpy.QtCore import Qt
 
 
 class FDCurveUI:
@@ -110,7 +110,7 @@ class FDCurveUI:
         layout.addWidget(grp)
 
     def _on_load(self):
-        from PyQt5.QtWidgets import QFileDialog
+        from qtpy.QtWidgets import QFileDialog
         from pycat.file_io.frap_io import lumicks_available, load_lumicks_fd
         if not lumicks_available():
             napari_show_warning("lumicks.pylake not installed. Run: pip install lumicks.pylake")
@@ -415,7 +415,7 @@ class FDCurveUI:
             parent=_parent, title='Detecting rips', text='Fitting each half-cycle…')
 
     def _on_export(self):
-        from PyQt5.QtWidgets import QFileDialog
+        from qtpy.QtWidgets import QFileDialog
         from pycat.toolbox.fd_curve_tools import cycles_to_dataframe
         seg = self._dr().get('fd_segments')
         if seg is None:

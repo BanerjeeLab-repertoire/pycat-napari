@@ -43,13 +43,13 @@ from napari.utils.notifications import (
     show_info    as napari_show_info,
     show_warning as napari_show_warning,
 )
-from PyQt5.QtWidgets import (
+from qtpy.QtWidgets import (
     QVBoxLayout, QWidget, QPushButton, QGroupBox, QFormLayout,
     QCheckBox, QSpinBox, QDoubleSpinBox, QLabel, QProgressBar,
     QScrollArea, QSizePolicy, QHBoxLayout, QTabWidget, QComboBox,
     QRadioButton, QButtonGroup, QStackedWidget,
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from qtpy.QtCore import Qt, QThread, Signal
 
 
 # _IVFWorker is the shared background task-worker (redundancy_consolidation axis 3): a QThread emitting
@@ -1130,7 +1130,7 @@ def _ivf_phase_diagram(ui, layout):
         "from a dilution series to estimate C_sat via the lever rule.\n"
         "Separate values with commas.</span>"
     ))
-    from PyQt5.QtWidgets import QLineEdit
+    from qtpy.QtWidgets import QLineEdit
     conc_edit = QLineEdit(); conc_edit.setPlaceholderText("e.g. 1, 2, 5, 10, 20  (µM)")
     conc_edit.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     phi_edit  = QLineEdit(); conc_edit.setPlaceholderText("e.g. 0, 0, 0.05, 0.12, 0.21")

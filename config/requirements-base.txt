@@ -13,7 +13,8 @@ numpy
 opencv-python-headless
 pandas
 pydantic
-pyqt5
+qtpy
+PySide6-Essentials
 torch
 pywavelets
 scikit-image

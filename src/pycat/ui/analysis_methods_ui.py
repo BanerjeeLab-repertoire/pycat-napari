@@ -9,8 +9,8 @@ so one module keeps that mutual dependency cycle-free. ui_modules re-exports eve
 from __future__ import annotations
 
 import napari
-from PyQt5.QtWidgets import QDoubleSpinBox, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QRadioButton, QPushButton, QLineEdit, QWidget, QComboBox, QSlider, QScrollArea, QSizePolicy, QAction, QTabWidget, QToolButton, QFrame
-from PyQt5.QtCore import Qt, QObject
+from qtpy.QtWidgets import QDoubleSpinBox, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QRadioButton, QPushButton, QLineEdit, QWidget, QComboBox, QSlider, QScrollArea, QSizePolicy, QAction, QTabWidget, QToolButton, QFrame
+from qtpy.QtCore import Qt, QObject
 from pycat.toolbox.brightfield_ui import BrightfieldCondensateUI
 from pycat.toolbox.invitro_fluor_ui import InVitroFluorUI
 from pycat.toolbox.timeseries_invitro_fluor_ui import TimeSeriesInVitroFluorUI
@@ -498,7 +498,7 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
         (e.g. frames 100–400 after stimulus addition) without modifying
         the source file or loading the whole stack into memory.
         """
-        from PyQt5.QtWidgets import (QGroupBox, QFormLayout, QSpinBox,
+        from qtpy.QtWidgets import (QGroupBox, QFormLayout, QSpinBox,
                                       QLabel)
         import numpy as np
 
@@ -624,7 +624,7 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
         stack_dropdown.currentIndexChanged.connect(_on_stack_changed)
 
         # ── XY ROI crop controls ─────────────────────────────────────────
-        from PyQt5.QtWidgets import QComboBox as _QCB, QGroupBox as _QGB
+        from qtpy.QtWidgets import QComboBox as _QCB, QGroupBox as _QGB
 
         roi_grp = _QGB("XY Region of Interest")
         roi_grp.setFlat(True)
@@ -653,8 +653,8 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
             # noticeable moment. Show a wait cursor and defer the heavy work by
             # one event-loop tick so the button click feels instant instead of
             # freezing mid-press.
-            from PyQt5.QtCore import QTimer, Qt as _Qt
-            from PyQt5.QtWidgets import QApplication as _QApp
+            from qtpy.QtCore import QTimer, Qt as _Qt
+            from qtpy.QtWidgets import QApplication as _QApp
 
             def _do_add():
                 try:

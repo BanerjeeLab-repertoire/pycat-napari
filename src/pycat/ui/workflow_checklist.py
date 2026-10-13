@@ -24,12 +24,12 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from PyQt5.QtWidgets import (
+from qtpy.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel, QPushButton,
     QFrame, QSizePolicy, QScrollArea, QToolButton, QCheckBox,
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QObject, QPoint
-from PyQt5.QtGui import QFont
+from qtpy.QtCore import Qt, Signal, QObject, QPoint
+from qtpy.QtGui import QFont
 
 
 # ---------------------------------------------------------------------------

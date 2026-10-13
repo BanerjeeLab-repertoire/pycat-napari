@@ -32,7 +32,7 @@ import os
 #
 # It was a module-level constant in `file_io.py`, and importing it back from there would make this
 # module import its former host — **a cycle.** *(And an unverifiable one: the sandbox has no Qt, so
-# `import napari_adapter` dies on PyQt5 before it ever reaches the circular import. A cycle I cannot
+# `import napari_adapter` dies on Qt before it ever reaches the circular import. A cycle I cannot
 # test is a cycle I will not ship.)*
 #
 # The diameter-annotation layers are created **on demand** by the measure widget the first time the
@@ -384,7 +384,7 @@ def _fit_view_to_layer(viewer, central_manager, layer=None, margin=0.9, attempt=
 
         # Canvas not laid out yet → retry shortly (up to ~6 attempts).
         if (not cw or not ch or cw <= 1 or ch <= 1) and attempt < 6:
-            from PyQt5.QtCore import QTimer as _QT
+            from qtpy.QtCore import QTimer as _QT
             _QT.singleShot(120 * (attempt + 1),
                            lambda: _fit_view_to_layer(viewer, central_manager, layer, margin, attempt + 1))
             return
@@ -408,7 +408,7 @@ def _fit_view_to_layer(viewer, central_manager, layer=None, margin=0.9, attempt=
                 print(f"[PyCAT fit] layer='{layer.name}' extent_world_size(yx)={sizes} "
                       f"canvas(w,h)=({cw},{ch}) zoom {_z_before:.4f} -> {_z:.4f} "
                       f"(attempt {attempt})")
-                from PyQt5.QtCore import QTimer as _QTd
+                from qtpy.QtCore import QTimer as _QTd
                 _QTd.singleShot(600, lambda: print(
                     f"[PyCAT fit] zoom 600ms later = {float(viewer.camera.zoom):.4f} "
                     f"(if changed, something reset it)"))

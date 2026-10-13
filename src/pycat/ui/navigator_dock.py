@@ -34,7 +34,7 @@ _PLAN_LEGEND = ("Step colour — green: ready · ⏳ blue: a QC probe runs first
 
 
 def _label(text, style=""):
-    from PyQt5.QtWidgets import QLabel
+    from qtpy.QtWidgets import QLabel
     lbl = QLabel(text)
     lbl.setWordWrap(True)
     if style:
@@ -44,7 +44,7 @@ def _label(text, style=""):
 
 def _row_frame(row):
     """One plan-step row: its name coloured by gate state, its reason, and the inline quality-gate notes."""
-    from PyQt5.QtWidgets import QFrame, QVBoxLayout
+    from qtpy.QtWidgets import QFrame, QVBoxLayout
     frame = QFrame()
     frame.setFrameShape(QFrame.StyledPanel)
     frame.setToolTip(_STATE_MEANING.get(row.state, ""))     # every step explains its own colour/state
@@ -61,7 +61,7 @@ def _row_frame(row):
 
 def _render_question(widget, body_layout, spec, on_answer):
     """Render a question (prompt + rationale + one button per choice) into ``body_layout``; a click answers."""
-    from PyQt5.QtWidgets import QPushButton
+    from qtpy.QtWidgets import QPushButton
     widget._state = "question"
     widget._choice_buttons = []
     body_layout.addWidget(_label(spec.prompt, "font-size: 13px; margin-top: 6px;"))
@@ -79,7 +79,7 @@ def _wire_reevaluation(widget, central_manager, render):
     """Wire the plan to viewer state: a layer inserted/removed or a calibration change RE-GATES (not
     recompiles) the compiled plan so a blocked step flips to satisfied and the run action re-enables — the fix
     for a panel that never tracked the data. Debounced: bursts of layer events coalesce into one cheap re-gate."""
-    from PyQt5.QtCore import QTimer
+    from qtpy.QtCore import QTimer
 
     def _reevaluate_now():
         widget._reeval_pending = False
@@ -133,8 +133,8 @@ def _make_run_progress_dialog(central_manager, plan):
     window is unavailable (headless). Its Cancel button drives ``run_plan``'s ``should_cancel``, and its value
     is advanced by ``on_progress``. Modal to the napari window so a run is not launched twice."""
     try:
-        from PyQt5.QtWidgets import QProgressDialog
-        from PyQt5.QtCore import Qt
+        from qtpy.QtWidgets import QProgressDialog
+        from qtpy.QtCore import Qt
         from pycat.navigator.execution import execution_order
         total = len(list(execution_order(plan)))
         if total <= 0:
@@ -178,7 +178,7 @@ def run_plan_via_central_manager(central_manager, plan, review=None):
         def _should_cancel():
             if dlg is None:
                 return False
-            from PyQt5.QtWidgets import QApplication
+            from qtpy.QtWidgets import QApplication
             QApplication.processEvents()      # let a Cancel click register between steps
             return dlg.wasCanceled()
 
@@ -260,7 +260,7 @@ def _add_plan_action_buttons(widget, body_layout):
     executor path, honestly labelled for what it does (running just the adapted steps). Both are gated by
     ``run_blocked_reason`` so an untrustworthy plan (uncalibrated scale, missing channel) says WHY rather than
     building/running something that would produce a wrong number. A disabled action is never a dead control."""
-    from PyQt5.QtWidgets import QPushButton
+    from qtpy.QtWidgets import QPushButton
     reason = widget._session.run_blocked_reason()
 
     def _build():
@@ -298,7 +298,7 @@ def _add_template_save(widget, body_layout):
     """Add a 'Save as template…' button that persists the answered plan under a user-supplied name (the answers
     + step names, NOT the gate verdicts — see navigator.templates). Reusable on other data without
     re-answering. Best-effort: a save failure never breaks the plan view."""
-    from PyQt5.QtWidgets import QPushButton, QInputDialog
+    from qtpy.QtWidgets import QPushButton, QInputDialog
 
     def _save():
         try:
@@ -324,7 +324,7 @@ def _add_template_save(widget, body_layout):
 def _param_input(param, value, on_change):
     """One editable control for a material parameter, seeded at ``value``; ``on_change(new_value)`` fires on
     edit. int → spin box, float → double spin, choice → combo. Returns the widget (or ``None`` on an odd kind)."""
-    from PyQt5.QtWidgets import QSpinBox, QDoubleSpinBox, QComboBox
+    from qtpy.QtWidgets import QSpinBox, QDoubleSpinBox, QComboBox
     if param.kind == "int":
         w = QSpinBox()
         w.setMinimum(int(param.minimum) if param.minimum is not None else 0)
@@ -355,7 +355,7 @@ def _add_param_review(widget, body_layout, plan):
     ``_review`` for the run. Surfaces the handful of material parameters per adapter-covered step, seeded from a
     preset/session value/grounded default (never invented); an edit is tracked so the run records provenance.
     Renders nothing when no adapter-covered step has material params — the honest 'nothing to review' case."""
-    from PyQt5.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout
+    from qtpy.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout
     from pycat.navigator.parameters import build_param_review
     try:
         review = build_param_review(plan, ctx=widget._session.ctx)
@@ -391,8 +391,8 @@ def build_navigator_widget(session, *, on_run=None, central_manager=None, parent
     action re-enables — the fix for a panel that was inert. Exposes ``_render()`` / ``_state`` /
     ``_choice_buttons`` / ``_reevaluate_now`` for a Qt-smoke test to drive it."""
     try:
-        from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QLabel, QPushButton, QScrollArea)
-        from PyQt5.QtCore import Qt
+        from qtpy.QtWidgets import (QWidget, QVBoxLayout, QLabel, QPushButton, QScrollArea)
+        from qtpy.QtCore import Qt
     except Exception:      # broad-ok: optional_probe — no Qt (headless) → no widget, callers guard on None
         return None
     from pycat.navigator.session import plan_rows, NavigatorSession, context_from_session
@@ -488,7 +488,7 @@ def install_navigator_action(viewer, *, on_run=None, central_manager=None):
     track viewer state (re-gate on load). Installed from ``central_manager`` (not the line-capped menu
     god-file). Returns the ``QAction`` or ``None`` (headless)."""
     try:
-        from PyQt5.QtWidgets import QAction
+        from qtpy.QtWidgets import QAction
     except Exception:      # broad-ok: optional_probe — no Qt (headless) → no action
         return None
     qt = getattr(getattr(viewer, "window", None), "_qt_window", None)

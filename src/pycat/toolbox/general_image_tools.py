@@ -23,7 +23,7 @@ functions exactly as before.
 
 import numpy as np
 
-from PyQt5.QtWidgets import (
+from qtpy.QtWidgets import (
     QGroupBox, QFormLayout, QVBoxLayout, QWidget, QComboBox, QPushButton,
     QLabel, QSpinBox, QDoubleSpinBox, QCheckBox, QSizePolicy)
 

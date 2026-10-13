@@ -17,8 +17,8 @@ etc.). The mixin is only ever combined into ToolboxFunctionsUI, which provides t
 import math
 
 import napari
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import (
+from qtpy.QtCore import Qt
+from qtpy.QtWidgets import (
     QPushButton, QLabel, QVBoxLayout, QHBoxLayout, QLineEdit, QWidget,
     QComboBox, QSlider, QScrollArea, QSizePolicy)
 
@@ -40,7 +40,7 @@ class _DiagnosticsWidgetsMixin:
               LoG not DoG, no /max normalisation).
         Run each panel independently to compare step-by-step.
         """
-        from PyQt5.QtWidgets import QGroupBox, QFormLayout, QTabWidget, QWidget, QVBoxLayout
+        from qtpy.QtWidgets import QGroupBox, QFormLayout, QTabWidget, QWidget, QVBoxLayout
 
         outer = QVBoxLayout()
         self.add_text_label(outer, 'Pipeline Step Diagnostics', bold=True)
@@ -51,7 +51,7 @@ class _DiagnosticsWidgetsMixin:
         tabs = QTabWidget()
 
         def _make_panel(label, run_fn):
-            from PyQt5.QtWidgets import QProgressBar as _QProgressBar
+            from qtpy.QtWidgets import QProgressBar as _QProgressBar
             grp_w = QWidget(); vb = QVBoxLayout(grp_w)
             form = QFormLayout()
             form.setContentsMargins(4, 8, 4, 4)
@@ -148,7 +148,7 @@ class _DiagnosticsWidgetsMixin:
         the current values into the session defaults so the next Pre-process /
         batch run uses them.
         """
-        from PyQt5.QtWidgets import (QLabel as _QLabel, QWidget as _QWidget,
+        from qtpy.QtWidgets import (QLabel as _QLabel, QWidget as _QWidget,
                                      QFormLayout, QHBoxLayout as _QHBoxLayout)
         import napari
         from pycat.toolbox.image_processing_tools import (
@@ -304,7 +304,7 @@ class _DiagnosticsWidgetsMixin:
         the raw intensity trend, and lets you apply the winner as the session
         default for time-series preprocessing.
         """
-        from PyQt5.QtWidgets import (QFormLayout, QSpinBox,
+        from qtpy.QtWidgets import (QFormLayout, QSpinBox,
                                      QCheckBox, QLabel as _QLabel)
         import napari
 
@@ -475,7 +475,7 @@ class _DiagnosticsWidgetsMixin:
         which case the others are scored against it (pixel Dice/IoU AND
         matched-detection precision/recall/F1, shown side by side).
         """
-        from PyQt5.QtWidgets import (QFormLayout, QCheckBox, QDoubleSpinBox, QLabel as _QLabel,
+        from qtpy.QtWidgets import (QFormLayout, QCheckBox, QDoubleSpinBox, QLabel as _QLabel,
                                      QListWidget, QListWidgetItem, QGroupBox,
                                      QVBoxLayout as _QV)
         import napari
@@ -693,7 +693,7 @@ class _DiagnosticsWidgetsMixin:
         software one). Produces the supplementary-figure artifact: detections vs
         threshold for both controls, the recommended point marked.
         """
-        from PyQt5.QtWidgets import (QFormLayout, QSpinBox, QLabel as _QLabel)
+        from qtpy.QtWidgets import (QFormLayout, QSpinBox, QLabel as _QLabel)
         from matplotlib.figure import Figure
         from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
         import napari
@@ -801,7 +801,7 @@ class _DiagnosticsWidgetsMixin:
         windowed (fast) refinement filter, timing each and verifying the refined
         masks are identical. Reports timings, speedup, and equivalence.
         """
-        from PyQt5.QtWidgets import QFormLayout, QWidget as _QWidget, QVBoxLayout as _QVBoxLayout
+        from qtpy.QtWidgets import QFormLayout, QWidget as _QWidget, QVBoxLayout as _QVBoxLayout
 
         outer = _QVBoxLayout()
         self.add_text_label(outer, 'Segmentation Speed Comparison', bold=True)
@@ -869,7 +869,7 @@ class _DiagnosticsWidgetsMixin:
         channel, adds raw + normalised layers, and — if a Labeled Cell Mask
         exists — writes per-cell topology metrics into cell_df.
         """
-        from PyQt5.QtWidgets import (QFormLayout, QDoubleSpinBox,
+        from qtpy.QtWidgets import (QFormLayout, QDoubleSpinBox,
                                      QWidget as _QWidget, QVBoxLayout as _QVBoxLayout)
         import napari
 
@@ -938,7 +938,7 @@ class _DiagnosticsWidgetsMixin:
         channel) infers partition vs exclusion. Calibrate the knobs against real
         data like the foreground-suppression tuner, then the defaults can be baked.
         """
-        from PyQt5.QtWidgets import (QFormLayout, QLabel as _QLabel,
+        from qtpy.QtWidgets import (QFormLayout, QLabel as _QLabel,
                                      QWidget as _QWidget, QVBoxLayout as _QVBoxLayout,
                                      QHBoxLayout as _QHBoxLayout)
         import napari
@@ -1042,7 +1042,7 @@ class _DiagnosticsWidgetsMixin:
         Also does a live probe: nudges contrast_limits and checks the change
         actually registers on the layer object.
         """
-        from PyQt5.QtWidgets import QWidget as _QWidget, QVBoxLayout as _QVBoxLayout, QTextEdit
+        from qtpy.QtWidgets import QWidget as _QWidget, QVBoxLayout as _QVBoxLayout, QTextEdit
         import numpy as _np
 
         outer = _QVBoxLayout()

@@ -146,7 +146,7 @@ def _build_snr_panel_widgets():
 
     Returns ``(outer_layout, table, note_label, refresh_btn)``.
     """
-    from PyQt5.QtWidgets import (
+    from qtpy.QtWidgets import (
         QVBoxLayout, QHBoxLayout, QPushButton,
         QTableWidget, QLabel, QSizePolicy,
         QHeaderView, QAbstractItemView)
@@ -203,9 +203,9 @@ def _add_pipeline_snr_analysis(ui_instance, layout=None, separate_widget=False):
     displays a colour-coded table.  A 'Refresh' button re-scans after
     running the diagnostic widget.
     """
-    from PyQt5.QtWidgets import QWidget, QTableWidgetItem
-    from PyQt5.QtCore import Qt
-    from PyQt5.QtGui import QColor
+    from qtpy.QtWidgets import QWidget, QTableWidgetItem
+    from qtpy.QtCore import Qt
+    from qtpy.QtGui import QColor
     import numpy as np
 
     outer, table, note, refresh_btn = _build_snr_panel_widgets()

@@ -437,7 +437,7 @@ def _add_client_enrichment(ui_instance, layout=None, separate_widget=False):
     per-cell enrichment.
     """
     import napari
-    from PyQt5.QtWidgets import (
+    from qtpy.QtWidgets import (
         QGroupBox, QFormLayout, QLabel, QSpinBox, QDoubleSpinBox, QPushButton,
         QProgressBar, QSizePolicy)
 
@@ -596,7 +596,7 @@ def _add_client_enrichment(ui_instance, layout=None, separate_widget=False):
     if layout is not None and not separate_widget:
         layout.addWidget(grp)
     else:
-        from PyQt5.QtWidgets import QVBoxLayout, QWidget, QScrollArea, QSizePolicy
+        from qtpy.QtWidgets import QVBoxLayout, QWidget, QScrollArea, QSizePolicy
         w = QWidget(); vl = QVBoxLayout(w); vl.addWidget(grp)
         w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         try:

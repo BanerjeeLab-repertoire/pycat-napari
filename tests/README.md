@@ -56,7 +56,7 @@ silently breaks a menu or workflow.
 - **`test_ui_smoke`** forces an offscreen Qt platform and actually constructs the
   CentralManager / toolbox UI / MenuManager, catching mixin-composition / MRO
   errors, missing-attribute-at-construction, and import cycles that a static parse
-  can't. Skips automatically where PyQt5/napari aren't installed.
+  can't. Skips automatically where Qt (qtpy + a binding)/napari aren't installed.
 
 **Recommended workflow for the `ui_modules.py` split:** run `pytest
 tests/test_ui_structure.py tests/test_ui_smoke.py -v` before and after each step of

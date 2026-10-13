@@ -13,7 +13,7 @@ _M = np.array([[1.00, 0.15], [0.08, 1.00]])          # 8 % / 15 % crosstalk
 
 @pytest.mark.integration
 def test_the_unmixing_step_builds_and_recovers_the_true_channels(qtbot):
-    from PyQt5.QtWidgets import QComboBox, QPushButton, QVBoxLayout, QLabel
+    from qtpy.QtWidgets import QComboBox, QPushButton, QVBoxLayout, QLabel
     import napari
     from pycat.ui.ui_imageops_mixin import _ImageOpsWidgetsMixin
 
@@ -56,7 +56,7 @@ def test_the_unmixing_step_builds_and_recovers_the_true_channels(qtbot):
 
 @pytest.mark.integration
 def test_the_step_warns_and_does_not_emit_when_controls_are_missing(qtbot, monkeypatch):
-    from PyQt5.QtWidgets import QComboBox, QPushButton, QVBoxLayout, QLabel
+    from qtpy.QtWidgets import QComboBox, QPushButton, QVBoxLayout, QLabel
     import napari
     import pycat.ui.ui_imageops_mixin as mod
     from pycat.ui.ui_imageops_mixin import _ImageOpsWidgetsMixin

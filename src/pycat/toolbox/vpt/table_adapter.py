@@ -17,12 +17,12 @@ from napari.utils.notifications import (
     show_info    as napari_show_info,
     show_warning as napari_show_warning,
 )
-from PyQt5.QtWidgets import (
+from qtpy.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QGroupBox, QFormLayout,
     QCheckBox, QSpinBox, QDoubleSpinBox, QLabel, QProgressBar,
     QScrollArea, QSizePolicy, QRadioButton, QComboBox, QLineEdit,
 )
-from PyQt5.QtCore import QThread, pyqtSignal, Qt
+from qtpy.QtCore import QThread, Signal, Qt
 
 
 class _VptTableMixin:
@@ -105,9 +105,9 @@ class _VptTableMixin:
         dispatcher can select a row here when the selection comes from elsewhere.
         Registers _track_table_registry {table, row_for_id, id_col}."""
         try:
-            from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QTableWidget,
+            from qtpy.QtWidgets import (QDialog, QVBoxLayout, QTableWidget,
                                          QTableWidgetItem, QLabel)
-            from PyQt5.QtCore import Qt
+            from qtpy.QtCore import Qt
         except Exception:
             return
         if per_track_metrics is None or per_track_metrics.empty:

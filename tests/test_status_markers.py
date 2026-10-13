@@ -13,7 +13,7 @@ import pytest
 
 @pytest.mark.integration
 def test_ready_is_outlined_amber_and_green_only_after_run(qtbot):
-    from PyQt5.QtWidgets import QPushButton, QComboBox
+    from qtpy.QtWidgets import QPushButton, QComboBox
     from pycat.ui.field_status import button_with_circle, _COLORS
 
     dd = QComboBox(); dd.addItems(["Select image", "MyLayer"])
@@ -34,7 +34,7 @@ def test_ready_is_outlined_amber_and_green_only_after_run(qtbot):
 
 @pytest.mark.integration
 def test_cycling_button_does_not_complete_on_a_raw_click(qtbot):
-    from PyQt5.QtWidgets import QPushButton
+    from qtpy.QtWidgets import QPushButton
     from pycat.ui.field_status import button_with_circle, _COLORS
 
     btn = QPushButton("Draw Lines")
@@ -50,7 +50,7 @@ def test_cycling_button_does_not_complete_on_a_raw_click(qtbot):
 
 @pytest.mark.integration
 def test_optional_action_goes_blue_on_run(qtbot):
-    from PyQt5.QtWidgets import QPushButton
+    from qtpy.QtWidgets import QPushButton
     from pycat.ui.field_status import button_with_circle, _COLORS
 
     btn = QPushButton("Run upscaling")

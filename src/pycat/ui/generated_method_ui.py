@@ -18,8 +18,8 @@ into widgets. Acceptance (Spec 1.6) is a manual napari run of the cell/condensat
 """
 from __future__ import annotations
 
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import QLabel, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
+from qtpy.QtCore import Qt
+from qtpy.QtWidgets import QLabel, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
 from pycat.ui.analysis_methods_ui import AnalysisMethodsUI
 from pycat.ui.base_ui import _relax_min_widths, _apply_scroll_guard
@@ -137,7 +137,7 @@ class GeneratedMethodUI(AnalysisMethodsUI):
         advantages / limitations / alternatives in place, and — when peer ops exist — a **Use this instead**
         button per alternative that swaps the step and rebuilds the panel (live revision). Best-effort — a guidance
         link must never block or crash the section it decorates."""
-        from PyQt5.QtWidgets import QToolButton
+        from qtpy.QtWidgets import QToolButton
         from pycat.ui.guidance_popout import open_guidance_popout
         alts = self._peer_alternatives(op_id)
         on_revise = (lambda new, cur=op_id: self._revise_to(cur, new)) if alts else None

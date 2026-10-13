@@ -59,7 +59,7 @@ def build_feature_explorer_dock(table, *, context=None, selection_service=None,
 
     Returns ``None`` if Qt is unavailable (headless) — the aggregator is usable without this shell."""
     try:
-        from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QListWidget, QLineEdit,
+        from qtpy.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QListWidget, QLineEdit,
                                      QTextBrowser, QLabel)
         from matplotlib.figure import Figure
         from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg

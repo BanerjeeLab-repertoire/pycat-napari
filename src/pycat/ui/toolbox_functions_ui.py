@@ -6,7 +6,7 @@ leaf module) plus the six widget mixins. ui_modules re-exports it, so
 from __future__ import annotations
 
 import napari
-from PyQt5.QtWidgets import QDoubleSpinBox, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QRadioButton, QPushButton, QLineEdit, QWidget, QComboBox, QSlider, QScrollArea, QSizePolicy, QAction, QTabWidget, QToolButton, QFrame
+from qtpy.QtWidgets import QDoubleSpinBox, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QRadioButton, QPushButton, QLineEdit, QWidget, QComboBox, QSlider, QScrollArea, QSizePolicy, QAction, QTabWidget, QToolButton, QFrame
 from pycat.toolbox.image_processing_tools import run_pre_process_image, run_apply_rescale_intensity, run_invert_image, run_upscaling_func, run_rb_gaussian_background_removal, run_enhanced_rb_gaussian_bg_removal, run_wbns, run_wavelet_noise_subtraction, run_apply_bilateral_filter, run_clahe, run_peak_and_edge_enhancement, run_morphological_gaussian_filter, run_dpr, run_apply_laplace_of_gauss_filter
 from pycat.ui.ui_diagnostics_mixin import _DiagnosticsWidgetsMixin
 from pycat.ui.ui_filtering_mixin import _FilteringWidgetsMixin
@@ -112,8 +112,8 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
 
         def _make_dock_wrapper(fn, dock_name):
             def _wrapper(layout=None, separate_widget=False):
-                from PyQt5.QtWidgets import QVBoxLayout as _VBL, QWidget as _QW, QScrollArea as _QSA
-                from PyQt5.QtCore import Qt as _Qt
+                from qtpy.QtWidgets import QVBoxLayout as _VBL, QWidget as _QW, QScrollArea as _QSA
+                from qtpy.QtCore import Qt as _Qt
                 inner_layout = _VBL()
                 fn(self, inner_layout)
                 w = _QW(); w.setLayout(inner_layout)
@@ -356,7 +356,7 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
             if not _has_clearable():
                 return True
             try:
-                from PyQt5.QtWidgets import QMessageBox
+                from qtpy.QtWidgets import QMessageBox
                 box = QMessageBox()
                 box.setWindowTitle("Clear measurements?")
                 box.setIcon(QMessageBox.Question)
@@ -402,7 +402,7 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
         # that; otherwise it reads "Draw Lines". Deferred so the dock has finished
         # building and any persisted layers are present.
         try:
-            from PyQt5.QtCore import QTimer as _QTarm
+            from qtpy.QtCore import QTimer as _QTarm
             _QTarm.singleShot(0, _relabel)
         except Exception:
             try:
@@ -447,8 +447,8 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
         Both the 'preprocessing' and 'background_removal' batch steps are recorded
         so replay reproduces both layers.
         """
-        from PyQt5.QtWidgets import QLabel as _QLabel, QWidget as _QWidget, QFormLayout
-        from PyQt5.QtCore import Qt
+        from qtpy.QtWidgets import QLabel as _QLabel, QWidget as _QWidget, QFormLayout
+        from qtpy.QtCore import Qt
         from pycat.toolbox.image_processing_tools import FOREGROUND_SUPPRESSION_DEFAULTS
 
         pre_process_layout = QVBoxLayout()
@@ -611,7 +611,7 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
         clear-frame reference once (it persists across images for the session),
         pick the correction type, and apply it to the active image layer.
         """
-        from PyQt5.QtWidgets import QFileDialog
+        from qtpy.QtWidgets import QFileDialog
         import os as _os
         from napari.utils.notifications import show_warning as _warn, show_info as _info
 

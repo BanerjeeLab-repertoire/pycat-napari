@@ -26,7 +26,7 @@ import pytest
 
 pytestmark = pytest.mark.base
 
-_FORBIDDEN_ROOTS = {"napari", "PyQt5", "PyQt6", "qtpy"}
+_FORBIDDEN_ROOTS = {"napari", "PyQt5", "PyQt6", "PySide2", "PySide6", "qtpy"}
 
 # The data layer — the modules a `core` test may legitimately reach without a GUI. Kept explicit
 # rather than globbed: a new file under `pycat/data/` should be a deliberate addition here, with a

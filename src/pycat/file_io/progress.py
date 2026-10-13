@@ -22,16 +22,16 @@ class _ProgressMixin:
         detaches (drops the orphan's result) rather than ``thread.wait()`` blocking (the X-out hang).
         """
         try:
-            from PyQt5.QtCore import (QThread, QObject, pyqtSignal, pyqtSlot, Qt,
+            from qtpy.QtCore import (QThread, QObject, Signal, Slot, Qt,
                                       QTimer, QEventLoop)
-            from PyQt5.QtWidgets import QProgressDialog
+            from qtpy.QtWidgets import QProgressDialog
         except Exception:
             return fn()
 
         box = {}
 
         class _Worker(QObject):
-            finished = pyqtSignal()
+            finished = Signal()
 
             def run(self):
                 try:
@@ -79,7 +79,7 @@ class _ProgressMixin:
         _timer.timeout.connect(_tick)
 
         class _Bridge(QObject):
-            @pyqtSlot()
+            @Slot()
             def on_finished(self):          # runs on the MAIN thread (queued) — closes the dialog
                 _state['done'] = True
                 _timer.stop()

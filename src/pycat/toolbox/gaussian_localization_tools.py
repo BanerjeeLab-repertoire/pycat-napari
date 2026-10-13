@@ -496,7 +496,7 @@ def _add_gaussian_localization(ui_instance, layout=None, separate_widget=False):
     reports sub-pixel centres, PSF widths (sigma / FWHM), and ellipticity.
     """
     import napari
-    from PyQt5.QtWidgets import (
+    from qtpy.QtWidgets import (
         QGroupBox, QFormLayout, QLabel, QSpinBox, QDoubleSpinBox, QPushButton,
         QProgressBar, QCheckBox, QSizePolicy)
 
@@ -661,7 +661,7 @@ def _add_gaussian_localization(ui_instance, layout=None, separate_widget=False):
     if layout is not None and not separate_widget:
         layout.addWidget(grp)
     else:
-        from PyQt5.QtWidgets import QVBoxLayout, QWidget, QScrollArea
+        from qtpy.QtWidgets import QVBoxLayout, QWidget, QScrollArea
         w = QWidget(); vl = QVBoxLayout(w); vl.addWidget(grp)
         w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         try:

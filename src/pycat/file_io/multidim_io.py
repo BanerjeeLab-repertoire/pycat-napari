@@ -277,7 +277,7 @@ def show_position_selection_dialog(positions: list[dict], title: str,
     List of indices (into `positions`) that the user selected.
     Empty list if the dialog was cancelled.
     """
-    from PyQt5.QtWidgets import (
+    from qtpy.QtWidgets import (
         QDialog, QVBoxLayout, QHBoxLayout, QCheckBox, QPushButton,
         QLabel, QScrollArea, QWidget, QDialogButtonBox,
     )

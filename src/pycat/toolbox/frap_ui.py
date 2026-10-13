@@ -25,12 +25,12 @@ from napari.utils.notifications import (
     show_info    as napari_show_info,
     show_warning as napari_show_warning,
 )
-from PyQt5.QtWidgets import (
+from qtpy.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QGroupBox, QFormLayout,
     QCheckBox, QSpinBox, QDoubleSpinBox, QLabel, QProgressBar,
     QScrollArea, QSizePolicy, QRadioButton,
 )
-from PyQt5.QtCore import Qt
+from qtpy.QtCore import Qt
 
 
 class FRAPUI:
@@ -242,7 +242,7 @@ class FRAPUI:
             "Draw the BLEACHED region first, then the REFERENCE region.")
 
     def _on_load_lumicks(self):
-        from PyQt5.QtWidgets import QFileDialog
+        from qtpy.QtWidgets import QFileDialog
         from pycat.file_io.frap_io import (
             lumicks_available, load_lumicks_frap, compute_lumicks_timelag)
         if not lumicks_available():
@@ -467,7 +467,7 @@ class FRAPUI:
             # Order by name (frame indices usually embedded), current layer first
             # is not required — natural/name order is the safest default.
             candidates.sort(key=lambda t: t[0])
-            from PyQt5.QtWidgets import QMessageBox
+            from qtpy.QtWidgets import QMessageBox
             box = QMessageBox()
             box.setWindowTitle("Stack 2D images into a recovery series?")
             box.setIcon(QMessageBox.Question)

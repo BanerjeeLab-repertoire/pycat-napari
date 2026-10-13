@@ -164,12 +164,27 @@ warnings.filterwarnings(
 )
 import importlib.resources as resources
 
+
+def _prefer_pyside6():
+    """Launch on PySide6 when it is installed, unless the user chose a binding with QT_API.
+
+    A fresh 1.7.0 install has only PySide6. An UPGRADED environment still has PyQt5 as well, and qtpy and napari
+    both pick PyQt5 first when it is present — so without this, everyone who upgraded would keep launching on
+    the deprecated binding. Must run before anything imports qtpy or napari. ``setdefault``: an explicit
+    ``QT_API`` (e.g. ``QT_API=pyqt5``) always wins."""
+    import importlib.util
+    if 'QT_API' not in os.environ and importlib.util.find_spec('PySide6') is not None:
+        os.environ['QT_API'] = 'pyside6'
+
+
+_prefer_pyside6()
+
 # Third party imports
 import napari
 
 from pycat.utils.general_utils import debug_log
-from PyQt5.QtWidgets import QApplication
-from PyQt5.QtGui import QIcon 
+from qtpy.QtWidgets import QApplication
+from qtpy.QtGui import QIcon 
 
 # Local application imports
 from pycat.central_manager import CentralManager
@@ -396,7 +411,7 @@ def run_pycat_func():
     # slightly larger base size, so default text reads at the larger scale the
     # step headers use rather than the small Qt default.
     try:
-        from PyQt5.QtGui import QFont
+        from qtpy.QtGui import QFont
         _ui_font = QFont("Arial")
         _ui_font.setStyleHint(QFont.SansSerif)   # fall back to any sans-serif if Arial absent
         _ui_font.setPointSize(10)                # larger base than the Qt default (~8-9pt)
@@ -423,7 +438,7 @@ def run_pycat_func():
         # would silently load nothing — leaving napari's default icon. Loading
         # into a QPixmap here reads the bytes while the file is guaranteed to
         # exist, so the icon no longer depends on the path persisting.
-        from PyQt5.QtGui import QPixmap as _QPixmap
+        from qtpy.QtGui import QPixmap as _QPixmap
         # Prefer the reduced mark (roundel only, no wordmark): at taskbar/titlebar
         # sizes the full logo's text is illegible, while the mark stays crisp.
         # Fall back to the full logo if the mark isn't present.
@@ -619,7 +634,10 @@ QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; lef
     # settling period and re-assert if any late relayout un-maximizes it. The
     # watcher disconnects itself once the state is stable, so there is no ongoing
     # cost and no fixed delay to out-grow.
-    _maximize_state = {'deadline_ms': 2500, 'elapsed': 0, 'timer': None}
+    # 1.7.0: "stable" means maximized for 1.5 s IN A ROW, not "2.5 s have passed". The first launch after an
+    # upgrade (PySide6 loading for the first time, ~100 modules recompiling) relaid out after the old fixed
+    # 2.5 s window had closed and opened un-maximized; the second launch was fast enough and did not.
+    _maximize_state = {'min_ms': 2500, 'stable_ms': 1500, 'cap_ms': 10000, 'held': 0, 'elapsed': 0, 'timer': None}
 
     def _maximize():
         try:
@@ -637,10 +655,15 @@ QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; lef
         """Re-assert maximize if a startup relayout dropped it; stop once the
         state has been stable through the settling window."""
         try:
-            if not _is_maximized():
+            if _is_maximized():
+                _maximize_state['held'] += 100
+            else:
+                _maximize_state['held'] = 0
                 _maximize()
             _maximize_state['elapsed'] += 100
-            if _maximize_state['elapsed'] >= _maximize_state['deadline_ms']:
+            settled = (_maximize_state['elapsed'] >= _maximize_state['min_ms']
+                       and _maximize_state['held'] >= _maximize_state['stable_ms'])
+            if settled or _maximize_state['elapsed'] >= _maximize_state['cap_ms']:
                 t = _maximize_state.get('timer')
                 if t is not None:
                     t.stop()
@@ -652,8 +675,8 @@ QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; lef
         `image:` url, objectName 'logo_silhouette') with the PyCAT logo, keep the
         hotkeys, and show 'PyCAT <ver> • napari <ver>'. Also set the window icon.
         Best-effort and fully guarded — napari internals vary by version."""
-        from PyQt5.QtGui import QIcon
-        from PyQt5.QtWidgets import QLabel
+        from qtpy.QtGui import QIcon
+        from qtpy.QtWidgets import QLabel
         # The welcome logo is applied via a QSS `image: url(...)` that Qt reads
         # LAZILY when it paints — long after this function returns. So the file
         # must persist for the window's lifetime, not just a `with` block. If we
@@ -722,7 +745,7 @@ QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; lef
     # so any late relayout can't leave the window un-maximized. This replaces the
     # old fixed-delay single-shot that kept getting out-grown by UI changes.
     try:
-        from PyQt5.QtCore import QTimer
+        from qtpy.QtCore import QTimer
         QTimer.singleShot(0, _apply_style)     # stylesheet first (triggers relayout)
         QTimer.singleShot(0, _maximize)        # first maximize once loop is live
         QTimer.singleShot(80, _brand_welcome)  # brand once the welcome widget exists
@@ -751,7 +774,7 @@ QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; lef
     def _rebrand_if_empty(*_a):
         try:
             if len(viewer.layers) == 0:
-                from PyQt5.QtCore import QTimer as _QT
+                from qtpy.QtCore import QTimer as _QT
                 _QT.singleShot(50, _brand_welcome)
         except Exception:
             pass

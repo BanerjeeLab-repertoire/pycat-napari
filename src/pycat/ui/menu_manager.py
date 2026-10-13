@@ -11,12 +11,12 @@ import math
 import napari 
 from pycat.utils.general_utils import debug_log
 from napari.utils.notifications import show_warning as napari_show_warning
-from PyQt5.QtWidgets import (
+from qtpy.QtWidgets import (
     QDoubleSpinBox,
     QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QRadioButton, QPushButton, 
     QLineEdit, QWidget, QComboBox, QSlider, QScrollArea, QSizePolicy, QAction,
     QTabWidget, QToolButton, QFrame)
-from PyQt5.QtCore import Qt, QObject
+from qtpy.QtCore import Qt, QObject
 from pycat.toolbox.invitro_fluor_ui import InVitroFluorUI
 from pycat.toolbox.timeseries_invitro_fluor_ui import TimeSeriesInVitroFluorUI
 from pycat.toolbox.vpt_ui import VideoParticleTrackingUI
@@ -42,8 +42,8 @@ class _FileDropFilter(QObject):
         self._file_io = file_io
 
     def eventFilter(self, obj, event):
-        from PyQt5.QtCore import QEvent
-        from PyQt5.QtWidgets import QTextEdit, QAbstractSpinBox
+        from qtpy.QtCore import QEvent
+        from qtpy.QtWidgets import QTextEdit, QAbstractSpinBox
         et = event.type()
         if et not in (QEvent.DragEnter, QEvent.DragMove, QEvent.Drop):
             return False
@@ -282,7 +282,7 @@ class MenuManager:
         # Window/Help). Without a visual break, users can't tell where napari ends
         # and PyCAT begins. Insert a bold, non-clickable marker as an obvious
         # divider so everything to its right reads as "PyCAT".
-        from PyQt5.QtGui import QFont as _QFont, QColor as _QColor, QIcon as _QIcon
+        from qtpy.QtGui import QFont as _QFont, QColor as _QColor, QIcon as _QIcon
         _menubar = self.viewer.window._qt_window.menuBar()
         # Branded section marker: the reduced PyCAT logo mark (snake/helix roundel,
         # no wordmark) followed by the "PyCAT" wordmark.
@@ -293,8 +293,8 @@ class MenuManager:
         # exactly what we put in it, so the icon and the wordmark both appear.
         self._pycat_marker_action = None
         try:
-            from PyQt5.QtWidgets import QWidgetAction, QLabel as _QLabel
-            from PyQt5.QtGui import QPixmap as _QPixmap
+            from qtpy.QtWidgets import QWidgetAction, QLabel as _QLabel
+            from qtpy.QtGui import QPixmap as _QPixmap
             import importlib.resources as _res
 
             _pm = None
@@ -392,7 +392,7 @@ class MenuManager:
         # Command palette: fuzzy-search to open any analysis method / toolbox
         # function or select a layer by name. Menu-bar button + Ctrl+Shift+P.
         try:
-            from PyQt5.QtGui import QKeySequence
+            from qtpy.QtGui import QKeySequence
             self.palette_action = QAction('\u2315 Search',
                                           self.viewer.window._qt_window)
             self.palette_action.setToolTip(
@@ -407,7 +407,7 @@ class MenuManager:
         # Route files dropped onto the napari window through PyCAT's openers
         # (napari's default drop bypasses PyCAT's channel-assignment pipeline).
         try:
-            from PyQt5.QtWidgets import QApplication
+            from qtpy.QtWidgets import QApplication
             self._pycat_drop_filter = _FileDropFilter(self.central_manager.file_io)
             app = QApplication.instance()
             if app is not None:
@@ -482,7 +482,7 @@ class MenuManager:
                     except Exception:
                         pass
                 try:
-                    from PyQt5.QtCore import QTimer as _QTimer
+                    from qtpy.QtCore import QTimer as _QTimer
                     # A couple of delays to beat whenever vispy finishes its init.
                     for _delay in (300, 900, 2000):
                         _QTimer.singleShot(_delay, _reassert_canvas_drops)
@@ -532,7 +532,7 @@ class MenuManager:
                         self._pending_foreign_paths = []
                     if src_path not in self._pending_foreign_paths:
                         self._pending_foreign_paths.append(src_path)
-                    from PyQt5.QtCore import QTimer
+                    from qtpy.QtCore import QTimer
                     QTimer.singleShot(0, self._process_foreign_layers)
                 except Exception:
                     pass

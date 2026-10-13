@@ -18,8 +18,8 @@ which ``vpt/results_dock`` can later be refactored onto this core.
 """
 from __future__ import annotations
 
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import QLabel, QSplitter, QVBoxLayout, QWidget
+from qtpy.QtCore import Qt
+from qtpy.QtWidgets import QLabel, QSplitter, QVBoxLayout, QWidget
 
 from pycat.utils.entity_ref import ENTITY_ID_COLUMN, without_identity
 from pycat.utils.general_utils import debug_log
@@ -280,7 +280,7 @@ class BrushableImageTier:
 def _crop_to_pixmap(crop):
     """A 2-D numpy crop → a grayscale ``QPixmap`` (contrast-stretched). None if it cannot render."""
     import numpy as np
-    from PyQt5.QtGui import QImage, QPixmap
+    from qtpy.QtGui import QImage, QPixmap
 
     a = np.asarray(crop)
     if a.ndim != 2 or a.size == 0:
@@ -304,8 +304,8 @@ class BatchCropView:
     """
 
     def __init__(self, df, service, view_id, *, entity_col=ENTITY_ID_COLUMN):
-        from PyQt5.QtCore import Qt
-        from PyQt5.QtWidgets import QLabel
+        from qtpy.QtCore import Qt
+        from qtpy.QtWidgets import QLabel
         from pycat.utils.object_ref import ObjectRef
 
         self.service = service
@@ -330,7 +330,7 @@ class BatchCropView:
 
     def apply_selection(self, state):
         from pycat.utils.brushing import crop_for_ref
-        from PyQt5.QtCore import Qt
+        from qtpy.QtCore import Qt
 
         refs = [self._eid_to_ref[e] for e in (getattr(state, 'entity_ids', ()) or ()) if e in self._eid_to_ref]
         if not refs:
@@ -361,7 +361,7 @@ class PlotBuilder:
     def __init__(self, tables, service, view_id):
         from matplotlib.figure import Figure
         from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
-        from PyQt5.QtWidgets import QComboBox, QHBoxLayout
+        from qtpy.QtWidgets import QComboBox, QHBoxLayout
 
         self.tables = {k: v for k, v in tables.items() if v is not None and len(v)}
         self.service = service

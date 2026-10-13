@@ -14,9 +14,9 @@ def build_preferences_dialog(store=None, parent=None):
     is unavailable (headless). ``store`` is injectable for tests; ``None`` uses the process-wide settings. The
     dialog applies each change immediately via the registry's ``set_preference``."""
     try:
-        from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QGroupBox, QRadioButton,
+        from qtpy.QtWidgets import (QDialog, QVBoxLayout, QGroupBox, QRadioButton,
                                      QLabel, QDialogButtonBox)
-        from PyQt5.QtCore import Qt
+        from qtpy.QtCore import Qt
     except Exception:      # broad-ok: optional_probe — no Qt (headless) → no dialog, callers guard on None
         return None
 
@@ -71,7 +71,7 @@ def install_preferences_action(viewer):
     god-file (which is pinned at its line ceiling). Returns the created ``QAction``, or ``None`` when Qt or the
     menu bar is unavailable (headless) — the caller stores it so it is not garbage-collected."""
     try:
-        from PyQt5.QtWidgets import QAction
+        from qtpy.QtWidgets import QAction
     except Exception:      # broad-ok: optional_probe — no Qt (headless) → no menu action, caller guards on None
         return None
     qt = getattr(getattr(viewer, 'window', None), '_qt_window', None)

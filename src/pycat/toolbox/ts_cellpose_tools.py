@@ -314,12 +314,12 @@ def _make_keyframe_cellpose_worker():
     if _KEYFRAME_WORKER_CLS is not None:
         return _KEYFRAME_WORKER_CLS
 
-    from PyQt5.QtCore import QThread, pyqtSignal
+    from qtpy.QtCore import QThread, Signal
 
     class _KeyframeCellposeWorker(QThread):
-        progress = pyqtSignal(int, int)
-        finished = pyqtSignal(object, object)   # (mask_stack, keyframe_indices)
-        error    = pyqtSignal(str)
+        progress = Signal(int, int)
+        finished = Signal(object, object)   # (mask_stack, keyframe_indices)
+        error    = Signal(str)
 
         def __init__(self, stack, cell_diameter, interval, parent=None,
                      upscale_factor=1, use_stardist=False, model_name=None):
@@ -499,7 +499,7 @@ def apply_transfection_filter_to_stack(mask_stack, kept_labels):
 
 def _ts_cp_input_method_widgets(ui_instance, form):
     """Build the seg-channel + method-selection widgets; return their handles."""
-    from PyQt5.QtWidgets import QCheckBox, QGroupBox, QHBoxLayout, QLabel, QRadioButton, QSizePolicy, QSpinBox, QVBoxLayout, QWidget
+    from qtpy.QtWidgets import QCheckBox, QGroupBox, QHBoxLayout, QLabel, QRadioButton, QSizePolicy, QSpinBox, QVBoxLayout, QWidget
     import napari
     seg_lbl = QLabel(
         "<span style='color:#aaa;font-size:9pt;'>"
@@ -615,7 +615,7 @@ def _ts_cp_input_method_widgets(ui_instance, form):
 
 def _ts_cp_option_widgets(ui_instance, form):
     """Build the upscale / max-projection / transfection / progress widgets."""
-    from PyQt5.QtWidgets import QCheckBox, QDoubleSpinBox, QLabel, QProgressBar, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout, QWidget
+    from qtpy.QtWidgets import QCheckBox, QDoubleSpinBox, QLabel, QProgressBar, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout, QWidget
     import napari
     # ── Upscaling ─────────────────────────────────────────────────────────
     upscale_check = QCheckBox("Upscale keyframes  (recommended for ≤512px)")
@@ -1061,13 +1061,13 @@ def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
     """
     # Qt is imported here, not at module scope — the analysis functions in this
     # module use none of it, and a module-scope import blocked their headless import.
-    from PyQt5.QtWidgets import (
+    from qtpy.QtWidgets import (
         QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QGroupBox,
         QFormLayout, QSpinBox, QDoubleSpinBox, QProgressBar, QLabel, QCheckBox,
         QRadioButton,
     )
-    from PyQt5.QtCore import Qt
-    from PyQt5.QtWidgets import QButtonGroup, QStackedWidget, QSizePolicy, QSizePolicy as _QSP
+    from qtpy.QtCore import Qt
+    from qtpy.QtWidgets import QButtonGroup, QStackedWidget, QSizePolicy, QSizePolicy as _QSP
     grp   = QGroupBox("Step 5 — Cell / Nuclei Segmentation")
     form  = QFormLayout(grp)
     form.setContentsMargins(9, 20, 9, 6)

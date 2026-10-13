@@ -291,12 +291,12 @@ def _make_twochannelcolocworker():
     if _TWOCHANNELCOLOCWORKER_CLS is not None:
         return _TWOCHANNELCOLOCWORKER_CLS
 
-    from PyQt5.QtCore import QThread, pyqtSignal
+    from qtpy.QtCore import QThread, Signal
 
     class TwoChannelColocWorker(QThread):
-        progress = pyqtSignal(int, int)
-        finished = pyqtSignal(object, object, object)
-        error    = pyqtSignal(str)
+        progress = Signal(int, int)
+        finished = Signal(object, object, object)
+        error    = Signal(str)
 
         def __init__(self, kwargs: dict, parent=None):
             super().__init__(parent)
@@ -333,14 +333,14 @@ def _make_condensatecoloctimeworker():
     if _CONDENSATECOLOCTIMEWORKER_CLS is not None:
         return _CONDENSATECOLOCTIMEWORKER_CLS
 
-    from PyQt5.QtCore import QThread, pyqtSignal
+    from qtpy.QtCore import QThread, Signal
 
     class CondensateColocTimeWorker(QThread):
         """Runs condensate_coloc_time_trace off the UI thread (frame-by-frame over a
         stack can be slow), reporting per-frame progress and supporting cancellation."""
-        progress = pyqtSignal(int, int)
-        finished = pyqtSignal(object)      # the trace DataFrame
-        error    = pyqtSignal(str)
+        progress = Signal(int, int)
+        finished = Signal(object)      # the trace DataFrame
+        error    = Signal(str)
 
         def __init__(self, kwargs: dict, parent=None):
             super().__init__(parent)
@@ -384,7 +384,7 @@ def _add_run_two_channel_coloc(ui_instance, layout=None, separate_widget=False):
     handles segmentation of both channels automatically before running OBCA.
     """
     # GUI imported here, not at module scope — the analysis in this module needs none.
-    from PyQt5.QtWidgets import QCheckBox, QDoubleSpinBox, QFormLayout, QGroupBox, QProgressBar, QPushButton, QSizePolicy, QVBoxLayout, QWidget
+    from qtpy.QtWidgets import QCheckBox, QDoubleSpinBox, QFormLayout, QGroupBox, QProgressBar, QPushButton, QSizePolicy, QVBoxLayout, QWidget
     import napari
     from pycat.ui.ui_utils import show_dataframes_dialog
     main_layout = QVBoxLayout()

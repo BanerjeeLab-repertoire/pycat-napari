@@ -46,7 +46,7 @@ _LAZY_SOURCES = (pathlib.Path(__file__).resolve().parents[1]
 
 # The same roots `test_headless_science` forbids. `lazy_sources` is held to the science modules'
 # standard because it is what the perf harness must be able to import.
-_FORBIDDEN_ROOTS = {"napari", "PyQt5", "PyQt6", "qtpy"}
+_FORBIDDEN_ROOTS = {"napari", "PyQt5", "PyQt6", "PySide2", "PySide6", "qtpy"}
 
 
 def test_lazy_sources_makes_no_GUI_import_at_MODULE_scope():
@@ -78,7 +78,7 @@ def test_IMPORTING_lazy_sources_does_not_drag_in_Qt():
     program = (
         "import sys\n"
         "import pycat.file_io.lazy_sources\n"
-        "bad = [m for m in ('napari', 'PyQt5', 'PyQt6', 'qtpy') if m in sys.modules]\n"
+        "bad = [m for m in ('napari', 'PyQt5', 'PyQt6', 'PySide2', 'PySide6', 'qtpy') if m in sys.modules]\n"
         "print(','.join(bad))\n"
     )
     # Hand the child the parent's import path so it resolves the SAME pycat the suite is testing

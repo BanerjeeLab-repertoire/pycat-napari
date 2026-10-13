@@ -46,7 +46,7 @@ Dependencies
 ------------
 All dependencies are already part of PyCAT's environment:
     json, pathlib, datetime  – stdlib
-    PyQt5                    – already required by napari
+    qtpy + PySide6           – the Qt binding (qtpy picks the installed one)
     napari                   – already required
 """
 
@@ -62,10 +62,10 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 # ---------------------------------------------------------------------------
-# Qt imports – PyCAT already depends on PyQt5 via napari
+# Qt imports – through qtpy (PySide6 by default)
 # ---------------------------------------------------------------------------
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
-from PyQt5.QtWidgets import (
+from qtpy.QtCore import Qt, QThread, Signal
+from qtpy.QtWidgets import (
     QAction,
     QDialog,
     QDialogButtonBox,
@@ -260,9 +260,9 @@ def make_console_output_safe():
 class BatchWorker(QThread):
     """Executes the recorded pipeline on a list of files."""
 
-    progress = pyqtSignal(int, int, str)   # current, total, message
-    finished = pyqtSignal(str)             # summary message
-    error = pyqtSignal(str)               # error message
+    progress = Signal(int, int, str)   # current, total, message
+    finished = Signal(str)             # summary message
+    error = Signal(str)               # error message
 
     def __init__(
         self,

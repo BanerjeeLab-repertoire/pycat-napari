@@ -4,7 +4,7 @@
 The background worker LIFECYCLE, relocated BEHAVIOUR-PRESERVING (no threading semantics changed): the
 parallel per-frame read/process helpers (_worker_read_frame, _process_frame_worker) run in ProcessPool
 subprocesses; _make__stackprocessworker and _make_timeseriesworker are the lazy QThread-worker factories
-(built on first use so Qt is not needed to IMPORT this module - PyQt5/napari stay function-scoped). The two
+(built on first use so Qt is not needed to IMPORT this module - Qt/napari stay function-scoped). The two
 factory result caches move with their factories. Moved VERBATIM. Reads frames via frame_access and runs the
 analysis via analysis.run_timeseries_condensate_analysis; the tools module re-exports the two factories,
 which the staying UI builders call.
@@ -131,7 +131,7 @@ def _make__stackprocessworker():
     if __STACKPROCESSWORKER_CLS is not None:
         return __STACKPROCESSWORKER_CLS
 
-    from PyQt5.QtCore import QThread, pyqtSignal
+    from qtpy.QtCore import QThread, Signal
 
     class _StackProcessWorker(QThread):
         """
@@ -147,10 +147,10 @@ def _make__stackprocessworker():
         Speedup is roughly linear with core count up to memory bandwidth limits:
         a 4-core machine processes ~4× faster than the old serial approach.
         """
-        progress    = pyqtSignal(int, int)   # (frames_done, total)
-        finished    = pyqtSignal(str)        # zarr store path when all done
-        finished2   = pyqtSignal(str)        # second zarr path (combined mode only)
-        error       = pyqtSignal(str)
+        progress    = Signal(int, int)   # (frames_done, total)
+        finished    = Signal(str)        # zarr store path when all done
+        finished2   = Signal(str)        # second zarr path (combined mode only)
+        error       = Signal(str)
 
         def __init__(self, stack_data, zarr_path, process_fn_name, process_fn_kwargs,
                      n_t, H, W, n_workers=None, parent=None, zarr_path2=None,
@@ -539,12 +539,12 @@ def _make_timeseriesworker():
     if _TIMESERIESWORKER_CLS is not None:
         return _TIMESERIESWORKER_CLS
 
-    from PyQt5.QtCore import QThread, pyqtSignal
+    from qtpy.QtCore import QThread, Signal
 
     class TimeSeriesWorker(QThread):
-        progress  = pyqtSignal(int, int)   # frame, total
-        finished  = pyqtSignal(object, object)  # results_df, condensate_stack
-        error     = pyqtSignal(str)
+        progress  = Signal(int, int)   # frame, total
+        finished  = Signal(object, object)  # results_df, condensate_stack
+        error     = Signal(str)
 
         def __init__(self, kwargs: dict, parent=None):
             super().__init__(parent)

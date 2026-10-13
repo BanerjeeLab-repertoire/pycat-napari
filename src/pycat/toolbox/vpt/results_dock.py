@@ -100,7 +100,7 @@ class _VptResultsDockMixin:
         """Build the per-track ``QTableWidget`` for the dock's right pane and register
         ``_track_table_registry`` so a selection from any view highlights the right row.
         Row-click selects that track everywhere. Returns the QTableWidget (or None)."""
-        from PyQt5.QtWidgets import QTableWidget, QTableWidgetItem
+        from qtpy.QtWidgets import QTableWidget, QTableWidgetItem
         if per_track_metrics is None or getattr(per_track_metrics, 'empty', True):
             self._track_table_registry = None
             return None
@@ -148,9 +148,9 @@ class _VptResultsDockMixin:
         ``restore_page`` / ``restore_bucket`` land a REOPENED dock (Part 2's "Show results") back where the
         user left it, rather than resetting to page 0 — they are passed only on a reopen, not a fresh run."""
         from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
-        from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
+        from qtpy.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                                      QLabel, QPushButton, QSpinBox, QSizePolicy)
-        from PyQt5.QtCore import Qt
+        from qtpy.QtCore import Qt
 
         all_tids = []
         try:
@@ -206,7 +206,7 @@ class _VptResultsDockMixin:
             self.viewer.window, splitter, name="VPT Results")
         # Floating the dock escapes the right-panel width entirely — the real answer for detailed inspection.
         try:
-            from PyQt5.QtWidgets import QDockWidget
+            from qtpy.QtWidgets import QDockWidget
             _d = self._vpt_results_dock
             _d.setFeatures(_d.features() | QDockWidget.DockWidgetFloatable | QDockWidget.DockWidgetMovable)
             _d.setToolTip("Drag wider to reflow the plots — or float this dock (double-click its title bar) "

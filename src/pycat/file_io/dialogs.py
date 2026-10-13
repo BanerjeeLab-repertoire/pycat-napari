@@ -55,7 +55,7 @@ def _ask_copy_to_local(file_path, verdict):
     before loading. Returns 'yes'|'no'|'always'|'never' (or 'no' if the dialog
     can't be shown)."""
     try:
-        from PyQt5.QtWidgets import QMessageBox, QCheckBox
+        from qtpy.QtWidgets import QMessageBox, QCheckBox
     except Exception:  # broad-ok: optional_probe — Qt/layer-inspection best-effort — a UI probe that fails degrades gracefully
         return 'no'
     try:
@@ -86,8 +86,8 @@ def _copy_to_local_with_progress(file_path, verdict):
     progress bar (the copy IS the slow I/O, so this doubles as the slow-load
     progress indicator). Returns the local path, or None on failure/cancel."""
     try:
-        from PyQt5.QtWidgets import QProgressDialog
-        from PyQt5.QtCore import Qt
+        from qtpy.QtWidgets import QProgressDialog
+        from qtpy.QtCore import Qt
     except Exception:  # broad-ok: optional_probe — Qt/layer-inspection best-effort — a UI probe that fails degrades gracefully
         QProgressDialog = None
     try:
@@ -149,7 +149,7 @@ def _copy_to_local_with_progress(file_path, verdict):
                 if dlg is not None and total:
                     pct = int(copied * 100 / total)
                     dlg.setValue(min(pct, 100))
-                    from PyQt5.QtWidgets import QApplication
+                    from qtpy.QtWidgets import QApplication
                     QApplication.processEvents()
                     if dlg.wasCanceled():
                         fdst.close()
@@ -194,7 +194,7 @@ def _ask_multipage_axis(file_path, n_pages):
     if remembered is not None:
         return remembered
     try:
-        from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QLabel,
+        from qtpy.QtWidgets import (QDialog, QVBoxLayout, QLabel,
                                      QRadioButton, QCheckBox, QPushButton,
                                      QButtonGroup)
     except Exception:  # broad-ok: optional_probe — Qt/layer-inspection best-effort — a UI probe that fails degrades gracefully
@@ -231,7 +231,7 @@ def _ask_multipage_axis(file_path, n_pages):
 # Unlike the ask-functions above, these are QDialog SUBCLASSES — they need Qt at class-definition
 # time, so this module now imports the widgets at module scope for them (the functions still import
 # lazily). Nothing external imported these from file_io; FileIOClass now imports them from here.
-from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QWidget, QLabel, QCheckBox, QRadioButton,
+from qtpy.QtWidgets import (QDialog, QVBoxLayout, QWidget, QLabel, QCheckBox, QRadioButton,
                              QPushButton, QLineEdit, QMessageBox, QComboBox)
 import os
 import numpy as np
@@ -600,7 +600,7 @@ class ChannelAssignmentDialog(QDialog):
         # it undecided (the honest default — we never guess).
         self.condensate_choice = None
         if not self.is_mask and len(self.channels) > 1:
-            from PyQt5.QtWidgets import QComboBox
+            from qtpy.QtWidgets import QComboBox
             layout.addWidget(QLabel("Which channel contains the condensates? "
                                     "(optional — remembered for files acquired this way)"))
             self._condensate_dd = QComboBox()

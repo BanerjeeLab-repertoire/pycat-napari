@@ -22,9 +22,9 @@ def open_command_palette(mm):
     and is left for later.
     """
     try:
-        from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QLineEdit,
+        from qtpy.QtWidgets import (QDialog, QVBoxLayout, QLineEdit,
                                      QListWidget, QListWidgetItem)
-        from PyQt5.QtCore import Qt
+        from qtpy.QtCore import Qt
     except Exception:
         return
 
@@ -130,7 +130,7 @@ def open_command_palette(mm):
     # Enter activates the highlighted row; Down from the search box moves into
     # the list. Keep it keyboard-first like a real command palette.
     def _key(ev):
-        from PyQt5.QtCore import Qt as _Qt
+        from qtpy.QtCore import Qt as _Qt
         if ev.key() in (_Qt.Key_Return, _Qt.Key_Enter):
             _activate(); return
         if ev.key() == _Qt.Key_Down and lst.count():

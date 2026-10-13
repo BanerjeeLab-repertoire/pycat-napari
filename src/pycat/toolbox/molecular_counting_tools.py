@@ -473,7 +473,7 @@ def _build_molecular_counting_panel(ui_instance):
     caller can wire the run signal and dock/embed the group box.
     """
     import napari
-    from PyQt5.QtWidgets import (
+    from qtpy.QtWidgets import (
         QGroupBox, QFormLayout, QLabel, QSpinBox, QDoubleSpinBox, QPushButton,
         QProgressBar, QSizePolicy)
 
@@ -535,7 +535,7 @@ def _add_molecular_counting(ui_instance, layout=None, separate_widget=False):
     # whole scope -- so the earlier use raised UnboundLocalError UNCONDITIONALLY and
     # this widget could never be constructed. The later branch's import is harmless
     # but redundant.
-    from PyQt5.QtWidgets import (
+    from qtpy.QtWidgets import (
         QGroupBox, QFormLayout, QLabel, QSpinBox, QDoubleSpinBox, QPushButton,
         QProgressBar, QSizePolicy)
 
@@ -626,7 +626,7 @@ def _add_molecular_counting(ui_instance, layout=None, separate_widget=False):
     if layout is not None and not separate_widget:
         layout.addWidget(grp)
     else:
-        from PyQt5.QtWidgets import QVBoxLayout, QWidget, QScrollArea, QSizePolicy
+        from qtpy.QtWidgets import QVBoxLayout, QWidget, QScrollArea, QSizePolicy
         w = QWidget(); vl = QVBoxLayout(w); vl.addWidget(grp)
         w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         try:

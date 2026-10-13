@@ -35,9 +35,11 @@ licence terms can be found at the links below:
    - License: MIT License
    - License text: https://github.com/samuelcolvin/pydantic/blob/master/LICENSE
 
-9. **pyqt5**
-   - License: GPL License
-   - License text: https://www.riverbankcomputing.com/static/Docs/PyQt5/license.html
+9. **PySide6-Essentials** (Qt for Python; with shiboken6)
+   - License: LGPL-3.0 License (PyCAT links it dynamically and does not modify it)
+   - License text: https://doc.qt.io/qtforpython-6/licenses.html
+   - Accessed through **qtpy** (MIT License, https://github.com/spyder-ide/qtpy/blob/master/LICENSE.txt).
+   - Until 1.7.0 PyCAT depended on PyQt5 (GPL); it no longer does.
 
 10. **torch**
     - License: BSD-3-Clause License

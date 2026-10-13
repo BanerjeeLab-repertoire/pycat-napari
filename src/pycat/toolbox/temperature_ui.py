@@ -23,12 +23,12 @@ from napari.utils.notifications import (
     show_info    as napari_show_info,
     show_warning as napari_show_warning,
 )
-from PyQt5.QtWidgets import (
+from qtpy.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QGroupBox, QFormLayout,
     QCheckBox, QSpinBox, QDoubleSpinBox, QLabel, QProgressBar, QLineEdit,
     QScrollArea, QSizePolicy, QComboBox,
 )
-from PyQt5.QtCore import Qt
+from qtpy.QtCore import Qt
 from pycat.ui.field_status import (
     status_row, add_reset_buttons, REQUIRED, OPTIONAL, AUTO, EXPERT)
 
@@ -207,19 +207,19 @@ class TemperatureDependentUI:
         layout.addWidget(grp)
 
     def _browse_tiff(self):
-        from PyQt5.QtWidgets import QFileDialog
+        from qtpy.QtWidgets import QFileDialog
         p, _ = QFileDialog.getOpenFileName(None, "Select OME-TIFF", "", "TIFF (*.tif *.tiff)")
         if p:
             self._tiff_edit.setText(p); self._tiff_path = p
 
     def _browse_csv(self):
-        from PyQt5.QtWidgets import QFileDialog
+        from qtpy.QtWidgets import QFileDialog
         p, _ = QFileDialog.getOpenFileName(None, "Select temperature CSV", "", "CSV (*.csv)")
         if p:
             self._csv_edit.setText(p)
 
     def _browse_tempfolder(self):
-        from PyQt5.QtWidgets import QFileDialog
+        from qtpy.QtWidgets import QFileDialog
         p = QFileDialog.getExistingDirectory(None, "Select temperature-files parent folder")
         if p:
             self._tempfolder_edit.setText(p)
@@ -418,7 +418,7 @@ class TemperatureDependentUI:
 
         # Transition-temperature definition — different conventions suit different
         # samples, so let the user pick.
-        from PyQt5.QtWidgets import QRadioButton, QButtonGroup
+        from qtpy.QtWidgets import QRadioButton, QButtonGroup
         self._method_baseline = QRadioButton("Baseline departure / return")
         self._method_baseline.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._method_baseline.setChecked(True)
@@ -592,7 +592,7 @@ class TemperatureDependentUI:
             "may be unreliable; check the entropy curve).")
 
     def _on_save_turbidity(self):
-        from PyQt5.QtWidgets import QFileDialog
+        from qtpy.QtWidgets import QFileDialog
         import os
         summary = self._dr().get('temp_turbidity_summary')
         curve = self._dr().get('temp_turbidity_df')
@@ -719,7 +719,7 @@ class TemperatureDependentUI:
             napari_show_warning(f"Could not draw scale bar: {e}")
 
     def _on_export(self):
-        from PyQt5.QtWidgets import QFileDialog
+        from qtpy.QtWidgets import QFileDialog
         from pathlib import Path
         sname = self._stack_dd.currentText()
         if sname not in [l.name for l in self.viewer.layers]:
@@ -821,7 +821,7 @@ class TemperatureDependentUI:
         layout.addWidget(grp)
 
     def _browse_into(self, line_edit):
-        from PyQt5.QtWidgets import QFileDialog
+        from qtpy.QtWidgets import QFileDialog
         p = QFileDialog.getExistingDirectory(None, "Select folder")
         if p:
             line_edit.setText(p)

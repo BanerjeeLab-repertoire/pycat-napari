@@ -14,8 +14,8 @@ self._add_widget_to_layout_or_dock, etc.).
 import math
 
 import napari
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import (
+from qtpy.QtCore import Qt
+from qtpy.QtWidgets import (
     QPushButton, QLabel, QVBoxLayout, QHBoxLayout, QLineEdit, QWidget,
     QComboBox, QSlider, QScrollArea, QSizePolicy)
 
@@ -104,7 +104,7 @@ class _AnalysisWidgetsMixin:
         puncta_measure_dropdown_images = self._layer_row(
             measure_puncta_layout, 'Select Image for Puncta Measurement:',
             napari.layers.Image, name_hint='Upscaled Fluorescence')
-        from PyQt5.QtWidgets import QCheckBox
+        from qtpy.QtWidgets import QCheckBox
         filter_irregular_cb = QCheckBox("Filter irregular objects")
         filter_irregular_cb.setChecked(True)
         filter_irregular_cb.setToolTip(

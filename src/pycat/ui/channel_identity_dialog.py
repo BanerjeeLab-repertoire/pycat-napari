@@ -26,7 +26,7 @@ def build_channel_identity_dialog(channel_infos, *, needing=None, parent=None):
     returns ``{index: name}`` for the fields the user filled — the seam a Qt-smoke test drives without a modal
     ``exec``."""
     try:
-        from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QFormLayout, QLineEdit, QLabel,
+        from qtpy.QtWidgets import (QDialog, QVBoxLayout, QFormLayout, QLineEdit, QLabel,
                                      QDialogButtonBox)
     except Exception:      # broad-ok: optional_probe — no Qt (headless/batch) → no prompt
         return None
@@ -73,7 +73,7 @@ def prompt_channel_identities(channel_infos, *, parent=None):
     if dialog is None:
         return {} if channels_needing_identity(channel_infos) == [] else None
     try:
-        from PyQt5.QtWidgets import QDialog
+        from qtpy.QtWidgets import QDialog
     except Exception:      # broad-ok: optional_probe — headless
         return None
     if dialog.exec_() != QDialog.Accepted:

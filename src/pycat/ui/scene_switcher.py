@@ -21,8 +21,8 @@ The first frame of a new scene can be a slow random-access read, so it is warmed
 
 from __future__ import annotations
 
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QPushButton, QSizePolicy,
+from qtpy.QtCore import Qt
+from qtpy.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QPushButton, QSizePolicy,
                              QVBoxLayout, QWidget)
 
 from pycat.utils.general_utils import debug_log

@@ -25,9 +25,9 @@ the user actually stopped on.
 from __future__ import annotations
 
 import numpy as np
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QImage, QPixmap
-from PyQt5.QtWidgets import (QGridLayout, QGroupBox, QHBoxLayout, QLabel, QPushButton,
+from qtpy.QtCore import Qt
+from qtpy.QtGui import QImage, QPixmap
+from qtpy.QtWidgets import (QGridLayout, QGroupBox, QHBoxLayout, QLabel, QPushButton,
                              QSizePolicy, QVBoxLayout, QWidget)
 
 from pycat.utils.general_utils import debug_log

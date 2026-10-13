@@ -13,7 +13,7 @@ import pytest
 
 
 def _stub_ui():
-    from PyQt5.QtWidgets import QComboBox
+    from qtpy.QtWidgets import QComboBox
 
     class _Events:
         def connect(self, *a, **k):

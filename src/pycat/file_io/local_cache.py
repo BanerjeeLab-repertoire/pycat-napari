@@ -324,7 +324,7 @@ def install_cache_menu_action(file_menu, parent=None):
     cache code it opens. Returns the ``QAction`` (kept alive by the menu), or ``None`` when Qt/the menu is
     unavailable (headless)."""
     try:
-        from PyQt5.QtWidgets import QAction
+        from qtpy.QtWidgets import QAction
     except Exception:      # broad-ok: optional_probe — no Qt (headless) → no menu entry, caller guards on None
         return None
     if file_menu is None:
@@ -382,10 +382,10 @@ def _show_dialog(items, protected_now, now, total):
     Returns the list of item-dicts the user chose to CLEAR, or ``None`` if cancelled.
     Raises if Qt is unavailable — the caller treats that as "don't delete."
     """
-    from PyQt5.QtWidgets import (
+    from qtpy.QtWidgets import (
         QDialog, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QPushButton,
         QScrollArea, QWidget, QFrame)
-    from PyQt5.QtCore import Qt
+    from qtpy.QtCore import Qt
 
     groups = _group_by_source(items)
 
@@ -445,9 +445,9 @@ def _show_dialog(items, protected_now, now, total):
 
         # Folder header cascades to its children.
         def _make_cascade(children):
-            def _cascade(state):
+            def _cascade(state):     # int from stateChanged: PySide6's Qt.Checked never equals one, so convert
                 for c in children:
-                    c.setChecked(state == Qt.Checked)
+                    c.setChecked(Qt.CheckState(state) == Qt.Checked)
             return _cascade
         folder_cb.stateChanged.connect(_make_cascade(child_cbs))
 

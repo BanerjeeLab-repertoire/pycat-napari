@@ -15,8 +15,8 @@ is imported deferred inside the one method that uses it, to avoid an import cycl
 import math
 
 import napari
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import (
+from qtpy.QtCore import Qt
+from qtpy.QtWidgets import (
     QPushButton, QLabel, QVBoxLayout, QHBoxLayout, QLineEdit, QWidget,
     QComboBox, QSlider, QScrollArea, QSizePolicy, QRadioButton)
 
@@ -50,7 +50,7 @@ class _LabelsMasksWidgetsMixin:
 
     def _add_run_expand_labels(self, layout=None, separate_widget=False):
         """Grow labels outward by a fixed distance without merging touching labels."""
-        from PyQt5.QtWidgets import QSpinBox, QLabel as _QLabel
+        from qtpy.QtWidgets import QSpinBox, QLabel as _QLabel
         expand_layout = QVBoxLayout()
         self.add_text_label(expand_layout, 'Expand Labels', bold=True)
         self.add_text_label(expand_layout,
@@ -75,7 +75,7 @@ class _LabelsMasksWidgetsMixin:
 
     def _add_run_mask_logic_merge(self, layout=None, separate_widget=False):
         """Combine two binary masks with AND / OR / XOR."""
-        from PyQt5.QtWidgets import QComboBox
+        from qtpy.QtWidgets import QComboBox
         logic_layout = QVBoxLayout()
         self.add_text_label(logic_layout, 'Mask Layer Operations (AND / OR / XOR)', bold=True)
         self.add_text_label(logic_layout,

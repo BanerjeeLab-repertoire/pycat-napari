@@ -21,18 +21,18 @@ from napari.utils.notifications import (
     show_info    as napari_show_info,
     show_warning as napari_show_warning,
 )
-from PyQt5.QtWidgets import (
+from qtpy.QtWidgets import (
     QVBoxLayout, QWidget, QPushButton, QGroupBox, QFormLayout,
     QCheckBox, QSpinBox, QDoubleSpinBox, QLabel, QProgressBar,
     QTabWidget, QComboBox, QSizePolicy,
 )
-from PyQt5.QtCore import QThread, pyqtSignal
+from qtpy.QtCore import QThread, Signal
 
 
 class _AdvancedAnalysisWorker(QThread):
-    progress = pyqtSignal(int, int)
-    finished = pyqtSignal(object)
-    error    = pyqtSignal(str)
+    progress = Signal(int, int)
+    finished = Signal(object)
+    error    = Signal(str)
 
     def __init__(self, task, kwargs):
         super().__init__()
@@ -215,7 +215,7 @@ def _dynamic_linking_widgets(ui_instance, df):
     stack_dd = ui_instance.create_layer_dropdown(napari.layers.Labels)
     df.addRow("TS condensate mask stack (T,H,W):", stack_dd)
 
-    from PyQt5.QtWidgets import QComboBox as _CB2
+    from qtpy.QtWidgets import QComboBox as _CB2
     linker_dd = _CB2()
     linker_dd.addItems([
         "Bayesian (Hungarian, recommended)",
@@ -676,7 +676,7 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
         report_guarantee_failure('advanced_analysis_ui: add_pixel_size_gate', _exc)
 
     # Fully-optional block: hidden by default behind an off-by-default checkbox.
-    from PyQt5.QtWidgets import QCheckBox as _QCheckBox
+    from qtpy.QtWidgets import QCheckBox as _QCheckBox
     show_cb = _QCheckBox("Show advanced analysis (optional)")
     show_cb.setChecked(False)
     show_cb.setToolTip(
@@ -706,7 +706,10 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
         # this overrides that by calling setMaximumHeight() whenever the tab
         # changes, collapsing the empty space that would otherwise appear when
         # a shorter tab (Morphological, Organizational) is active.
-        w = tabs.currentWidget()
+        try:
+            w = tabs.currentWidget()
+        except RuntimeError:
+            return           # the dock was replaced before this deferred fit ran (PySide6 raises on a deleted widget)
         if w is None:
             return
         bar_h     = tabs.tabBar().sizeHint().height()
@@ -758,7 +761,7 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
     # Initialise height cap after all tab content is constructed.
     # Must be deferred (via a zero-ms timer) so Qt has finished computing
     # sizeHints before we read them.
-    from PyQt5.QtCore import QTimer
+    from qtpy.QtCore import QTimer
     QTimer.singleShot(0, _fit_tab_height)
 
     ui_instance._add_widget_to_layout_or_dock(

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 
-from PyQt5.QtWidgets import QCheckBox, QDialog, QFileDialog, QMessageBox
+from qtpy.QtWidgets import QCheckBox, QDialog, QFileDialog, QMessageBox
 
 from pycat.file_io.dialogs import LayerDataframeSelectionDialog
 

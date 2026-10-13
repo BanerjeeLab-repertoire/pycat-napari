@@ -15,7 +15,7 @@ pytestmark = pytest.mark.core
 
 @pytest.fixture(scope='module')
 def qapp():
-    QtWidgets = pytest.importorskip("PyQt5.QtWidgets")
+    QtWidgets = pytest.importorskip("qtpy.QtWidgets")
     return QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
 
 

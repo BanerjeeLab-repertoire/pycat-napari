@@ -25,8 +25,8 @@ def build_contradiction_panel(file_metadata, store=None, *, on_change=None, pare
     ``on_change()`` fires after a mark/unmark so the caller can refresh the toolbar indicator. Exposes
     ``_buttons`` / ``_render`` for a Qt-smoke test."""
     try:
-        from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame
-        from PyQt5.QtCore import Qt
+        from qtpy.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame
+        from qtpy.QtCore import Qt
     except Exception:      # broad-ok: optional_probe — no Qt (headless) → no widget, callers guard on None
         return None
     from pycat.utils.metadata_contradictions import contradiction_rows, mark_expected

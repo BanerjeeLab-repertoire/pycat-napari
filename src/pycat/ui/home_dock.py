@@ -23,7 +23,7 @@ def _open_card(card):
 
 
 def _label(text, style=""):
-    from PyQt5.QtWidgets import QLabel
+    from qtpy.QtWidgets import QLabel
     lbl = QLabel(text)
     lbl.setWordWrap(True)
     if style:
@@ -32,7 +32,7 @@ def _label(text, style=""):
 
 
 def _card_frame(widget, card):
-    from PyQt5.QtWidgets import QVBoxLayout, QPushButton, QFrame
+    from qtpy.QtWidgets import QVBoxLayout, QPushButton, QFrame
     frame = QFrame()
     frame.setFrameShape(QFrame.StyledPanel)
     fl = QVBoxLayout(frame)
@@ -49,8 +49,8 @@ def _render_home(widget, body_layout, store, reg, central_manager):
     """Render the Home surface: a header + a Guided/Full toggle that labels the OUTCOME (item 5), then two
     tabs — the guided navigator and the capability explorer, which serve different intents and get their own
     space (item 6). Re-run whenever the app mode changes."""
-    from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTabWidget
-    from PyQt5.QtCore import Qt
+    from qtpy.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTabWidget
+    from qtpy.QtCore import Qt
     from pycat.utils.app_mode import current_mode, toggle_mode, AppMode
     while body_layout.count():
         item = body_layout.takeAt(0)
@@ -119,8 +119,8 @@ def build_home_widget(central_manager, *, reg=None, store=None, parent=None):
     the process-wide feature registry and ``store`` to the real user-settings; both are injectable for tests.
     Exposes ``_render`` / ``_cards`` / ``_mode_button`` / ``_navigator`` for a Qt-smoke test to drive it."""
     try:
-        from PyQt5.QtWidgets import QWidget, QVBoxLayout, QScrollArea
-        from PyQt5.QtCore import Qt
+        from qtpy.QtWidgets import QWidget, QVBoxLayout, QScrollArea
+        from qtpy.QtCore import Qt
     except Exception:      # broad-ok: optional_probe — no Qt (headless) → no widget, callers guard on None
         return None
     from pycat.utils.feature_registry import registry as _registry
@@ -178,7 +178,7 @@ def install_home_action(central_manager):
     first run — greet the user with it once. Guarded end-to-end: neither the action nor the auto-open may
     ever break startup. Returns the ``QAction`` or ``None`` (headless). Installed from ``central_manager``."""
     try:
-        from PyQt5.QtWidgets import QAction
+        from qtpy.QtWidgets import QAction
     except Exception:      # broad-ok: optional_probe — no Qt (headless) → no action
         return None
     viewer = getattr(central_manager, "viewer", None)

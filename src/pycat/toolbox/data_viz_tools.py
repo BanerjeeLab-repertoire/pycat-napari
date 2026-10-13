@@ -3,7 +3,7 @@ Data Visualization and Plotting Tools for PyCAT
 
 This module contains classes and functions for visualizing data using various types of plots.
 The PlottingWidget class provides a GUI for selecting and visualizing data from different 
-DataFrames using various types of plots. The class uses PyQt5 for the GUI and pandas, seaborn,
+DataFrames using various types of plots. The class uses Qt (via qtpy) for the GUI and pandas, seaborn,
 and matplotlib for data manipulation and plotting. 
 
 Author
@@ -22,8 +22,8 @@ import matplotlib.pyplot as plt
 
 from pycat.utils.general_utils import debug_log
 from napari.utils.notifications import show_warning as napari_show_warning
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QComboBox, QRadioButton, QButtonGroup, QGroupBox, QHBoxLayout, QLabel, QCheckBox, QScrollArea, QLineEdit, QPushButton, QSizePolicy
-from PyQt5.QtCore import Qt
+from qtpy.QtWidgets import QWidget, QVBoxLayout, QComboBox, QRadioButton, QButtonGroup, QGroupBox, QHBoxLayout, QLabel, QCheckBox, QScrollArea, QLineEdit, QPushButton, QSizePolicy
+from qtpy.QtCore import Qt
 
 
 def _plottable_columns(df):

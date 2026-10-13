@@ -7,8 +7,8 @@ so the user sees WHICH shapes are gained or lost, not just a count.
 """
 from __future__ import annotations
 
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QSlider, QVBoxLayout, QWidget
+from qtpy.QtCore import Qt, QTimer
+from qtpy.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QSlider, QVBoxLayout, QWidget
 
 from pycat.toolbox.segmentation.contrast_floor import CONTRAST_FLOOR_DEFAULT
 
