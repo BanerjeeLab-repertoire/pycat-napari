@@ -258,12 +258,12 @@ exclude = ["build", "dist", "*.egg-info", "tests", "**/.DS_Store"]
 include = [
     "src/pycat",
     "config",
-    "LICENSE",
-    "README.md",
-    "CHANGELOG.md",
-    "CONTRIBUTING.md",
-    "THIRD_PARTY_LICENSES.txt",
-    "pyproject.toml",
+    "/LICENSE",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/CONTRIBUTING.md",
+    "/THIRD_PARTY_LICENSES.txt",
+    "/pyproject.toml",
     # NB: `docs` (18 MB, mostly screenshots) and `notebooks` (816 KB) are deliberately NOT shipped in
     # the sdist — they live in the git repo and the published docs site; a `pip install` does not need
     # them, and they were the dominant PyPI-quota cost (~25 MB → ~7 MB per release). See
@@ -349,7 +349,6 @@ markers = [
     "slow: long-running; run deliberately, not on every push.",
     "gpu: requires a CUDA GPU (cupy / torch-cuda).",
     "benchmark: standing per-release validation suite; run deliberately, not on every commit (see benchmarks/).",
-    "realdata: runs the pipelines on the real-data corpus (tests/data/registry.txt); skipped when the corpus is absent. Scheduled, not per-commit.",
 ]
 
 [tool.black]

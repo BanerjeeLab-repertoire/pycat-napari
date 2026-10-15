@@ -6,7 +6,7 @@ the one dependency claim the completion audit could not settle. Verified here by
 plugin -- with PyCAT's tifffile/zarr shim installed, as every PyCAT open path has it (``pycat.file_io``
 installs it on import; without it tifffile <= 2026.4.11 misreports zarr 3.4 as "zarr < 3").
 
-CZI cannot be synthesised; ``realdata`` covers it when the corpus is present.
+CZI cannot be synthesised, so it is not covered here.
 """
 import numpy as np
 import pytest

@@ -176,3 +176,6 @@ PKG-INFO
 # python -m benchmarks.mask_inventory / benchmarks.mask_level_calibration)
 benchmarks/bio_gt_objects.csv
 benchmarks/mask_level_objects.csv
+
+# Private real-data validation (lab corpus, golden masters, route matrix) -- internal, never published.
+/validation/
