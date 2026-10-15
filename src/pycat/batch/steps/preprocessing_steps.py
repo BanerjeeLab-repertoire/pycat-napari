@@ -11,6 +11,7 @@ import numpy as np
 from pycat.file_io.image_reader import open_image
 from pycat.batch.steps._common import (
     _get_data, _derive_split_companion_path, _source_path_for_recorded_channel, _load_image, _resolve_channel_for_layer, _save_array, _raw_counts, _normalize_to_float, _resolve_image_layer, _ivf_droplet_mask_and_image, _active_layer_channel_role)
+from pycat.kernel import OperationService
 
 
 def _preprocess_raw(arr, ball_radius, window_size, suppress_foreground, suppression_params):
@@ -198,7 +199,6 @@ def _selected_upscale_roles(state: dict, selected_names) -> set:
 def _upscale_named_channels(state, image, roles, upscale_all, upscale_factor) -> bool:
     """Upscale the selected ``channels_by_name`` / ``channels_processed_by_name`` entries in place (replay_upscaling).
     True if any was upscaled."""
-    from pycat.kernel import OperationService
 
     did_upscale = False
     # Update channels_by_name (raw) and channels_processed_by_name (if a named
@@ -293,7 +293,6 @@ def replay_upscaling(state: dict, image_path: Path, params: dict, output_dir: Pa
     no-op for any non-saturated real image, a plain floor-at-zero already
     matches the GUI's real-world numbers.
     """
-    from pycat.kernel import OperationService
 
     data_instance = state['data_instance']
     image = state['image']

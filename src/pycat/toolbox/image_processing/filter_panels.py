@@ -15,6 +15,7 @@ from pycat.toolbox.image_processing._base import (
 )
 from pycat.utils.general_utils import dtype_conversion_func
 from pycat.utils.notify import show_warning as napari_show_warning
+from pycat.kernel import OperationService
 
 
 def run_peak_and_edge_enhancement(data_instance, viewer):
@@ -52,7 +53,6 @@ def run_peak_and_edge_enhancement(data_instance, viewer):
   image = active_layer.data
 
   # Apply the peak and edge enhancement function to the input image
-  from pycat.kernel import OperationService
   enhanced_image = OperationService.produce('peak_edge', {'image': image}, {'ball_radius': ball_radius})
 
   # Add the enhanced image as a new layer to the viewer with a descriptive name
@@ -88,7 +88,6 @@ def run_apply_laplace_of_gauss_filter(sigma_input, viewer):
     sigma = float(sigma_input.text()) if sigma_input.text() else 3
 
     # Apply the LoG filter to the input image
-    from pycat.kernel import OperationService
     LoG_image = OperationService.produce('log', {'image': image}, {'sigma': sigma})
 
     # Add the LoG filtered image to the viewer
@@ -130,7 +129,6 @@ def run_morphological_gaussian_filter(filter_size_input, viewer):
     
     # Determine the filter size from the user input or default to 2
     filter_size = int(filter_size_input.text()) if filter_size_input.text() else 2
-    from pycat.kernel import OperationService
     image = OperationService.produce('morph_gaussian', {'image': active_layer.data}, {'filter_size': filter_size})
 
     # Add the processed image as a new layer to the viewer with a descriptive name
@@ -230,7 +228,6 @@ def run_apply_bilateral_filter(radius_input, viewer):
     radius = float(radius_input.text()) if radius_input.text() else 2
 
     # Apply the bilateral filter to the image
-    from pycat.kernel import OperationService
     filtered_image = OperationService.produce('bilateral', {'image': image}, {'radius': radius})
 
     # Add the filtered image as a new layer to the viewer

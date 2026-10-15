@@ -13,6 +13,7 @@ import numpy as np
 from pycat.utils.general_utils import debug_log
 from pycat.utils.notify import show_info as napari_show_info
 from pycat.utils.notify import show_warning as napari_show_warning
+from pycat.kernel import OperationService
 
 _WORKER_CLS = None
 STEP_NAME = 'cell_timeseries'
@@ -179,7 +180,6 @@ def _on_segment_cells(ui, ns):
     frames = _frame_range(ui, layer.data.shape[0])
 
     def _work(progress):
-        from pycat.kernel import OperationService
         from pycat.toolbox.timeseries.cell_pipeline import time_average
         avg = time_average(layer.data, frames)
         lo, hi = np.percentile(avg, (0.5, 99.9))

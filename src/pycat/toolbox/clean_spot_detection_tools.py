@@ -54,6 +54,7 @@ import pandas as pd
 # Via the notification shim: keeps the array functions importable with no GUI stack.
 from pycat.utils.notify import show_info as napari_show_info
 from pycat.utils.notify import show_warning as napari_show_warning
+from pycat.kernel import OperationService
 
 
 # ---------------------------------------------------------------------------
@@ -296,7 +297,6 @@ def run_clean_detection(threshold_input, damping_input, sigma_input,
     if mname != 'None' and mname in [l.name for l in viewer.layers]:
         mask = np.asarray(viewer.layers[mname].data) > 0
 
-    from pycat.kernel import OperationService
     df = OperationService.execute('clean', {'image': data}, {'max_threshold': thresh, 'damping': damping,
                                                               'psf_sigma': sigma, 'mask': mask}).measurements
     if len(df) == 0:

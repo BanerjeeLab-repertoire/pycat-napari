@@ -10,6 +10,7 @@ import skimage as sk
 from pycat.utils.tag_registry import tags_layer
 from pycat.utils.notify import show_warning as napari_show_warning
 from pycat.toolbox.label_and_mask_tools import binary_morph_operation
+from pycat.kernel import OperationService
 
 
 @tags_layer('local_threshold', role='mask', inputs=('image',),
@@ -139,7 +140,6 @@ def run_local_thresholding(k_slider, window_slider, mode_dropdown, viewer):
         return
 
     # Apply local thresholding to the image and convert result to integer for display
-    from pycat.kernel import OperationService
     thresh_mask = np.asarray(OperationService.produce('local_threshold', {'image': image}, {
         'window_size': window_size, 'k_val': k_value, 'mode': mode_dropdown})).astype(int)
 

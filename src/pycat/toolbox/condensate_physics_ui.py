@@ -33,6 +33,7 @@ from qtpy.QtCore import QThread, Signal
 # _PhysicsWorker is the shared background task-worker (redundancy_consolidation axis 3): a QThread emitting
 # finished(result)/error(traceback). Was a byte-identical local class; now the one shared class, same
 # non-modal semantics (inline spinner, GUI interactive). NOT operation_runner — that is window-modal.
+from pycat.kernel import OperationService
 from pycat.utils.qt_worker import make_task_worker as _make_task_worker
 _PhysicsWorker = _make_task_worker()
 
@@ -101,9 +102,7 @@ def _run_msd_analysis(ui_instance, w):
     """Run the MSD / anomalous-diffusion analysis for the MSD tab."""
     (stack_dd_msd, dt_spin, lag_spin, min_len, per_track_cb, prog_msd, run_msd) = (
         w.stack_dd_msd, w.dt_spin, w.lag_spin, w.min_len, w.per_track_cb, w.prog_msd, w.run_msd)
-    from pycat.toolbox.condensate_physics_tools import (
-        fit_anomalous_diffusion, msd_per_track)
-    from pycat.kernel import OperationService
+    from pycat.toolbox.condensate_physics_tools import msd_per_track
     from pycat.toolbox.dynamic_spatial_tools import (
         extract_frame_properties, link_trajectories_bayesian)
     try:
@@ -134,7 +133,7 @@ def _run_msd_analysis(ui_instance, w):
         msd_df = OperationService.execute('condensate_physics.compute_msd', {'tracks': tracks}, {
             'max_lag': max_l, 'frame_interval_s': dt_spin.value(),
             'min_track_length': min_len.value()}).measurements
-        fit    = fit_anomalous_diffusion(msd_df)
+        fit    = OperationService.produce('condensate_physics.fit_anomalous_diffusion', {'msd_df': msd_df})
         res    = {'msd': msd_df, 'fit': fit}
         from pycat.toolbox.condensate_physics_tools import per_track_msd_curves
         res['track_curves'] = per_track_msd_curves(
@@ -293,7 +292,6 @@ def _build_kinetics_tab(ui_instance):
     kf.addRow(_bwc(run_fusion, optional=True))
 
     def _on_coarsen():
-        from pycat.toolbox.condensate_physics_tools import fit_coarsening
         dr = ui_instance.central_manager.active_data_class.data_repository
         ts_df = dr.get('timeseries_condensate_df')
         if ts_df is None or ts_df.empty:
@@ -302,7 +300,7 @@ def _build_kinetics_tab(ui_instance):
         summary = ts_df.groupby('frame')['mean_condensate_area_um2'].mean()
         time_s  = summary.index.values * dt_kin.value()
         r_mean  = np.sqrt(summary.values / np.pi)
-        res = fit_coarsening(time_s, r_mean)
+        res = OperationService.produce('coarsening_fit', {'time_s': time_s, 'mean_radius_um': r_mean})
         from pycat.ui.ui_utils import show_dataframes_dialog
         df = pd.DataFrame([{k: v for k, v in res.items() if not hasattr(v,'__len__') or isinstance(v, str)}])
         show_dataframes_dialog("Coarsening Kinetics", [("Coarsening fit", df.round(4))])
@@ -320,8 +318,7 @@ def _build_kinetics_tab(ui_instance):
         (napari_show_warning if conf == 'low' else napari_show_info)(msg)
 
     def _on_fusion():
-        from pycat.toolbox.condensate_physics_tools import (
-            extract_fusion_relaxation, fit_aspect_ratio_relaxation)
+        from pycat.toolbox.condensate_physics_tools import extract_fusion_relaxation
         dr = ui_instance.central_manager.active_data_class.data_repository
         name = fus_stack_dd.currentText()
         if name not in [l.name for l in ui_instance.viewer.layers]:
@@ -340,8 +337,9 @@ def _build_kinetics_tab(ui_instance):
         # Fit the event with the largest initial aspect ratio (clearest fusion).
         ev = max(events, key=lambda e: float(np.max(e['aspect_ratio'])))
         R = fus_R.value() if fus_R.value() > 0 else ev['R_um']
-        fit = fit_aspect_ratio_relaxation(
-            ev['time_s'], ev['aspect_ratio'], characteristic_length_um=R)
+        fit = OperationService.produce(
+            'condensate_physics.fit_fusion_relaxation', {'time_s': ev['time_s'], 'aspect_ratio': ev['aspect_ratio']},
+            {'characteristic_length_um': R})
         dr['fusion_relaxation_fit'] = fit
         try:
             from pycat.toolbox.analysis_plots import plot_fusion_relaxation

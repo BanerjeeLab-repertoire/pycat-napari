@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pycat.kernel.operation_service import (
     _result,
+    named,
     passthrough,
     register_kernel,
     resolve,
@@ -88,3 +89,17 @@ def _manders(op_id: str, function: str, first_role: str, second_role: str):
 register_kernel('colocalization', _pearson, wraps=_PEARSON, entity='coloc')
 _manders('coloc.manders_m1', 'manders_m1_calculation', 'masked_image_1', 'mask_2')
 _manders('coloc.manders_m2', 'manders_m2_calculation', 'mask_1', 'masked_image_2')
+
+# ── Dynamics: trajectories, MSD fits, coarsening, merge/fission, VPT ─────────────────────────────────────────
+_DYN = 'pycat.toolbox.dynamic_spatial_tools'
+named('dynamic_spatial.link_trajectories', f'{_DYN}:link_trajectories', entity='track')
+named('dynamic_spatial.detect_merge_fission', f'{_DYN}:detect_merge_fission', entity='event')
+named('condensate_physics.fit_anomalous_diffusion', 'pycat.toolbox.condensate_physics.msd:fit_anomalous_diffusion',
+      entity='track')
+named('coarsening_fit', 'pycat.toolbox.condensate_physics.coarsening:fit_coarsening', entity='condensate')
+named('condensate_physics.fit_fusion_relaxation',
+      'pycat.toolbox.condensate_physics.relaxation:fit_aspect_ratio_relaxation', entity='condensate')
+named('bead_detect', 'pycat.toolbox.vpt.detection:detect_beads_stack', entity='bead')
+named('viscosity', 'pycat.toolbox.vpt.viscosity:viscosity_from_diffusion', entity='condensate')
+named('host_segment', 'pycat.toolbox.vpt.host:segment_host_condensate', entity='mask')
+named('host_erode', 'pycat.toolbox.vpt.host:erode_host_mask', entity='mask')

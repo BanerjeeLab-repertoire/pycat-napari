@@ -19,6 +19,7 @@ from pycat.utils.general_utils import dtype_conversion_func
 from pycat.utils.notify import show_warning as napari_show_warning
 from pycat.toolbox.image_processing._base import _safe_equalize_adapthist, _add_image, _napari
 from pycat.toolbox.image_processing.filters import peak_and_edge_enhancement_func
+from pycat.kernel import OperationService
 
 
 @tags_layer('inpaint', role='preprocessed',
@@ -277,7 +278,6 @@ def run_rb_gaussian_background_removal(eq_int_input, data_instance, viewer):
         napari_show_warning("No active image layer selected.")
 
     # Perform the background removal on the image
-    from pycat.kernel import OperationService
     bg_removed_image = OperationService.produce('rolling_ball', {'image': image}, {
         'ball_radius': ball_radius, 'equalize_intensity': equalize_intensity_input})
 
@@ -644,7 +644,6 @@ def run_enhanced_rb_gaussian_bg_removal(data_instance, viewer):
 
     # Always the destructive rolling-ball + Gaussian + Gabor chain -- no "does
     # this already look preprocessed" branch. See docstring.
-    from pycat.kernel import OperationService
     enhanced_image = OperationService.produce('bg_removal_enhanced', {'image': image}, {'ball_radius': ball_radius})
 
     # Add the processed image as a new layer with an indicative name

@@ -56,6 +56,7 @@ except Exception:
 # finished(result)/error(traceback). Was a byte-identical local class; now the one shared class, same
 # non-modal semantics (inline spinner, GUI interactive). NOT operation_runner — that is window-modal.
 from pycat.utils.qt_worker import make_task_worker as _make_task_worker
+from pycat.kernel import OperationService
 _BFWorker = _make_task_worker()
 
 
@@ -758,13 +759,8 @@ def _add_bf_dynamics(ui, layout):
 
     def _on_run():
         from pycat.toolbox.dynamic_spatial_tools import (
-            extract_frame_properties, link_trajectories_bayesian,
-            trajectory_metrics, detect_merge_fission, cluster_lifetime_analysis,
-        )
-        from pycat.toolbox.condensate_physics_tools import (
-            fit_anomalous_diffusion, msd_per_track,
-            fit_coarsening, kaplan_meier_lifetimes,
-        )
+            extract_frame_properties, link_trajectories_bayesian, trajectory_metrics, cluster_lifetime_analysis)
+        from pycat.toolbox.condensate_physics_tools import msd_per_track, kaplan_meier_lifetimes
         try:
             from pycat.utils.qt_worker import materialize_off_thread
             stack = materialize_off_thread(ui.viewer.layers[stack_dd.currentText()].data,
@@ -800,11 +796,11 @@ def _add_bf_dynamics(ui, layout):
                     # in COMPLETE SILENCE. See utils.general_utils.report_guarantee_failure.
                     from pycat.utils.general_utils import report_guarantee_failure
                     report_guarantee_failure('brightfield_ui: warn_if_assumed_axis', _exc)
-                from pycat.kernel import OperationService
                 msd_df = OperationService.execute('condensate_physics.compute_msd', {'tracks': tracks},
                                                   {'frame_interval_s': dt}).measurements
                 res['msd']     = msd_df
-                res['msd_fit'] = fit_anomalous_diffusion(msd_df)
+                res['msd_fit'] = OperationService.produce(
+                    'condensate_physics.fit_anomalous_diffusion', {'msd_df': msd_df})
                 res['msd_pt']  = msd_per_track(tracks, dt)
 
             if do_coarse:
@@ -812,13 +808,15 @@ def _add_bf_dynamics(ui, layout):
                 area_per_frame = props.groupby('frame')['area_um2'].mean()
                 r_mean = np.sqrt(area_per_frame.values / np.pi)
                 t_arr  = area_per_frame.index.values * dt
-                res['coarsening'] = fit_coarsening(t_arr, r_mean)
+                res['coarsening'] = OperationService.produce(
+                    'coarsening_fit', {'time_s': t_arr, 'mean_radius_um': r_mean})
 
             if do_km:
                 res['km'] = kaplan_meier_lifetimes(tracks, n_frames)
 
             if do_mf:
-                res['merge_fission'] = detect_merge_fission(stack, mpx)
+                res['merge_fission'] = OperationService.produce(
+                    'dynamic_spatial.detect_merge_fission', {'mask_stack': stack}, {'microns_per_pixel': mpx})
 
             return res
 

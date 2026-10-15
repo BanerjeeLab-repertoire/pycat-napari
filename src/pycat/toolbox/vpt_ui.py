@@ -61,6 +61,7 @@ from pycat.toolbox.vpt.msd_adapter import _VptMsdMixin
 
 from pycat.toolbox.vpt.results_dock import _VptResultsDockMixin
 from pycat.toolbox.vpt.drift_adapter import _VptDriftMixin
+from pycat.kernel import OperationService
 
 
 class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin,
@@ -278,14 +279,15 @@ class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin,
         if self._host_mode() == 'infer':
             self._infer_host_from_beads()
             return
-        from pycat.toolbox.vpt_tools import segment_host_condensate, erode_host_mask
         name = self._host_dd.currentText()
         if name not in [l.name for l in self.viewer.layers]:
             napari_show_warning(f"Host channel layer '{name}' not found."); return
         img = np.asarray(self.viewer.layers[name].data)
         try:
-            labeled = segment_host_condensate(img, method=self._seg_method_name())
-            eroded  = erode_host_mask(labeled, erosion_px=self._erosion_spin.value())
+            labeled = OperationService.produce('host_segment', {'host_image': img},
+                {'method': self._seg_method_name()})
+            eroded  = OperationService.produce('host_erode', {'labeled_mask': labeled},
+                {'erosion_px': self._erosion_spin.value()})
         except Exception as e:
             napari_show_warning(f"Host segmentation failed: {e}"); return
 
@@ -309,8 +311,7 @@ class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin,
     def _infer_host_from_beads(self):
         """Mode C: infer an unlabelled host from where the beads are, then
         erode it and store it as the bead-inclusion mask."""
-        from pycat.toolbox.vpt_tools import (
-            detect_beads_stack, infer_host_from_beads, erode_host_mask)
+        from pycat.toolbox.vpt_tools import infer_host_from_beads
         name = self._bead_dd.currentText()
         if name not in [l.name for l in self.viewer.layers]:
             napari_show_warning(
@@ -339,13 +340,16 @@ class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin,
         # Detect beads across the KEY frames (no host filter — we're building
         # one), pool their centroids into a single (N, 2) array of (y, x) px.
         try:
-            det = detect_beads_stack(
-                layer_data, host_mask=None,
-                min_sigma=self._min_sigma.value(),
-                max_sigma=self._max_sigma.value(),
-                threshold=self._bead_thresh.value(),
-                microns_per_pixel=1.0, fit_quality=False,
-                frame_indices=key_idx)
+            det = OperationService.produce(
+                'bead_detect', {'bead_stack': layer_data, 'host_mask': None},
+                {
+                    'min_sigma': self._min_sigma.value(),
+                    'max_sigma': self._max_sigma.value(),
+                    'threshold': self._bead_thresh.value(),
+                    'microns_per_pixel': 1.0,
+                    'fit_quality': False,
+                    'frame_indices': key_idx,
+                })
         except Exception as e:
             napari_show_warning(f"Bead detection for host inference failed: {e}")
             return
@@ -370,7 +374,8 @@ class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin,
                 "condensate radius, or this data may have no bulk-diffusion "
                 "region (consider 'No host (full frame)' mode)."); return
 
-        eroded = erode_host_mask(labeled, erosion_px=self._erosion_spin.value())
+        eroded = OperationService.produce('host_erode', {'labeled_mask': labeled},
+            {'erosion_px': self._erosion_spin.value()})
         if int(eroded.max()) == 0:
             napari_show_warning(
                 "Inferred condensates vanished after erosion. Reduce the "
@@ -400,7 +405,6 @@ class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin,
             except Exception: pass
 
     def _on_detect_beads(self):
-        from pycat.toolbox.vpt_tools import detect_beads_stack
         name = self._bead_dd.currentText()
         if name not in [l.name for l in self.viewer.layers]:
             napari_show_warning(f"Bead channel layer '{name}' not found."); return
@@ -504,20 +508,24 @@ class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin,
             # Keep ALL classes labelled at detection; routing (primary vs.
             # aggregate) happens at the tracking step so aggregates can be
             # followed as their own population.
-            return detect_beads_stack(
-                stack, host_mask=host_mask,
-                min_sigma=self._min_sigma.value(),
-                max_sigma=self._max_sigma.value(),
-                threshold=self._bead_thresh.value(),
-                microns_per_pixel=self._mpx(),
-                quality_mode=qmode, subpixel=subpixel,
-                template_mode=template_mode,
-                bead_size_nm=bead_nm,
-                template_type=template_type,
-                merge_radius_px=merge_radius,
-                strictness=self._strictness.value(),
-                exclude_aggregates=False, recover_out_of_plane=True,
-                progress_callback=progress)
+            return OperationService.produce(
+                'bead_detect', {'bead_stack': stack, 'host_mask': host_mask},
+                {
+                    'min_sigma': self._min_sigma.value(),
+                    'max_sigma': self._max_sigma.value(),
+                    'threshold': self._bead_thresh.value(),
+                    'microns_per_pixel': self._mpx(),
+                    'quality_mode': qmode,
+                    'subpixel': subpixel,
+                    'template_mode': template_mode,
+                    'bead_size_nm': bead_nm,
+                    'template_type': template_type,
+                    'merge_radius_px': merge_radius,
+                    'strictness': self._strictness.value(),
+                    'exclude_aggregates': False,
+                    'recover_out_of_plane': True,
+                    'progress_callback': progress,
+                })
 
         w = _VPTWorker(_job)
         def _done(det_df):
@@ -913,10 +921,6 @@ class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin,
             pass
 
     def _on_rheology(self):
-        from pycat.toolbox.condensate_physics_tools import (
-            fit_anomalous_diffusion)
-        from pycat.kernel import OperationService
-        from pycat.toolbox.vpt_tools import viscosity_from_diffusion
         # VPT treats frames as TIME (MSD, viscosity) — if the stack's axis was
         # assumed at load (undeclared multipage TIFF), warn once.
         try:
@@ -940,20 +944,16 @@ class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin,
             msd_df = OperationService.execute('condensate_physics.compute_msd', {'tracks': tracks}, {
                 'frame_interval_s': self._frame_dt.value(),
                 'min_track_length': self._min_track.value()}).measurements
-            fit = fit_anomalous_diffusion(
-                msd_df,
-                frame_interval_s=self._frame_dt.value(),
-                upper_lag_rule=(self._lag_rule.currentData()
-                                if hasattr(self, '_lag_rule') else 'fraction'),
-                upper_lag_fraction=(self._lag_fraction.value()
-                                    if hasattr(self, '_lag_fraction') else 0.25),
-                upper_lag_fixed_s=(self._lag_fixed_s.value()
-                                   if hasattr(self, '_lag_fixed_s') else None),
-                min_independent_pairs=(self._lag_minpairs.value()
-                                       if hasattr(self, '_lag_minpairs') else 10),
-                confine_to_defensible_bounds=(
-                    self._lag_confine.isChecked()
-                    if hasattr(self, '_lag_confine') else True))
+            fit = OperationService.produce(
+                'condensate_physics.fit_anomalous_diffusion', {'msd_df': msd_df},
+                {
+                    'frame_interval_s': self._frame_dt.value(),
+                    'upper_lag_rule': self._lag_rule.currentData() if hasattr(self, '_lag_rule') else 'fraction',
+                    'upper_lag_fraction': self._lag_fraction.value() if hasattr(self, '_lag_fraction') else 0.25,
+                    'upper_lag_fixed_s': self._lag_fixed_s.value() if hasattr(self, '_lag_fixed_s') else None,
+                    'min_independent_pairs': self._lag_minpairs.value() if hasattr(self, '_lag_minpairs') else 10,
+                    'confine_to_defensible_bounds': self._lag_confine.isChecked() if hasattr(self, '_lag_confine') else True,
+                })
             _fw = fit.get('fit_window_warning')
             if _fw:
                 napari_show_warning(f"MSD fit window: {_fw}")
@@ -963,9 +963,8 @@ class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin,
                 print(f"[PyCAT VPT] MSD fit confined to defensible lag window "
                       f"{_win[0]:.3g}–{_win[1]:.3g}s "
                       f"({'confined' if (self._lag_confine.isChecked() if hasattr(self,'_lag_confine') else True) else 'full range (confine off)'}).")
-            eta = viscosity_from_diffusion(
-                fit.get('D_um2_per_s', float('nan')),
-                self._bead_radius.value(), self._temp_C.value())
+            eta = OperationService.produce('viscosity', {'D_um2_per_s': fit.get('D_um2_per_s', float('nan'))},
+                {'bead_radius_um': self._bead_radius.value(), 'temperature_C': self._temp_C.value()})
         except Exception as e:
             napari_show_warning(f"Microrheology failed: {e}"); return
 

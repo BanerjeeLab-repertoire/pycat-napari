@@ -11,6 +11,7 @@ import numpy as np
 from pycat.file_io.image_reader import open_image
 from pycat.batch.steps._common import (
     _get_data, _derive_split_companion_path, _source_path_for_recorded_channel, _load_image, _resolve_channel_for_layer, _save_array, _raw_counts, _normalize_to_float, _resolve_image_layer, _ivf_droplet_mask_and_image)
+from pycat.kernel import OperationService
 
 
 def replay_cellpose_segmentation(state: dict, image_path: Path, params: dict, output_dir: Path):
@@ -53,7 +54,6 @@ def replay_cellpose_segmentation(state: dict, image_path: Path, params: dict, ou
         method = 'cellpose'
 
     if method == 'cellpose':
-        from pycat.kernel import OperationService
         _refine = bool(params.get('cellpose_refine', False))
         _model = params.get('cellpose_model', None)
         cell_masks = OperationService.produce('cellpose', {'image': image}, {

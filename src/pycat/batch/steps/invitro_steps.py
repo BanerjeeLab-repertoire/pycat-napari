@@ -11,6 +11,7 @@ import numpy as np
 from pycat.file_io.image_reader import open_image
 from pycat.batch.steps._common import (
     _get_data, _derive_split_companion_path, _source_path_for_recorded_channel, _load_image, _resolve_channel_for_layer, _save_array, _raw_counts, _normalize_to_float, _resolve_image_layer, _ivf_droplet_mask_and_image)
+from pycat.kernel import OperationService
 
 
 
@@ -31,7 +32,6 @@ def replay_ivf_preprocess(state: dict, image_path: Path, params: dict, output_di
     than the one the interactive session actually produced, silently.
     """
     from pycat.toolbox.image_processing_tools import apply_laplace_of_gauss_enhancement, pre_process_image
-    from pycat.kernel import OperationService
 
     # RAW counts: pre_process_image's rolling ball is NOT scale-invariant.
     # `_normalize_to_float` subtracts the pedestal; the GUI does not. See _proc, above.
@@ -239,7 +239,6 @@ def replay_ivf_segmentation(state: dict, image_path: Path, params: dict, output_
         labeled = _postfilter(pre > cut)
 
     elif method == 'sauvola':
-        from pycat.kernel import OperationService
         binary = OperationService.produce('local_threshold', {'image': pre}, {
             'window_size': int(params.get('sauvola_window', 35)), 'k_val': params.get('sauvola_k', 0.0),
             'mode': 'Sauvola'})
@@ -400,7 +399,6 @@ def replay_client_enrichment(state: dict, image_path: Path, params: dict, output
         print('[PyCAT Batch]   client_enrichment skipped (no droplet mask/image in state — segment first).')
         return
 
-    from pycat.kernel import OperationService
     di = state.get('data_instance')
     image_metadata = dict(di.data_repository) if di is not None and hasattr(di, 'data_repository') else {}
     temperature_K = params.get('temperature_K')

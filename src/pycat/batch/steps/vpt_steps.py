@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+from pycat.kernel import OperationService
 # NOTE: pandas is imported INSIDE the handler, not at module scope. `batch_step_registry` imports this module,
 # and a `core` test that imports the registry must still work in the minimal (numpy-only) lane — a module-scope
 # pandas import here breaks that (test_ci_dependencies::test_a_core_test_needs_only_the_minimal_lane_install).
@@ -24,11 +25,6 @@ def replay_vpt_microrheology(state: dict, image_path: Path, params: dict, output
     REFUSES to emit a number — it writes a verdict row and stashes the verdict (mirroring
     ``replay_client_enrichment``'s calibration-validity stash), never a pixel-unit viscosity.
     """
-    from pycat.toolbox.vpt.detection import detect_beads_stack
-    from pycat.toolbox.dynamic_spatial_tools import link_trajectories
-    from pycat.toolbox.condensate_physics_tools import fit_anomalous_diffusion
-    from pycat.kernel import OperationService
-    from pycat.toolbox.vpt_tools import viscosity_from_diffusion
     from pycat.toolbox.vpt.measured_drift import measure_and_apply_if_real
     from pycat.utils.pixel_size import pixel_size_um, has_real_pixel_size
     from pycat.utils.frame_interval import frame_interval_s
@@ -62,8 +58,10 @@ def replay_vpt_microrheology(state: dict, image_path: Path, params: dict, output
     temperature_C = float(params.get('temperature_C', 24.0))
     min_track_length = int(params.get('min_track_length', 10))
 
-    beads = detect_beads_stack(stack, microns_per_pixel=mpx, threshold=float(params.get('threshold', 0.02)))
-    tracks = link_trajectories(beads, max_displacement_um=float(params.get('max_displacement_um', 2.0)))
+    beads = OperationService.produce('bead_detect', {'bead_stack': stack},
+        {'microns_per_pixel': mpx, 'threshold': float(params.get('threshold', 0.02))})
+    tracks = OperationService.produce('dynamic_spatial.link_trajectories', {'props_df': beads},
+        {'max_displacement_um': float(params.get('max_displacement_um', 2.0))})
     # Same rule as the panel: drift is measured from the beads and subtracted for the MSD only when it is real
     # (and not when the recording says the user switched it off). The stored tracks keep the centroids.
     tracks, msd_tracks, drift = measure_and_apply_if_real(tracks, mpx)
@@ -71,8 +69,10 @@ def replay_vpt_microrheology(state: dict, image_path: Path, params: dict, output
         msd_tracks = tracks
     msd = OperationService.execute('condensate_physics.compute_msd', {'tracks': msd_tracks}, {
         'frame_interval_s': dt_s, 'min_track_length': min_track_length}).measurements
-    fit = fit_anomalous_diffusion(msd, frame_interval_s=dt_s)
-    eta = viscosity_from_diffusion(fit['D_um2_per_s'], bead_radius_um, temperature_C)
+    fit = OperationService.produce('condensate_physics.fit_anomalous_diffusion', {'msd_df': msd},
+        {'frame_interval_s': dt_s})
+    eta = OperationService.produce('viscosity', {'D_um2_per_s': fit['D_um2_per_s']},
+        {'bead_radius_um': bead_radius_um, 'temperature_C': temperature_C})
 
     di = state['data_instance']
     di.set_data('vpt_tracks', tracks)

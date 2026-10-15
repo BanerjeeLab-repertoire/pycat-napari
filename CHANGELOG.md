@@ -19,6 +19,15 @@ corpus is unchanged, and the route-equivalence tests still pin each kernel to th
   `image_processing/filter_panels.py` (the filters' viewer panels, from filters.py), `batch/step_operations.py`
   (`_STEP_OPERATIONS`, from batch_step_registry.py). Old import paths still work. Ceilings lowered to match.
 
+- **The dynamics family through the kernel too** (26 more sites): trajectory linking, merge/fission detection,
+  the anomalous-diffusion fit, coarsening and fusion-relaxation fits, bead detection, host segmentation/erosion and
+  the Stokes-Einstein viscosity -- in the batch replays (dynamic spatial, MSD, VPT microrheology), the three
+  Dynamics panels, condensate physics (MSD, kinetics), advanced analysis and VPT. `OperationService.produce` now
+  returns exactly what the wrapped function returned (array, record, scalar or table), and `OperationService` is
+  imported once per module: a local import made the name local to the whole function, and the in-vitro Dynamics
+  panels' coarsening fit raised UnboundLocalError mid-migration (caught by the real-data verification; now a
+  contract test).
+
 ### Fixed
 - **MSD on a movie shorter than the minimum track length: a stated lag window, not a crash.** The Dynamics panels
   (brightfield, in-vitro brightfield, in-vitro fluorescence) use the 200-frame default; on a shorter movie no track

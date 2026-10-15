@@ -134,6 +134,7 @@ from pycat.batch.steps.timeseries_invitro_steps import (replay_tsivf_segment_sta
 from pycat.batch.steps.analysis_steps import (replay_condensate_analysis, replay_measure_line, replay_cell_analysis, replay_sacf_analysis, replay_condensate_segmentation, replay_pixel_coloc, replay_spatial_metrology, replay_dynamic_spatial, replay_msd_analysis)
 
 from pycat.batch.steps._common import _get_data, _save_array, _raw_counts, _normalize_to_float, _active_layer_channel_role  # for replay_background_removal (kept here: a source-level test pins it)
+from pycat.kernel import OperationService
 
 # replay_background_removal stays in this file: test_batch_matches_the_recording reads its SOURCE here
 # (a white-box scale-logic check), so moving it would break a test the spec forbids editing.
@@ -151,7 +152,6 @@ def replay_background_removal(state: dict, image_path: Path, params: dict, outpu
     handling moved the intensity scale the heuristic keyed on -- removing the
     branch entirely also removes that whole class of GUI/batch mismatch.
     """
-    from pycat.kernel import OperationService
     import math
 
     preprocessed = state.get('preprocessed')

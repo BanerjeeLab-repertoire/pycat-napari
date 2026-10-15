@@ -46,6 +46,7 @@ except Exception:
 # _IVBFWorker is the shared background task-worker (redundancy_consolidation axis 3): a QThread emitting
 # finished(result)/error(traceback). Was a byte-identical local class; now the one shared class, same
 # non-modal semantics (inline spinner, GUI interactive). NOT operation_runner — that is window-modal.
+from pycat.kernel import OperationService
 from pycat.utils.qt_worker import make_task_worker as _make_task_worker
 _IVBFWorker = _make_task_worker()
 
@@ -505,8 +506,7 @@ def _ivbf_dynamics(ui, layout):
     def _on_run():
         from pycat.toolbox.dynamic_spatial_tools import (
             extract_frame_properties, link_trajectories_bayesian)
-        from pycat.toolbox.condensate_physics_tools import (
-            fit_anomalous_diffusion, msd_per_track, fit_coarsening)
+        from pycat.toolbox.condensate_physics_tools import msd_per_track
         from pycat.toolbox.invitro_tools import (
             coarsening_statistics, detect_sedimentation, detect_and_fit_fusions)
         try:
@@ -530,7 +530,7 @@ def _ivbf_dynamics(ui, layout):
             res['coarsening_stats'] = cs
             if do['c']:
                 r = cs['mean_radius_um'].values; t = cs['time_s'].values
-                res['coarsening_fit'] = fit_coarsening(t, r)
+                res['coarsening_fit'] = OperationService.produce('coarsening_fit', {'time_s': t, 'mean_radius_um': r})
             if do['s']:
                 res['sedimentation'] = detect_sedimentation(cs)
             if do['m']:
@@ -544,11 +544,10 @@ def _ivbf_dynamics(ui, layout):
                     # in COMPLETE SILENCE. See utils.general_utils.report_guarantee_failure.
                     from pycat.utils.general_utils import report_guarantee_failure
                     report_guarantee_failure('invitro_bf_ui: warn_if_assumed_axis', _exc)
-                from pycat.kernel import OperationService
                 msd_df = OperationService.execute('condensate_physics.compute_msd', {'tracks': tracks},
                                                   {'frame_interval_s': dt}).measurements
                 res['msd']    = msd_df
-                res['msd_fit']= fit_anomalous_diffusion(msd_df)
+                res['msd_fit']= OperationService.produce('condensate_physics.fit_anomalous_diffusion', {'msd_df': msd_df})
                 res['msd_pt'] = msd_per_track(tracks, dt)
             if do['f']:
                 res['fusions'] = detect_and_fit_fusions(stack, tracks, None, mpx, dt)

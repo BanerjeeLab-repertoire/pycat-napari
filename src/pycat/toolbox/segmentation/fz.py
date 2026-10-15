@@ -20,6 +20,7 @@ from pycat.toolbox.label_and_mask_tools import (
 from pycat.toolbox.segmentation.local_thresholding import local_thresholding_func
 from pycat.utils.general_utils import check_contrast_func, dtype_conversion_func
 from pycat.utils.tag_registry import tags_layer
+from pycat.kernel import OperationService
 
 
 def _weight_mean_color(graph, src, dst, n):
@@ -375,7 +376,6 @@ def run_fz_segmentation_and_merging(scale_input, sigma_input, min_size_input, me
     merge_tol = float(merge_tol_input.text()) if merge_tol_input.text() else 0.05
 
     # Apply the segmentation and merging process to the selected image layer
-    from pycat.kernel import OperationService
     segmented_img = OperationService.produce('felzenszwalb', {'image': image}, {
         'scale': scale, 'sigma': sigma, 'min_size': min_size, 'merge_tol': merge_tol})
 

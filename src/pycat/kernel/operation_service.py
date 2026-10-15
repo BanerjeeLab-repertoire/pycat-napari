@@ -57,7 +57,11 @@ def _result(op_id: str, entity: str, out) -> AnalysisResult:
     if isinstance(out, pd.DataFrame):
         return AnalysisResult(operation_id=op_id, entity_type=entity, measurements=out, artifacts=())
     if isinstance(out, dict):   # a one-record measure: the table, and the record itself (exact types) as the artifact
-        return AnalysisResult(operation_id=op_id, entity_type=entity, measurements=pd.DataFrame([out]), artifacts=(out,))
+        try:
+            table = pd.DataFrame([out])
+        except (ValueError, TypeError):   # a record pandas cannot lay out as one row stays the artifact only
+            table = None
+        return AnalysisResult(operation_id=op_id, entity_type=entity, measurements=table, artifacts=(out,))
     return AnalysisResult(operation_id=op_id, entity_type=entity, measurements=None, artifacts=(out,))
 
 
@@ -85,6 +89,16 @@ def passthrough(op_id: str, wraps: str, *, roles: tuple = ('image',), optional: 
     register_kernel(op_id, run, wraps=wraps, entity=entity)
 
 
+def named(op_id: str, wraps: str, *, entity: str = 'image') -> None:
+    """Register a kernel that passes inputs AND params to the wrapped function by its own parameter names:
+    ``fn(**inputs, **params)``. Inputs are the data (images, masks, tables), params the settings; the split is
+    for the reader, the function's signature is the vocabulary."""
+    def run(inputs: dict, params: dict) -> AnalysisResult:
+        return _result(op_id, entity, resolve(wraps)(**inputs, **params))
+
+    register_kernel(op_id, run, wraps=wraps, entity=entity)
+
+
 class OperationService:
     """The single scientific-execution kernel — see the module docstring."""
 
@@ -102,12 +116,9 @@ class OperationService:
 
     @staticmethod
     def produce(op_id: str, inputs: dict, params: dict = None):
-        """What the wrapped function returned: the array an enhance/create op produces, or the record a one-row
-        measure op returns (``execute(...).artifacts[0]``)."""
+        """Exactly what the wrapped function returned: the array, the record (dict), the scalar, or the table."""
         result = OperationService.execute(op_id, inputs, params)
-        if not result.artifacts:
-            raise ScientificAssumptionError(f"{op_id} produces a table; use execute(...).measurements.")
-        return result.artifacts[0]
+        return result.artifacts[0] if result.artifacts else result.measurements
 
     @staticmethod
     def has_kernel(op_id: str) -> bool:

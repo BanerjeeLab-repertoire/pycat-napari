@@ -21,6 +21,7 @@ from pathlib import Path
 import numpy as np
 
 from pycat.batch.steps._common import _get_data, _save_array
+from pycat.kernel import OperationService
 
 
 def _stack(state):
@@ -46,7 +47,6 @@ def _frame_interval(state, params):
 def replay_ts_cells_time_average(state: dict, image_path: Path, params: dict, output_dir: Path):
     """Cellpose on the movie's time average at the recorded cell diameter (the GUI's 'Segment cells on the
     time average')."""
-    from pycat.kernel import OperationService
     from pycat.toolbox.timeseries.cell_pipeline import time_average
     stack = _stack(state)
     if stack is None:

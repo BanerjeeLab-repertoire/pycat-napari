@@ -142,3 +142,22 @@ def test_a_steps_declared_operations_include_every_op_its_replay_runs():
         if missing:
             undeclared.append(f'{step}: runs {sorted(missing)} but declares {step_operations(step)}')
     assert not undeclared, '\n'.join(undeclared)
+
+
+def test_OperationService_is_imported_once_at_module_level():
+    """A local ``from pycat.kernel import OperationService`` makes the name local to the WHOLE function: a kernel
+    call earlier in that function, or in a branch that skips the import, raises UnboundLocalError. That broke the
+    in-vitro Dynamics panels' coarsening fit during the migration; the real-data verification caught it."""
+    local = []
+    for path in SRC.rglob('*.py'):
+        rel = path.relative_to(SRC).as_posix()
+        if rel.startswith('kernel/'):
+            continue
+        tree = ast.parse(path.read_text(encoding='utf-8'))
+        for fn in ast.walk(tree):
+            if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for node in ast.walk(fn):
+                    if (isinstance(node, ast.ImportFrom) and node.module == 'pycat.kernel'
+                            and any(a.name == 'OperationService' for a in node.names)):
+                        local.append(f'{rel}:{node.lineno} (in {fn.name})')
+    assert not local, 'import OperationService at module level instead:\n' + '\n'.join(sorted(set(local)))

@@ -35,7 +35,9 @@ _STEP_OPERATIONS: dict[str, tuple[str, ...]] = {
     'bf_condensate_segmentation': ('bf_segment',),
     'ivbf_segmentation':        ('bf_segment',),
     'ivf_size_distribution':    ('invitro.size_distribution',),   # a MEASURE op
-    'vpt_microrheology':        ('vpt.microrheology', 'condensate_physics.compute_msd'),   # INTERPRET terminal (N2b-1) + its MSD
+    'vpt_microrheology':        ('vpt.microrheology', 'bead_detect', 'dynamic_spatial.link_trajectories',
+                                 'condensate_physics.compute_msd', 'condensate_physics.fit_anomalous_diffusion',
+                                 'viscosity'),   # INTERPRET terminal (N2b-1) and the chain it runs
     # Steps that run through OperationService: the ops each replay executes (checked against the replay's own
     # OperationService calls by tests/test_kernel_contract.py).
     'background_removal':       ('bg_removal_enhanced',),
@@ -45,7 +47,8 @@ _STEP_OPERATIONS: dict[str, tuple[str, ...]] = {
     'local_thresholding':       ('local_threshold',),
     'pixel_colocalization':     ('colocalization',),
     'client_enrichment':        ('client_enrichment',),
-    'msd_analysis':             ('condensate_physics.compute_msd',),
+    'msd_analysis':             ('condensate_physics.compute_msd', 'condensate_physics.fit_anomalous_diffusion'),
+    'dynamic_spatial':          ('dynamic_spatial.link_trajectories', 'dynamic_spatial.detect_merge_fission'),
 }
 
 

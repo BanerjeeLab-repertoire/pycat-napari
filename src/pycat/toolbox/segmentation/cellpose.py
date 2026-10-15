@@ -19,6 +19,7 @@ from pycat.utils.notify import show_warning as napari_show_warning
 from pycat.toolbox.label_and_mask_tools import binary_morph_operation, opencv_contour_func, extend_mask_to_edges
 from pycat.toolbox.image_processing_tools import apply_rescale_intensity
 from pycat.toolbox.segmentation.watershed import opencv_watershed_func
+from pycat.kernel import OperationService
 
 
 # Cache GPU availability at module load time  --  avoids re-initializing the
@@ -301,7 +302,6 @@ def run_cellpose_segmentation(image_layer, data_instance, viewer):
     refine = bool(data_instance.data_repository.get('cellpose_refine', False))
 
     # Perform cell segmentation using Cellpose.
-    from pycat.kernel import OperationService
     cell_masks = OperationService.produce('cellpose', {'image': image}, {
         'object_diameter': object_diameter, 'model_name': model_name, 'postprocess': refine})
     

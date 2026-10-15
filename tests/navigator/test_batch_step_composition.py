@@ -41,7 +41,7 @@ from pycat.navigator.op_catalog import _measure_ops, load_operation_catalog
 # principle ("a guessed mapping is worse than none"), removing a proven-wrong entry is not a regression.
 # Raised 9 -> 17 (OperationService adoption): eight steps that now run through the kernel declare their ops,
 # and tests/test_kernel_contract.py checks each declaration against the replay's own kernel calls.
-_MIN_STEPS_DECLARED = 17
+_MIN_STEPS_DECLARED = 18   # + dynamic_spatial (dynamics family through the kernel)
 
 
 def _operation_vocabulary():

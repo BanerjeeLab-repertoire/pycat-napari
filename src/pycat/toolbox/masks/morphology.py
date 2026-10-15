@@ -16,6 +16,7 @@ import cv2
 
 from pycat.utils.notify import show_warning as napari_show_warning
 from pycat.utils.tag_registry import tags_layer
+from pycat.kernel import OperationService
 
 
 def _napari():
@@ -306,7 +307,6 @@ def run_binary_morph_operation(roi_mask_layer, iter_input, elem_size_input, elem
         raise ValueError('The binary mask and ROI mask must have the same shape.')
 
     # Perform the binary morphological operation
-    from pycat.kernel import OperationService
     processed_mask = OperationService.produce('binary_morph', {'mask': binary_mask}, {
         'iterations': iter_val, 'element_size': elem_size_val, 'element_shape': elem_shape_dropdown,
         'mode': mode_dropdown, 'roi_mask': roi_mask})

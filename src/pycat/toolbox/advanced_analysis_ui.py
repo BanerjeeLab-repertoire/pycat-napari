@@ -27,6 +27,7 @@ from qtpy.QtWidgets import (
     QTabWidget, QComboBox, QSizePolicy,
 )
 from qtpy.QtCore import QThread, Signal
+from pycat.kernel import OperationService
 
 
 class _AdvancedAnalysisWorker(QThread):
@@ -361,11 +362,7 @@ def _run_dynamic_analysis(ui_instance, w):
     (stack_dd, prog_d, run_d, cb_track, cb_mf, cb_life, cb_nb, cb_grow, linker_dd, max_disp, max_gap, sigma_spin, area_w_spin, vel_check, tm_gap_dist, tm_merge_cb, tm_split_cb, tm_kalman_cb, prox_um, nb_rad, frame_dt, stop_d) = (
         w.stack_dd, w.prog_d, w.run_d, w.cb_track, w.cb_mf, w.cb_life, w.cb_nb, w.cb_grow, w.linker_dd, w.max_disp, w.max_gap, w.sigma_spin, w.area_w_spin, w.vel_check, w.tm_gap_dist, w.tm_merge_cb, w.tm_split_cb, w.tm_kalman_cb, w.prox_um, w.nb_rad, w.frame_dt, w.stop_d)
     from pycat.toolbox.dynamic_spatial_tools import (
-        extract_frame_properties, link_trajectories,
-        trajectory_metrics, detect_merge_fission,
-        cluster_lifetime_analysis, neighbourhood_persistence,
-        growth_shrinkage_kinetics,
-    )
+        extract_frame_properties, trajectory_metrics, cluster_lifetime_analysis, neighbourhood_persistence, growth_shrinkage_kinetics)
     try:
         stack = ui_instance.viewer.layers[stack_dd.currentText()].data
     except KeyError as e:
@@ -433,15 +430,20 @@ def _run_dynamic_analysis(ui_instance, w):
                 # ambiguous "-1" pseudo-track.
                 tracks = tm_result[tm_result['track_id'] != -1].reset_index(drop=True)
             else:
-                tracks = link_trajectories(props, max_disp.value(), max_gap.value())
+                tracks = OperationService.produce('dynamic_spatial.link_trajectories', {'props_df': props},
+                    {'max_displacement_um': max_disp.value(), 'max_gap_frames': max_gap.value()})
             if cb_track.isChecked():
                 res['trajectories']    = tracks
                 res['trajectory_metrics'] = trajectory_metrics(tracks)
             progress_emit and progress_emit(2, 5)
 
         if cb_mf.isChecked():
-            res['merge_fission'] = detect_merge_fission(
-                np.asarray(stack), mpx, prox_um.value())
+            res['merge_fission'] = OperationService.produce(
+                'dynamic_spatial.detect_merge_fission', {'mask_stack': np.asarray(stack)},
+                {
+                    'microns_per_pixel': mpx,
+                    'proximity_um': prox_um.value(),
+                })
             progress_emit and progress_emit(3, 5)
 
         if cb_life.isChecked() and tracks is not None:

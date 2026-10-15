@@ -41,6 +41,7 @@ from pycat.utils.math_utils import remove_outliers_iqr
 # functions in this module (cell_analysis_func, puncta_analysis_func) stay testable
 # headlessly.
 from pycat.toolbox.image_processing_tools import apply_rescale_intensity
+from pycat.kernel import OperationService
 
 
 
@@ -1060,7 +1061,6 @@ def run_puncta_analysis_func(puncta_mask_layer, image_layer, data_instance, view
     # this restores the original behaviour.)
     cell_mask = (labeled_cells > 0).astype(bool)
     green_channel = dtype_conversion_func(image, output_bit_depth='uint16')
-    from pycat.kernel import OperationService
     green_channel = OperationService.produce('rescale', {'image': green_channel})
     sbs_overlay = create_overlay_image(green_channel, puncta_masks * cell_mask, alpha=0.65)
     # Add as an explicit RGB image (uint8, rgb=True). The array is (H, 2W, 3):

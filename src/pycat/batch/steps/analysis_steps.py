@@ -11,6 +11,7 @@ import numpy as np
 from pycat.file_io.image_reader import open_image
 from pycat.batch.steps._common import (
     _get_data, _derive_split_companion_path, _source_path_for_recorded_channel, _load_image, _resolve_channel_for_layer, _save_array, _raw_counts, _normalize_to_float, _resolve_image_layer, _ivf_droplet_mask_and_image)
+from pycat.kernel import OperationService
 
 
 def replay_condensate_analysis(state: dict, image_path: Path, params: dict, output_dir: Path):
@@ -401,7 +402,6 @@ def replay_pixel_coloc(state: dict, image_path: Path, params: dict, output_dir: 
     both channels share (r≈0.99 even for independent channels), not colocalisation — the ROI (the union of the
     segmented objects, excluding background) is the fix. The raw threshold-free measures from `coloc/metrics`."""
     from pycat.toolbox.coloc.metrics import manders_overlap, manders_k1_calculation, manders_k2_calculation
-    from pycat.kernel import OperationService
     import pandas as pd
     # The first segmentation that actually HAS pixels: an image whose condensate step found no puncta still holds
     # an (empty) puncta_mask, and an empty ROI crashed Pearson ("x and y must have length at least 2") instead of
@@ -487,8 +487,7 @@ def replay_dynamic_spatial(state: dict, image_path: Path, params: dict, output_d
     never fabricates a per-frame segmentation. Both the motion op (`dynamic_spatial.link_trajectories`) and the
     fusion op (`dynamic_spatial.detect_merge_fission`) resolve here, so the `_dynamic_spatial_done` guard keeps a
     plan that contains both from tracking twice."""
-    from pycat.toolbox.dynamic_spatial_tools import (
-        extract_frame_properties, link_trajectories, detect_merge_fission)
+    from pycat.toolbox.dynamic_spatial_tools import extract_frame_properties
     import pandas as pd
 
     if state.get('_dynamic_spatial_done'):
@@ -512,8 +511,10 @@ def replay_dynamic_spatial(state: dict, image_path: Path, params: dict, output_d
     proximity = float(params.get('proximity_um', 1.0))
 
     props = extract_frame_properties(stack, mpx)
-    tracks = link_trajectories(props, max_displacement_um=max_disp, max_gap_frames=max_gap)
-    events = detect_merge_fission(stack, mpx, proximity_um=proximity)
+    tracks = OperationService.produce('dynamic_spatial.link_trajectories', {'props_df': props},
+        {'max_displacement_um': max_disp, 'max_gap_frames': max_gap})
+    events = OperationService.produce('dynamic_spatial.detect_merge_fission', {'mask_stack': stack},
+        {'microns_per_pixel': mpx, 'proximity_um': proximity})
 
     di = state['data_instance']
     state['dynamic_spatial_tracks_df'] = tracks
@@ -535,8 +536,6 @@ def replay_msd_analysis(state: dict, image_path: Path, params: dict, output_dir:
     scale discipline as VPT microrheology: a diffusion coefficient is a physical rate (um^2/s), so the handler
     REFUSES (a validity flag, no number) when the pixel size is a 1.0 placeholder or the frame interval is
     missing — it never emits a pixel^2/frame "D". Replaces the msd_analysis skip-stub."""
-    from pycat.toolbox.condensate_physics_tools import fit_anomalous_diffusion
-    from pycat.kernel import OperationService
     from pycat.utils.pixel_size import has_real_pixel_size
     from pycat.utils.frame_interval import frame_interval_s
     import pandas as pd
@@ -567,7 +566,8 @@ def replay_msd_analysis(state: dict, image_path: Path, params: dict, output_dir:
         _min = (getattr(msd, 'attrs', {}).get('lag_budget') or {}).get('effective_min_track_length', min_track_length)
         print(f"[PyCAT Batch]   MSD analysis: no track met the {_min}-frame minimum length.")
         return
-    fit = fit_anomalous_diffusion(msd, frame_interval_s=dt_s)
+    fit = OperationService.produce('condensate_physics.fit_anomalous_diffusion', {'msd_df': msd},
+        {'frame_interval_s': dt_s})
 
     di = state['data_instance']
     state['msd_df'] = msd

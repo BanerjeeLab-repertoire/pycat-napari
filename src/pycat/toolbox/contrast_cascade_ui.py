@@ -12,6 +12,7 @@ from qtpy.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox, QLabel, QProgressBar, QPushButton,
     QSpinBox, QComboBox, QWidget, QSizePolicy,
 )
+from pycat.kernel import OperationService
 
 _BAND_CMAPS = ['red', 'yellow', 'green', 'cyan', 'blue', 'magenta']
 
@@ -127,7 +128,6 @@ def _add_contrast_cascade(ui_instance, layout=None, separate_widget=False):
         name = img_dd.currentText()
         if name not in [l.name for l in viewer.layers]:
             napari_show_warning("Select an image."); return
-        from pycat.kernel import OperationService
         data = np.asarray(viewer.layers[name].data)
         img2d = data.max(axis=0) if data.ndim == 3 else data
         viewer.add_image(OperationService.produce('tone_map', {'image': img2d}, {'method': 'log'}),
