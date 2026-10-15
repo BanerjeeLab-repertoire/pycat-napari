@@ -13,6 +13,13 @@ from pycat.batch.steps._common import (
     _get_data, _derive_split_companion_path, _source_path_for_recorded_channel, _load_image, _resolve_channel_for_layer, _save_array, _raw_counts, _normalize_to_float, _resolve_image_layer, _ivf_droplet_mask_and_image)
 
 
+
+def _mpx(state):
+    """The pixel size through the one gate (Completion Spec A5): the loader's 1-um/px placeholder is not a
+    calibration, and the gate says so on the record instead of a silent ``.get(..., 1.0)``."""
+    from pycat.utils.pixel_size import pixel_size_um_or_default
+    return pixel_size_um_or_default(state['data_instance'].data_repository, context='batch in-vitro')
+
 def replay_ivf_preprocess(state: dict, image_path: Path, params: dict, output_dir: Path):
     """Replay in vitro fluorescence preprocessing (no cell mask).
 
@@ -79,7 +86,7 @@ def replay_ivf_field_summary(state: dict, image_path: Path, params: dict, output
     if mask is None or img is None:
         print('[PyCAT Batch]   IVF field summary skipped (no droplet mask/image in state).')
         return
-    mpx = state['data_instance'].data_repository.get('microns_per_pixel_sq', 1.0) ** 0.5
+    mpx = _mpx(state)
     summ = field_summary(mask, img, mpx)
 
     # Partition coefficient: mirror the interactive GUI exactly
@@ -116,20 +123,22 @@ def replay_ivf_field_summary(state: dict, image_path: Path, params: dict, output
 
 def replay_ivf_size_distribution(state: dict, image_path: Path, params: dict, output_dir: Path):
     """Replay in vitro droplet size-distribution fit from the droplet mask."""
-    from pycat.toolbox.invitro_tools import fit_size_distribution
+    from pycat.toolbox.invitro_tools import detection_limit_for_radii, fit_size_distribution
     import pandas as pd, numpy as np
     import skimage as sk
     mask, _ = _ivf_droplet_mask_and_image(state)
     if mask is None:
         print('[PyCAT Batch]   IVF size distribution skipped (no droplet mask in state).')
         return
-    mpx = state['data_instance'].data_repository.get('microns_per_pixel_sq', 1.0) ** 0.5
+    mpx = _mpx(state)
     props = sk.measure.regionprops(mask.astype(np.int32))
     radii = np.array([np.sqrt(p.area * mpx**2 / np.pi) for p in props])
     if len(radii) < 5:
         print(f'[PyCAT Batch]   IVF size distribution skipped ({len(radii)} droplets < 5).')
         return
-    res = fit_size_distribution(radii, n_bins=int(params.get('n_bins', 30)))
+    # The segmentation dropped objects under its minimum area: fit with that detection limit (A4).
+    xmin = detection_limit_for_radii(radii, state.get('ivf_min_area_px'), mpx)
+    res = fit_size_distribution(radii, n_bins=int(params.get('n_bins', 30)), xmin=xmin)
     state['ivf_size_distribution'] = res        # expose the fit to the navigator (additive; batch unaffected)
     row = {k: v for k, v in res.items() if not hasattr(v, '__len__')}
     pd.DataFrame([row]).to_csv(
@@ -155,7 +164,7 @@ def replay_ivf_spatial_metrology(state: dict, image_path: Path, params: dict, ou
     if mask is None:
         print('[PyCAT Batch]   IVF spatial metrology skipped (no droplet mask in state).')
         return
-    mpx = state['data_instance'].data_repository.get('microns_per_pixel_sq', 1.0) ** 0.5
+    mpx = _mpx(state)
     H, W = mask.shape[:2]
     field_lbl = np.ones((H, W), dtype=np.int32); field_lbl[:2, :2] = 0
     coords_df = get_puncta_centroids(mask, field_lbl, mpx)
@@ -200,6 +209,7 @@ def replay_ivf_segmentation(state: dict, image_path: Path, params: dict, output_
     method = params.get('method', 'otsu')
     p_minarea = int(params.get('min_area', 6))
     p_round = bool(params.get('reject_nonround', False))
+    state['ivf_min_area_px'] = p_minarea         # the size fit's detection limit (A4)
 
     def _postfilter(binary):
         b = np.asarray(binary) > 0
@@ -285,6 +295,7 @@ def replay_ivf_droplet_segment(state: dict, image_path: Path, params: dict, outp
         reject_nonround=bool(params.get('reject_nonround', False)))
     labeled = np.asarray(labeled).astype(np.int32)
     state['ivf_droplet_mask'] = labeled
+    state['ivf_min_area_px'] = int(params.get('min_area', 6))    # the size fit's detection limit (A4)
     state['cellpose_mask']    = labeled       # aliases for downstream compatibility
     state['labeled_cells']    = labeled
     _save_array(labeled.astype(np.uint16),

@@ -145,3 +145,14 @@ def test_empty_review_helpers_are_safe():
     empty = ParamReview([])
     assert empty.is_empty and empty.params_by_step() == {} and empty.provenance_by_step() == {}
     assert empty.step("anything") is None
+
+
+# ── Completion Spec C3: "Build method panel" received the ParamReview and silently did nothing ─────────────
+
+def test_the_reviewed_values_flatten_to_the_repository_shape_the_panel_seeds():
+    from pycat.navigator.parameters import flat_reviewed_parameters
+    review = build_param_review(_plan(_step("image_processing_tools")), ctx={"ball_radius": 30})
+    assert flat_reviewed_parameters(review) == {"ball_radius": 30}
+    assert flat_reviewed_parameters(None) == {}
+    assert flat_reviewed_parameters({"a": 1}) == {"a": 1}
+

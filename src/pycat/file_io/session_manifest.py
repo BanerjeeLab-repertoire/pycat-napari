@@ -301,10 +301,20 @@ def read_dataframes_from_manifest(manifest, folder):
         if not fpath.exists():
             continue
         try:
-            out[key] = pd.read_csv(fpath)
+            out[key] = _restore_index(pd.read_csv(fpath))
         except Exception:
             continue
     return out
+
+
+def _restore_index(df):
+    """The session writer saves tables WITH their index (``to_csv(index=True)``), so its first column is the
+    unnamed index. Read back plainly it became a data column, ``Unnamed: 0`` -- every restored table gained a
+    column the saved one did not have (found by the real-data harness's session route, 1.7.005)."""
+    if len(df.columns) and str(df.columns[0]).startswith('Unnamed: 0'):
+        df = df.set_index(df.columns[0])
+        df.index.name = None
+    return df
 
 
 def restore_dataframes_from_manifest(manifest, folder, data_repository):

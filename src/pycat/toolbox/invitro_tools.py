@@ -62,7 +62,7 @@ from pycat.toolbox.invitro.field_summary import field_summary  # noqa: E402,F401
 # The MLE size-distribution fitting moved to its own domain module; re-exported so every caller
 # (invitro UIs, batch steps, the op-catalog api string) keeps importing it from invitro_tools.
 from pycat.toolbox.invitro.size_distribution import (  # noqa: E402,F401
-    fit_size_distribution_mle, fit_size_distribution)
+    fit_size_distribution_mle, fit_size_distribution, detection_limit_for_radii)
 # ---------------------------------------------------------------------------
 # Coarsening + C_sat  ->  moved to invitro/analysis.py (1.6.216)
 # ---------------------------------------------------------------------------

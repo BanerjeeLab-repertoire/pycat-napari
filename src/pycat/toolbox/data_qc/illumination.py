@@ -1,6 +1,6 @@
 """Illumination QC — vignetting (flat-field uniformity) and ghosting (stray-light / secondary-reflection) field artifacts.
 
-Moved VERBATIM out of `data_qc_tools` (data_qc_decomposition); that module re-exports these.
+Split out of `data_qc_tools` (data_qc_decomposition); that module re-exports these.
 """
 from __future__ import annotations
 
@@ -47,7 +47,13 @@ def qc_vignetting(img):
     ===================================  =============  =============
 
     Object placement no longer moves the number, and real vignetting is still measured.
+
+    **A stack is measured on its MEAN frame, deliberately** (audited for the SNR mean-frame artefact, G3). Unlike
+    the SNR, averaging does not manufacture a better verdict here — it removes a real bias: the median-filter
+    estimate reads LOW as noise rises (a 0.757 true edge/centre read 0.743 / 0.693 / 0.645 at noise sigma
+    5 / 25 / 50), so the averaged frame is the more accurate one.
     """
+    from pycat.toolbox.data_qc import thresholds as th
     a = _mean_frame(img).astype(float)
     h, w = a.shape
 
@@ -115,7 +121,8 @@ def qc_vignetting(img):
     centre = float(np.mean(prof[:max(1, nb // 8)]))
     edge = float(np.mean(prof[-max(1, nb // 8):]))
     ratio = edge / centre if centre != 0 else 1.0
-    status = 'good' if ratio >= 0.9 else ('warn' if ratio >= 0.7 else 'bad')
+    status = ('good' if ratio >= th.VIGNETTING_GOOD_RATIO else
+              ('warn' if ratio >= th.VIGNETTING_WARN_RATIO else 'bad'))
     return dict(
         name='Vignetting / flat-field', tier='core', status=status,
         value=float(ratio), unit='edge/centre',
@@ -145,7 +152,13 @@ def qc_ghosting(img):
     (a faint shifted copy of the whole scene) leaves a sharp cepstral peak at the
     ghost offset. The cepstrum is far more specific than plain autocorrelation:
     it responds to the coherent whole-field echo, not to ordinary repeated
-    structure (spots, cells) in the sample."""
+    structure (spots, cells) in the sample.
+
+    The power cepstrum is Bogert, Healy & Tukey (1963); its use for echo detection is the textbook one (Oppenheim &
+    Schafer, *Discrete-Time Signal Processing*, ch. 13). A stack is assessed on its mean frame: audited for the
+    SNR mean-frame artefact (G3), the cepstral peak does not move with frame count (0.0021 / 0.0022 / 0.0023 at
+    1 / 16 / 64 frames of the same scene)."""
+    from pycat.toolbox.data_qc import thresholds as th
     from scipy.ndimage import gaussian_filter
     a = _mean_frame(img)
     a = a - a.mean()
@@ -165,12 +178,12 @@ def qc_ghosting(img):
     sec = float(prom[mask].max())
     idx = np.argwhere(mask & (prom == sec))
     off = np.sqrt(((idx[0][0] - cy) ** 2 + (idx[0][1] - cx) ** 2)) if len(idx) else 0.0
-    status = 'good' if sec < 0.005 else ('warn' if sec < 0.012 else 'bad')
+    status = 'good' if sec < th.GHOSTING_GOOD_PEAK else ('warn' if sec < th.GHOSTING_WARN_PEAK else 'bad')
     return dict(
         name='Ghosting (double image)', tier='core', status=status,
         value=sec, unit='cepstral peak',
         headline=f"cepstral echo {sec:.4f} at ~{off:.0f} px offset",
-        how="Cepstrum (inverse transform of the log power spectrum). A reflection "
+        how="Power cepstrum (Bogert, Healy & Tukey 1963: inverse transform of the log power spectrum). A reflection "
             "ghost is a faint shifted copy of the whole scene and leaves a sharp "
             "cepstral peak at the ghost's displacement.",
         good="No sharp cepstral peak (well below ~0.005). A clear peak means a "

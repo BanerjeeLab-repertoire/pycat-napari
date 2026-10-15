@@ -203,9 +203,8 @@ def replay_sacf_analysis(state: dict, image_path: Path, params: dict, output_dir
         print("[PyCAT Batch]   SACF skipped: recorded image_layer not found in state.")
         return
     stack = image[np.newaxis, ...] if image.ndim == 2 else image
-    microns_per_pixel = np.sqrt(
-        data_instance.data_repository.get('microns_per_pixel_sq', 1.0)
-    )
+    from pycat.utils.pixel_size import pixel_size_um_or_default
+    microns_per_pixel = pixel_size_um_or_default(data_instance.data_repository, context='batch SACF')
 
     if mode == MODE_LIR:
         labeled_cells = state.get('labeled_cells')
@@ -404,15 +403,14 @@ def replay_pixel_coloc(state: dict, image_path: Path, params: dict, output_dir: 
     from pycat.toolbox.coloc.metrics import (
         pearsons_correlation, manders_overlap, manders_k1_calculation, manders_k2_calculation)
     import pandas as pd
-    roi_src = state.get('puncta_mask')
-    if roi_src is None:
-        roi_src = state.get('labeled_cells')
-    if roi_src is None:
-        roi_src = state.get('cellpose_mask')
-    if roi_src is None:
-        print(f"[PyCAT Batch]   Colocalization skipped for {image_path.name}: no segmentation ROI in state.")
+    # The first segmentation that actually HAS pixels: an image whose condensate step found no puncta still holds
+    # an (empty) puncta_mask, and an empty ROI crashed Pearson ("x and y must have length at least 2") instead of
+    # falling back to the cells (real-data harness, 1.7.005).
+    roi = next((np.asarray(state[k]) > 0 for k in ('puncta_mask', 'labeled_cells', 'cellpose_mask')
+                if state.get(k) is not None and int((np.asarray(state[k]) > 0).sum()) >= 2), None)
+    if roi is None:
+        print(f"[PyCAT Batch]   Colocalization skipped for {image_path.name}: no segmentation ROI with pixels in state.")
         return
-    roi = np.asarray(roi_src) > 0
     ch1 = np.asarray(_resolve_image_layer(state, params.get('image_layer1'),
                                           fallback=state.get('preprocessed', state['image'])), dtype=np.float64)
     named = state.get('channels_by_name', {}) or {}
@@ -449,7 +447,8 @@ def replay_spatial_metrology(state: dict, image_path: Path, params: dict, output
         return
     puncta = np.asarray(puncta)
     cells = np.asarray(cells)
-    mpx = state['data_instance'].data_repository.get('microns_per_pixel_sq', 1.0) ** 0.5
+    from pycat.utils.pixel_size import pixel_size_um_or_default
+    mpx = pixel_size_um_or_default(state['data_instance'].data_repository, context='batch spatial metrology')
 
     def _flatten(prefix, obj, out):
         if isinstance(obj, dict):
@@ -505,7 +504,8 @@ def replay_dynamic_spatial(state: dict, image_path: Path, params: dict, output_d
               f"needs a segmented (T, H, W) time-series mask stack upstream.")
         return
 
-    mpx = state['data_instance'].data_repository.get('microns_per_pixel_sq', 1.0) ** 0.5
+    from pycat.utils.pixel_size import pixel_size_um_or_default
+    mpx = pixel_size_um_or_default(state['data_instance'].data_repository, context='batch dynamic spatial')
     max_disp = float(params.get('max_displacement_um', 2.0))
     max_gap = int(params.get('max_gap_frames', 1))
     proximity = float(params.get('proximity_um', 1.0))

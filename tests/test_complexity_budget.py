@@ -237,7 +237,9 @@ _MAX_LONG_FUNCTIONS = 113
 # verification is "it still imports" is a refactor that ships bugs (see the header).
 #
 # **THIS IS THE FUNCTION TO SPLIT FIRST**, the moment someone can verify it by hand.
-_ABSOLUTE_LONGEST = 676
+# 1.7.005 (Completion Spec C2): 676 had 253 lines of slack over the actual longest (run_pycat_func, 423), so it
+# no longer bounded anything. Re-set to the actual + a small margin; it only moves down.
+_ABSOLUTE_LONGEST = 450
 
 
 def _long_functions():
@@ -300,20 +302,20 @@ _FILE_LINE_CEILINGS = {
     # (step 6, 1.6.253: preprocessing + upscaling). image_processing_tools.py is now a PURE re-export shim
     # (no defs); ceiling locked at the shim size. The family modules get their own concentration ceilings.
     "toolbox/image_processing_tools.py": 221,
-    "toolbox/image_processing/filters.py": 564,
-    "toolbox/image_processing/background.py": 918,
+    "toolbox/image_processing/filters.py": 561,
+    "toolbox/image_processing/background.py": 897,   # 1.7.005: refreshed to actual (918 was stale; Completion Spec C2)
     # 2828 -> 2600 (frame-access + correlation) -> 1952 (analysis) -> 1410 (worker plumbing) -> 180 (step 4,
     # 1.6.247: preprocessing science + Qt UI builders). timeseries_condensate_tools.py is now a PURE re-export
     # shim (no defs); ceiling locked at the shim size. The analysis / execution / ui modules get their own
     # concentration ceilings.
     "toolbox/timeseries_condensate_tools.py": 180,
     "toolbox/timeseries/analysis.py": 685,
-    "toolbox/timeseries/execution.py": 581,
-    "toolbox/timeseries/ui.py": 1288,   # ui_builder_split decomposed BOTH _add_run_timeseries_condensate_analysis and _add_lazy_preprocess_stack here (adds helper defs/docstrings/unpacks; the two giant functions + the 358-line _on_build are gone)
+    "toolbox/timeseries/execution.py": 580,
+    "toolbox/timeseries/ui.py": 1249,   # 1.7.005: refreshed to actual (1288 was stale; Completion Spec C2)   # ui_builder_split decomposed BOTH _add_run_timeseries_condensate_analysis and _add_lazy_preprocess_stack here (adds helper defs/docstrings/unpacks; the two giant functions + the 358-line _on_build are gone)
     # 2692 -> 2030 (leaf) -> 1239 (fz+cellpose) -> 566 (puncta) -> 148 (step 4, 1.6.243: subcellular). The
     # scientific core is fully split into toolbox/segmentation/ by family; segmentation_tools.py is now a
     # PURE re-export shim (no defs). Ceiling locked at the shim size.
-    "toolbox/segmentation_tools.py": 148,
+    "toolbox/segmentation_tools.py": 147,
     # puncta_refinement.py — the SNR/kurtosis/contrast gate + the two bit-identical implementations, moved
     # here from segmentation_tools (1.6.242). 715 -> 747: the large-condensate exemption (Meet Raval's
     # "Improved segmentation for large condensates", re-targeted here from the pre-decomposition
@@ -330,7 +332,7 @@ _FILE_LINE_CEILINGS = {
     # vpt_ui.py: 2458 -> 1778 (panels) -> 1375 (napari) -> 1246 (table) -> 1139 (msd) as the four
     # adapter modules absorbed its responsibilities (decomposition steps 2-3). A 54% reduction. The
     # ratchet moving DOWN is the point — the file cannot grow back to where it was.
-    "toolbox/vpt_ui.py": 1139,
+    "toolbox/vpt_ui.py": 1138,
     # 2834 -> 95 (-97%): the scientific core split into toolbox/vpt/ by domain — viscosity (1.6.235),
     # drift (1.6.236), host (1.6.237), the whole detection stack (1.6.238), and finally population routing
     # + the run_vpt_analysis orchestrator (1.6.239). vpt_tools.py is now a PURE re-export shim (no defs);
@@ -338,7 +340,7 @@ _FILE_LINE_CEILINGS = {
     "toolbox/vpt_tools.py": 95,
     # detection.py — the LoG/GPU/template detection stack + backend chooser + linking probes moved here
     # from vpt_tools (1.6.238). Byte-identical; its own concentration ceiling, ratchets DOWN if split.
-    "toolbox/vpt/detection.py": 1773,
+    "toolbox/vpt/detection.py": 1261,   # 1.7.005: refreshed to actual (1773 was stale; Completion Spec C2)
     # analysis.py — the run_vpt_analysis orchestrator (host->detect->link->drift->MSD->viscosity) + _link
     # + compare_detection_variants moved here from vpt_tools (1.6.239). Byte-identical; own ceiling.
     # 228 -> 231 (1.6.406): run_vpt_analysis gained the @tags_layer('bead_track') decorator + its import so the
@@ -346,7 +348,7 @@ _FILE_LINE_CEILINGS = {
     "toolbox/vpt/analysis.py": 231,
     # 5573 -> 3268 (-41%): MenuManager (2164 lines) extracted to ui/menu_manager.py in the 1.6.149
     # decomposition. The ratchet moves DOWN — it cannot grow back.
-    "ui/ui_modules.py": 3268,
+    "ui/ui_modules.py": 136,   # 1.7.005: refreshed to actual (3268 was stale; Completion Spec C2)
     # 2344 -> 1105 (-53%): the ui_decomposition Part 2 feature extraction (1.6.370-1.6.378) moved every
     # policy/feature/dialog method to its own module (command_palette, tag_inspector, metadata_dialogs,
     # napari_menus, session_loader, grid_view, recorded_steps_dialog, viewer_actions). What remains is menu
@@ -356,11 +358,11 @@ _FILE_LINE_CEILINGS = {
     # 2805 -> 1670 (-40.5%) as StackLoadCancelled (errors.py), the two dialogs (dialogs.py), the pure
     # naming/pixel helpers (naming.py) and the three format openers (stack_openers.py) moved to their
     # homes (decomposition, 1.6.146). The ratchet moves DOWN — it cannot grow back.
-    "file_io/file_io.py": 1670,
+    "file_io/file_io.py": 1057,   # 1.7.005: refreshed to actual (1670 was stale; Completion Spec C2)
     # 1663 -> 432 (-74%): the replay handlers + shared helpers moved to the pycat.batch.steps package
     # (decomposition, 1.6.150); _STEP_MAP, the registry wiring, and replay_background_removal (pinned by
     # a source-level test) stay. Ratchet moves down only.
-    "batch_step_registry.py": 432,
+    "batch_step_registry.py": 350,   # 1.7.005: refreshed to actual (432 was stale; Completion Spec C2)
     # 2051 -> 1623 -> 799 -> 605 -> 88: the full invitro decomposition (1.6.213-1.6.216) moved every domain
     # to toolbox/invitro/{size_distribution,partition,field_summary,analysis}.py. invitro_tools.py is now a
     # pure re-export shim (-96%). The ceiling is locked at the shim size.
@@ -368,7 +370,7 @@ _FILE_LINE_CEILINGS = {
     # 2447 -> 2242 (coarsening, 1.6.217) -> 1802 (photobleaching + frame_quality, 1.6.218): domains moved to
     # toolbox/condensate_physics/*.py. The ceiling ratchets DOWN as the remaining quantities (msd, moduli,
     # relaxation, intensity, survival) move out.
-    "toolbox/condensate_physics_tools.py": 122,
+    "toolbox/condensate_physics_tools.py": 109,   # 1.7.005: refreshed to actual (122 was stale; Completion Spec C2)
     # 1,592 -> 39: the full label_mask_split decomposition (1.6.336-1.6.383) moved the physics to
     # condensate_physics/wetting.py and the masking halves to toolbox/masks/{measurement,morphology,splitting,
     # labels}.py. label_and_mask_tools.py is now a pure re-export shim (-98%). The ceiling is locked at the
@@ -434,8 +436,8 @@ def test_ui_modules_does_not_GROW():
     ui_modules = _SOURCE / "ui" / "ui_modules.py"
     line_count = len(ui_modules.read_text(encoding='utf-8', errors='ignore').splitlines())
 
-    # Today's size, plus a small allowance for the comments a bug-fix needs.
-    ceiling = 5600
+    # 1.7.005: the file is 136 lines since the decomposition (the 5600 ceiling was 40x stale; Completion Spec C2).
+    ceiling = 150
 
     assert line_count <= ceiling, (
         f"ui_modules.py is {line_count} lines (ceiling {ceiling}).\n\n"

@@ -53,6 +53,13 @@ def _add_spida(ui_instance, layout=None, separate_widget=False):
                        "Subtracted before analysis.")
     form.addRow("White-noise background:", wn_spin)
 
+    rn_spin = QDoubleSpinBox(); rn_spin.setRange(0, 1e5); rn_spin.setDecimals(2)
+    rn_spin.setValue(0.0)
+    rn_spin.setToolTip("Detector READ-NOISE sd (counts): the sd of a dark frame, or the camera spec. Read noise "
+                       "adds variance without signal, so left at 0 it inflates epsilon and deflates N (a read sd of "
+                       "80 turns a true N of 8 into 4). 0 = none / photon-counting detector.")
+    form.addRow("Read-noise sd:", rn_spin)
+
     from qtpy.QtWidgets import QComboBox
     modality_dd = QComboBox()
     modality_dd.addItems(['Confocal / laser-scanning', 'TIRF (camera)',
@@ -85,7 +92,8 @@ def _add_spida(ui_instance, layout=None, separate_widget=False):
     cal_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     cal_btn.clicked.connect(lambda: run_spida_calibration(
         _layer(ui_instance, image_dd), _layer(ui_instance, roi_dd),
-        bins_spin.value(), wn_spin.value(), ui_instance.viewer, _modality()))
+        bins_spin.value(), wn_spin.value(), ui_instance.viewer, _modality(),
+        read_noise_sd=rn_spin.value()))
     cal_form.addRow(_bwc(cal_btn, optional=True, watch_dropdowns=[image_dd]))
     outer.addWidget(cal_grp)
 
@@ -106,7 +114,7 @@ def _add_spida(ui_instance, layout=None, separate_widget=False):
     an_btn.clicked.connect(lambda: run_spida_analysis(
         _layer(ui_instance, image_dd), _layer(ui_instance, roi_dd),
         bins_spin.value(), wn_spin.value(), eps0_spin.value(),
-        ui_instance.viewer, _modality()))
+        ui_instance.viewer, _modality(), read_noise_sd=rn_spin.value()))
     an_form.addRow(_bwc(an_btn, watch_dropdowns=[image_dd]))
     outer.addWidget(an_grp)
 

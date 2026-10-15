@@ -113,6 +113,7 @@ class _Viewer:
         self.layers = _Layers(_Image())
         self.dims = _Dims(on_write)
         self.camera = _Camera(on_write)
+        self.scene = __import__('types').SimpleNamespace(camera=self.camera)   # napari >= 0.9 path
         self.added = []
 
     def add_shapes(self, data, **kw):

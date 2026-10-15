@@ -281,7 +281,7 @@ def _keep_dialog_alive(dialog):
         pass
 
 
-def show_dataframes_dialog(window_title, tables_info):
+def show_dataframes_dialog(window_title, tables_info, service=None):
     """
     Displays a dialog window with a scrollable area that contains multiple dataframes shown as table views.
 
@@ -292,6 +292,11 @@ def show_dataframes_dialog(window_title, tables_info):
     tables_info : list of tuples
         A list where each tuple contains a title (str) for the table and a pandas DataFrame. The title is displayed
         as a label above the corresponding table view.
+    service : SelectionService, optional
+        The one selection bus (``central_manager.selection``). When given, each table is BRUSHABLE: the
+        display hides the ``_pycat_*`` identity columns and the table joins the bus, keyed on
+        ``_pycat_entity_id`` when the table is stamped (sort-safe) and on row position otherwise (labelled
+        as such by ``linkability_of``). Omitted -> today's plain table (Completion Spec F1).
 
     Notes
     -----
@@ -309,6 +314,7 @@ def show_dataframes_dialog(window_title, tables_info):
     scrollLayout = QVBoxLayout(scrollContent)
     scrollContent.setLayout(scrollLayout)
 
+    _brushables = []
     # Add each table to the scroll area
     for title, df in tables_info:
         if df is not None:
@@ -316,7 +322,18 @@ def show_dataframes_dialog(window_title, tables_info):
             section_label.setStyleSheet("font-size: 16pt;") # Adjust the font size as needed
             scrollLayout.addWidget(section_label, alignment=Qt.AlignCenter) # Align the title to the center
 
-            table_view = create_table_view(df)
+            if service is None:
+                table_view = create_table_view(df)
+            else:
+                from pycat.ui.brushable_table import make_brushable
+                from pycat.utils.entity_ref import linkability_of, without_identity
+                table_view = create_table_view(without_identity(df))
+                brushable = make_brushable(table_view, df, service, f'{window_title}.{title}')
+                if brushable is not None:
+                    _brushables.append(brushable)
+                    link = QLabel(linkability_of(df))
+                    link.setStyleSheet("color: gray; font-size: 9pt;")
+                    scrollLayout.addWidget(link, alignment=Qt.AlignCenter)
             scrollLayout.addWidget(table_view)
 
     # Add the scroll area and an OK button to the dialog
@@ -345,6 +362,18 @@ def show_dataframes_dialog(window_title, tables_info):
     except Exception:
         pass
     dialog.setModal(False)
+    if _brushables:
+        # Unsubscribe the tables from the selection bus when the window closes (OK, Esc or the title-bar X all
+        # finish a QDialog), so a closed results window never keeps answering selections.
+        def _detach_tables(*_):
+            from pycat.utils.general_utils import debug_log
+            while _brushables:
+                try:
+                    _brushables.pop().close()
+                except Exception as exc:      # broad-ok: ui_cleanup — teardown is best-effort; never raise on close
+                    debug_log('show_dataframes_dialog: a linked table failed to close', exc)
+        dialog.finished.connect(_detach_tables)
+        dialog._pycat_brushables = _brushables      # keep the views alive as long as the window
     _keep_dialog_alive(dialog)
     dialog.show()
     dialog.raise_()

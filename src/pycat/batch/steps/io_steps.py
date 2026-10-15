@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from pycat.file_io.image_reader import open_image
 from pycat.batch.steps._common import (
-    _get_data, _derive_split_companion_path, _source_path_for_recorded_channel, _load_image, _resolve_channel_for_layer, _save_array, _raw_counts, _normalize_to_float, _resolve_image_layer, _ivf_droplet_mask_and_image)
+    _get_data, _derive_split_companion_path, _source_path_for_recorded_channel, _load_image, _load_stack, _resolve_channel_for_layer, _save_array, _raw_counts, _normalize_to_float, _resolve_image_layer, _ivf_droplet_mask_and_image)
 
 
 def _finalize_ball_radius(state: dict, image_path: Path) -> None:
@@ -268,9 +268,21 @@ def replay_open_stack(state: dict, image_path: Path, params: dict, output_dir: P
     steps (cellpose, condensate segmentation, etc.) work unchanged.
     """
     # Delegate to the existing open_image replay — it already handles
-    # multi-channel files via channel_assignment and state['channels_by_name'].
-    # The only difference is the step name; the params schema is the same.
+    # multi-channel files via channel_assignment and state['channels_by_name'] — then replace the roles'
+    # single plane with the whole stack (raw counts, as the GUI's stack layers hold it). open_image reads ONE
+    # plane; without this every time-series step received a 2-D image and skipped (1.7.005).
     replay_open_image(state, image_path, params, output_dir)
+    channel_assignment = params.get('channel_assignment')
+    seg_channel = _resolve_channel_for_layer(channel_assignment, 'Segmentation', default=0)
+    fluor_channel = _resolve_channel_for_layer(channel_assignment, 'Fluorescence', default=0)
+    stack = _load_stack(image_path, seg_channel)
+    if stack is None:
+        return
+    state['image'] = stack
+    state['preprocessed'] = stack
+    state['fluorescence_image'] = stack if fluor_channel == seg_channel else _load_stack(image_path, fluor_channel)
+    state['data_instance'].data_repository['timeseries_n_frames'] = int(stack.shape[0])
+    print(f"[PyCAT Batch]   Loaded the whole stack: {stack.shape} {stack.dtype} (raw counts)")
 
 
 def replay_save_and_clear(state: dict, image_path: Path, params: dict, output_dir: Path):

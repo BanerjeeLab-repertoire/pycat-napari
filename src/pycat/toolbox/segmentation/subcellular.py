@@ -422,6 +422,66 @@ def _split_at_contrast_floor(viewer, data_instance, labels, original_image, cell
     return above
 
 
+# The settings the 2D cellular fluorescence workflow segments condensates with (the GUI runner's defaults,
+# below). The time-series workflow uses the same dict, so a movie frame is segmented exactly as a 2D image.
+CELLULAR_2D_SETTINGS = dict(
+    kurtosis_threshold=-3.0, local_snr_threshold=1.0, global_snr_threshold=1.0,
+    intensity_hwhm_scale=1.17, max_area_fraction=0.25, min_spot_radius=2,
+    punctate_gate=True, punctate_gate_sigma=5.0, punctate_gate_abs_sigma=3.0,
+    multiscale=True, boundary_refit=True, refit_level=0.5, boundary_mode='regional',
+    second_pass=True, transfected_route=True, ring_rejection=True, scale_reconciliation=True)
+
+
+def segment_condensates_in_cells(original_image, pre_processed_image, cell_masks, ball_radius, cell_df=None,
+                                 stretch=True, on_cell=None, **settings):
+    """The 2D cellular condensate segmentation of one image, every cell, with no viewer.
+
+    What `run_segment_subcellular_objects` does between reading its layers and adding its results: the
+    per-cell contrast stretch, the absolute background measured once on the raw image, then
+    `segment_subcellular_objects` cell by cell with ``settings`` (`CELLULAR_2D_SETTINGS` for any key not
+    given), and the rejected halo fragments removed. The contrast floor is NOT applied here -- the GUI keeps
+    its measurement for the floor slider; headless callers use `contrast_floor.object_local_cnr`.
+
+    ``stretch=False`` skips the per-cell stretch (the GUI's no-cell-mask fallback). ``on_cell(i, n, label)`` is
+    called before each cell, for progress.
+
+    Returns a dict: ``puncta`` / ``refined`` (bool masks before / after refinement), ``boundary_source``
+    (uint8, which boundary each object kept), ``ring_rejected`` (bool, the removed halo fragments).
+    """
+    kw = {**CELLULAR_2D_SETTINGS, **settings}
+    CMS_img = cell_mask_stretching(pre_processed_image, cell_masks) if stretch else np.asarray(pre_processed_image).copy()
+    unique_labels = np.unique(cell_masks)
+    unique_labels = unique_labels[unique_labels != 0]
+
+    # ── Measure the ABSOLUTE background ONCE, before any per-cell renormalisation ──
+    #
+    # This is what lets ``segment_subcellular_objects`` tell **"this cell is empty"** apart
+    # from **"this cell's noise has been stretched to look like signal"** — a distinction that
+    # is destroyed the moment per-cell CLAHE runs, because it normalises every cell to unit
+    # maximum.
+    image_stats = None
+    if kw['punctate_gate']:
+        image_stats = compute_image_intensity_stats(
+            original_image, cell_masks, smooth_sigma=max(0.5, kw['min_spot_radius'] / 2.0))
+
+    total_puncta_mask = np.zeros(cell_masks.shape, dtype=bool)
+    total_refined_puncta_mask = np.zeros(cell_masks.shape, dtype=bool)
+    boundary_source = np.zeros(cell_masks.shape, dtype=np.uint8)
+    ring_rejected = np.zeros(cell_masks.shape, dtype=bool)
+    for i, label in enumerate(unique_labels):
+        if on_cell is not None:
+            on_cell(i, len(unique_labels), label)
+        refined_puncta_mask, puncta_mask = segment_subcellular_objects(
+            np.array(original_image, copy=True), CMS_img.copy(), cell_masks == label, label, ball_radius, cell_df,
+            image_stats=image_stats, boundary_source=boundary_source, ring_rejected=ring_rejected, **kw)
+        total_puncta_mask |= puncta_mask.astype(bool)
+        total_refined_puncta_mask |= refined_puncta_mask.astype(bool)
+
+    total_puncta_mask &= ~ring_rejected          # a rejected halo fragment is gone from both layers
+    return {'puncta': total_puncta_mask, 'refined': total_refined_puncta_mask,
+            'boundary_source': boundary_source, 'ring_rejected': ring_rejected}
+
+
 def run_segment_subcellular_objects(pre_processed_image_layer, original_image_layer, data_instance, viewer,
                                     kurtosis_threshold=-3.0, local_snr_threshold=1.0, global_snr_threshold=1.0,
                                     intensity_hwhm_scale=1.17, max_area_fraction=0.25, min_spot_radius=2,
@@ -477,79 +537,39 @@ def run_segment_subcellular_objects(pre_processed_image_layer, original_image_la
 
     # Labeled Cell Mask is created by the cell analyzer, if it is not in the viewer the function
     # will run on the entire image, however this is not the desired behavior hence we warn the user
-    if 'Labeled Cell Mask' in viewer.layers:
+    stretch = 'Labeled Cell Mask' in viewer.layers
+    if stretch:
         cell_masks = viewer.layers['Labeled Cell Mask'].data # Get the labeled cell mask
         cell_df = data_instance.get_data('cell_df', pd.DataFrame()) # Get the cell_df if it is available
-        CMS_img = cell_mask_stretching(pre_processed_image, cell_masks) # Apply per cell contrast enhancement 
     else:
         cell_masks = np.ones_like(original_image).astype(int) # Create a dummy cell mask to run on the entire image
         cell_masks[0:2, 0:2] = 0 # Ensure there are 2 labels for the cell mask
         cell_df = pd.DataFrame() # Create cell_df since we assume it is not available because it is created by the cell analyzer too
-        CMS_img = pre_processed_image.copy() # We cannot do per cell contrast enhancement without the cell masks
         napari_show_warning("Warning: This function is intended to be used after running Cell Analyzer.\n"
               "Ignore this warning if you intend on segmenting the entire image.\n"
               "Note that this may cause unintended behavior."
               )
 
-
-    # Get the number of cells in cell_masks
-    unique_labels = np.unique(cell_masks)
-    unique_labels = unique_labels[1:]
-
-    # ── Measure the ABSOLUTE background ONCE, before any per-cell renormalisation ──
-    #
-    # This is what lets ``segment_subcellular_objects`` tell **"this cell is empty"** apart
-    # from **"this cell's noise has been stretched to look like signal"** — a distinction that
-    # is destroyed the moment per-cell CLAHE runs, because it normalises every cell to unit
-    # maximum.
-    image_stats = None
-    if punctate_gate:
-        image_stats = compute_image_intensity_stats(
-            original_image, cell_masks,
-            smooth_sigma=max(0.5, min_spot_radius / 2.0))
-
-    # Initialize total masks to store the combined results
-    total_puncta_mask = np.zeros_like(cell_masks, dtype=bool)
-    total_refined_puncta_mask = np.zeros_like(cell_masks, dtype=bool)
-    boundary_source = np.zeros(cell_masks.shape, dtype=np.uint8)
-    ring_rejected = np.zeros(cell_masks.shape, dtype=bool)
-
-    # Iterate over all cell labels, segment, and refine puncta within each cell
-    for label in unique_labels:
-
-        contrast_stretched_img = CMS_img.copy()
-        original_img = original_image.copy()
-
-        napari_show_info(f"Processing cell... {label} of {len(unique_labels)}")
-
-        # Create a binary mask for the current cell
-        cell_mask_holder = np.zeros_like(cell_masks)
-        cell_mask_holder[cell_masks==label] = 1
-        cell_mask_holder = cell_mask_holder.astype(bool)
-
-        # Segment and refine puncta within the cell
-        refined_puncta_mask, puncta_mask = segment_subcellular_objects(
-            original_img, contrast_stretched_img, cell_mask_holder, label, ball_radius, cell_df,
-            kurtosis_threshold=kurtosis_threshold, local_snr_threshold=local_snr_threshold,
-            global_snr_threshold=global_snr_threshold, intensity_hwhm_scale=intensity_hwhm_scale,
-            max_area_fraction=max_area_fraction, min_spot_radius=min_spot_radius,
-                image_stats=image_stats, punctate_gate=punctate_gate,
-                punctate_gate_sigma=punctate_gate_sigma,
-                punctate_gate_abs_sigma=punctate_gate_abs_sigma,
-                multiscale=multiscale, boundary_refit=boundary_refit,
-                refit_level=refit_level, boundary_mode=boundary_mode, second_pass=second_pass,
-                transfected_route=transfected_route,
-                boundary_source=boundary_source, ring_rejection=ring_rejection,
-                ring_rejected=ring_rejected, scale_reconciliation=scale_reconciliation)
-
-        # Add the segmented mask to the total mask
-        total_puncta_mask += puncta_mask 
-        total_refined_puncta_mask += refined_puncta_mask
+    # Every cell, segmented as `segment_condensates_in_cells` does it (the time-series workflow calls the
+    # same function, so a movie frame and a 2D image are segmented identically).
+    seg = segment_condensates_in_cells(
+        original_image, pre_processed_image, cell_masks, ball_radius, cell_df, stretch=stretch,
+        on_cell=lambda i, n, label: napari_show_info(f"Processing cell... {label} of {n}"),
+        kurtosis_threshold=kurtosis_threshold, local_snr_threshold=local_snr_threshold,
+        global_snr_threshold=global_snr_threshold, intensity_hwhm_scale=intensity_hwhm_scale,
+        max_area_fraction=max_area_fraction, min_spot_radius=min_spot_radius,
+        punctate_gate=punctate_gate, punctate_gate_sigma=punctate_gate_sigma,
+        punctate_gate_abs_sigma=punctate_gate_abs_sigma,
+        multiscale=multiscale, boundary_refit=boundary_refit,
+        refit_level=refit_level, boundary_mode=boundary_mode, second_pass=second_pass,
+        transfected_route=transfected_route, ring_rejection=ring_rejection,
+        scale_reconciliation=scale_reconciliation)
+    total_puncta_mask, total_refined_puncta_mask = seg['puncta'], seg['refined']
+    ring_rejected = seg['ring_rejected']
 
     # Which boundary each object kept, for the condensate table (`puncta_analysis_func`).
-    data_instance.data_repository['boundary_source_map'] = boundary_source
+    data_instance.data_repository['boundary_source_map'] = seg['boundary_source']
     data_instance.data_repository['ring_rejected_map'] = ring_rejected
-    total_puncta_mask &= ~ring_rejected          # a rejected halo fragment is gone from both layers
 
     # Count DISTINCT objects via connected components, not the boolean max.
     # total_refined_puncta_mask is a boolean OR-accumulation across cells, so its

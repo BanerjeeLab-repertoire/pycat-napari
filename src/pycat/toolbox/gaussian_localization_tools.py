@@ -594,8 +594,10 @@ def _add_gaussian_localization(ui_instance, layout=None, separate_widget=False):
         px = px_spin.value()
         if px <= 0:
             try:
-                stored = ui_instance.central_manager.active_data_class.data_repository.get('microns_per_pixel_sq')
-                px = float(stored) ** 0.5 if stored else None
+                from pycat.utils.pixel_size import pixel_size_um
+                px = pixel_size_um(ui_instance.central_manager.active_data_class.data_repository,
+                                   context='Gaussian localization')
+                px = float(px) if np.isfinite(px) else None
             except Exception:
                 px = None
         pxz = pxz_spin.value() or None

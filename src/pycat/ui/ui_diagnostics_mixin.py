@@ -632,7 +632,9 @@ class _DiagnosticsWidgetsMixin:
             gt_choice = gt_dd.currentText()
             gt_name = None if gt_choice.startswith("(none") else gt_choice
             mode = 'fixed' if tol_mode.currentIndex() == 1 else 'auto'
-            mpx = float(dr.get('microns_per_pixel_sq', 0) or 0) ** 0.5 or None
+            from pycat.utils.pixel_size import pixel_size_um
+            mpx = pixel_size_um(dr, context='segmentation benchmark')
+            mpx = float(mpx) if np.isfinite(mpx) else None
 
             run_btn.setEnabled(False); run_btn.setText("Running benchmark…")
             try:
@@ -757,7 +759,9 @@ class _DiagnosticsWidgetsMixin:
                 return np.asarray(image) > threshold
 
             dr = self.central_manager.active_data_class.data_repository
-            mpx = float(dr.get('microns_per_pixel_sq', 0) or 0) ** 0.5 or None
+            from pycat.utils.pixel_size import pixel_size_um
+            mpx = pixel_size_um(dr, context='segmentation benchmark')
+            mpx = float(mpx) if np.isfinite(mpx) else None
 
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")

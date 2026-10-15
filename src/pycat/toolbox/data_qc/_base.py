@@ -7,9 +7,23 @@ result). Used across the check families, so they live here rather than in any on
 """
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 from pycat.utils.general_utils import debug_log
+
+
+def _usable(*values):
+    """True only when every value is a finite, positive number.
+
+    **Truthiness is not a validity check: ``float('nan')`` is truthy** (Completion Spec G4). ``pixel_size_um()``
+    returns NaN precisely so callers REFUSE, and ``if not (pixel_um and na and wavelength_nm)`` let it through —
+    an uncalibrated image got a red "undersampled" verdict with NaN in the value column."""
+    try:
+        return all(v is not None and math.isfinite(float(v)) and float(v) > 0 for v in values)
+    except (TypeError, ValueError):
+        return False
 
 
 def _to_float(img):
@@ -21,12 +35,48 @@ def _to_float(img):
 
 
 def _robust_noise_std(img):
-    """Noise std from median absolute adjacent-pixel differences (robust to
-    real structure and sparse edges)."""
-    d = np.abs(np.diff(_to_float(img), axis=-1))
-    if d.size == 0:
-        return 0.0
-    return 1.4826 * float(np.median(d)) / np.sqrt(2.0)
+    """Noise std from the median absolute adjacent-pixel difference (Donoho & Johnstone 1994's MAD estimator,
+    sigma = 1.4826 * MAD / sqrt(2) for a difference of two independent samples) -- robust to real structure and
+    sparse edges.
+
+    **Measured along BOTH axes, and the larger is reported** (Completion Spec G7). Differencing along x only
+    cancels anything constant along a row: sCMOS row noise, line-scan artefacts and resonant-scanner banding read
+    as ZERO noise -- the same sigma-25 amplitude gave SNR 7,026,023 "good" as row structure and 6.1 "warn" as
+    column structure, so rotating the camera 90 degrees changed the verdict. The maximum is rotation-invariant and
+    cannot hide structured noise in one direction (the minimum would reproduce exactly that failure). On white
+    noise the two estimates agree."""
+    a = _to_float(img)
+    estimates = []
+    for axis in (-1, -2):
+        if a.ndim >= 2 or axis == -1:
+            d = np.abs(np.diff(a, axis=axis)) if a.shape[axis] > 1 else np.empty(0)
+            if d.size:
+                estimates.append(1.4826 * float(np.median(d)) / np.sqrt(2.0))
+    return max(estimates) if estimates else 0.0
+
+
+def _ceiling_from_pileup(a):
+    """The ceiling read from the DATA, or None: if many pixels sit *exactly* at the image maximum while the few
+    levels just below it are nearly empty, that maximum is a clip. Dtype-agnostic (Completion Spec G5): the
+    "levels" are the data's own quantisation step near the top, so a float image holding camera counts is judged
+    exactly as the same counts in a uint16 array."""
+    from pycat.toolbox.data_qc import thresholds as th
+    flat = a[np.isfinite(a)] if np.issubdtype(a.dtype, np.floating) else a.ravel()
+    if flat.size == 0:
+        return None
+    obs_max = float(flat.max())
+    n_at_max = int((flat == obs_max).sum())
+    if np.issubdtype(a.dtype, np.integer):
+        step = 1.0
+    else:
+        k = max(flat.size - 2000, 0)                  # the top ~2000 values set the local quantisation step
+        gaps = np.diff(np.unique(np.partition(flat, k)[k:]))
+        gaps = gaps[gaps > 0]
+        step = float(np.median(gaps)) if gaps.size else 0.0
+    window = th.CEILING_SPIKE_LEVELS * step
+    below = int(((flat >= obs_max - window) & (flat < obs_max)).sum()) if window > 0 else 0
+    is_spike = n_at_max > th.CEILING_SPIKE_MIN_PIXELS and n_at_max > th.CEILING_SPIKE_RATIO * max(below, 1)
+    return obs_max if (is_spike and obs_max > 0) else None
 
 
 def _dtype_max(img):
@@ -56,43 +106,29 @@ def _dtype_max(img):
     kept as the fallback when no such pile-up exists.
     """
     a = np.asarray(img)
+    # ── A pile-up AT the image maximum is the signature of clipping, wherever the ceiling sits ──
+    #
+    # A clip dumps everything above the ceiling into ONE bin, while an unclipped distribution tapers smoothly to
+    # its maximum. Compare the count AT the max against the count in the few levels just below it:
+    #
+    #     image             n@max    n just below    ratio
+    #     unclipped         1        0               **1.0**
+    #     clipped at 900    151      5               **30.2**
+    #     clipped at 700    313      2               **156.5**
+    #
+    # No magic count, and it works on a 256x256 crop and a 2048x2048 frame alike. (A fixed count threshold missed
+    # a real 9-pixel clip.) **Applied to FLOAT images too** (G5): float32 clipped at 300 used to round its ceiling
+    # UP to 4095 and report "0.00 % at ceiling, good" while the same pixels as uint16 reported 2.48 % "bad".
+    try:
+        if a.size:
+            ceiling = _ceiling_from_pileup(a)
+            if ceiling is not None:
+                return ceiling
+    except Exception as _exc:  # broad-ok: optional_probe — falls back to the dtype / bit-depth ceiling below
+        debug_log('saturation: could not detect the ceiling from the data', _exc)
     if np.issubdtype(a.dtype, np.integer):
-        # A pile-up AT the image maximum is the signature of clipping, wherever the ceiling
-        # sits. One pixel happening to be brightest is not a pile-up; hundreds is.
-        try:
-            if a.size:
-                obs_max = float(a.max())
-                n_at_max = int((a == a.max()).sum())
-
-                # ── A pile-up is a SPIKE, not a pixel count ──────────────────────
-                #
-                # A fixed threshold (``> max(10, 0.0001 * size)``) is not scale-free, and it
-                # missed a real clip by ONE pixel: a 256x256 image with 9 pixels flat-topped at
-                # the ceiling was reported as **"0.00 % at ceiling, GOOD"** while its histogram
-                # showed the spike plainly. **Nine clipped pixels are still clipped** — they are
-                # the peaks of the brightest objects, and every intensity measured on them is
-                # destroyed.
-                #
-                # The physical signature is scale-free: **a clip dumps everything above the
-                # ceiling into ONE bin**, while an unclipped distribution tapers smoothly to its
-                # maximum. Compare the count AT the max against the count in the few levels just
-                # below it:
-                #
-                #     image             n@max    n just below    ratio
-                #     unclipped         1        0               **1.0**
-                #     clipped at 900    151      5               **30.2**
-                #     clipped at 700    313      2               **156.5**
-                #
-                # No magic count, and it works on a 256x256 crop and a 2048x2048 frame alike.
-                _below = int(((a >= a.max() - 5) & (a < a.max())).sum())
-                _is_spike = n_at_max > 2 and n_at_max > 2.0 * max(_below, 1)
-
-                if _is_spike and obs_max > 0:
-                    return obs_max
-        except Exception as _exc:
-            debug_log('saturation: could not detect the ceiling from the data', _exc)
         return float(np.iinfo(a.dtype).max)
-    # floats: assume the data max is the ceiling unless it looks normalised
+    # floats with no pile-up: assume the data max is the ceiling unless it looks normalised
     m = float(np.nanmax(a)) if a.size else 1.0
     if m <= 1.0 + 1e-6:
         return 1.0

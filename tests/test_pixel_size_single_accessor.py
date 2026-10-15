@@ -75,3 +75,63 @@ def test_the_guard_detects_a_bespoke_accessor():
               "    def _mpx(self):\n"
               "        return pixel_size_um_or_default(self._dr(), context='w')\n")
     assert not [f for f in _mpx_functions(routed) if not _calls_canonical(f)]
+
+
+# ── Completion Spec A5: EVERY read of the raw key, not only functions named `_mpx` ────────────────────────────────
+#
+# The `_mpx` scan above missed 15 call sites that read `microns_per_pixel_sq` directly with a 1.0 default (or by
+# indexing) -- among them the colocalisation and SACF paths -- so the loader's "we don't know" sentinel became a
+# silent 1 um/px. Reads are now confined to the accessor module and the files below, each with its reason; any
+# other read must go through `pixel_size_um` / `pixel_size_um_or_default` / `has_real_pixel_size`.
+_RAW_KEY = "microns_per_pixel_sq"
+_RAW_READ_ALLOWED = {
+    "utils/pixel_size.py": "the accessor itself",
+    "file_io/file_io.py": "loader: recovers a real scale when the reader landed on the placeholder",
+    "file_io/stack_load.py": "loader: decides whether a previously rejected value is still the placeholder",
+    "file_io/napari_adapter.py": "render: napari needs a positive layer.scale even for the placeholder",
+    "file_io/session_loader.py": "persistence: restores the saved value verbatim",
+    "file_io/session_manifest.py": "persistence: saves the value verbatim (with its provenance flags)",
+    "ui/field_status.py": "the pixel-size gate UI that sets and confirms the value",
+    "batch/steps/preprocessing_steps.py": "rescales the stored value when an upscale changes the pixel grid",
+    "navigator/session.py": "reads a metadata snapshot and rejects the sentinel itself (abs(px - 1) > 1e-9)",
+}
+
+
+def _raw_key_reads(source: str):
+    """Line numbers where the raw key is READ: every occurrence of the string constant except a dict-literal key or
+    the index of an assignment target (both are writes)."""
+    tree = ast.parse(source)
+    writes = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Dict):
+            writes.update(id(k) for k in node.keys if k is not None)
+        if isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Store):
+            writes.add(id(node.slice))
+    return [n.lineno for n in ast.walk(tree)
+            if isinstance(n, ast.Constant) and n.value == _RAW_KEY and id(n) not in writes]
+
+
+def test_no_raw_pixel_size_read_outside_the_gate():
+    offenders = []
+    for path in sorted(_SRC.rglob("*.py")):
+        rel = path.relative_to(_SRC).as_posix()
+        if rel in _RAW_READ_ALLOWED:
+            continue
+        lines = _raw_key_reads(path.read_text(encoding="utf-8", errors="ignore"))
+        offenders += [f"{rel}:{ln}" for ln in lines]
+    assert not offenders, (
+        "these read `microns_per_pixel_sq` directly instead of through the pixel-size gate:\n  "
+        + "\n  ".join(offenders)
+        + "\n\nThe loader writes exactly 1 as the 'unknown' sentinel; a direct read turns it into a silent 1 um/px. "
+          "Use pixel_size_um (NaN when unknown), pixel_size_um_or_default (falls back ON THE RECORD) or "
+          "has_real_pixel_size -- or, for a loader/persistence/render path, add the file to _RAW_READ_ALLOWED with "
+          "its reason.")
+
+
+def test_the_raw_read_scan_sees_reads_and_ignores_writes():
+    src = ("def f(dr):\n"
+           "    a = dr.get('microns_per_pixel_sq', 1.0)\n"
+           "    b = dr['microns_per_pixel_sq']\n"
+           "    dr['microns_per_pixel_sq'] = 2.0\n"
+           "    d = {'microns_per_pixel_sq': 3.0}\n")
+    assert _raw_key_reads(src) == [2, 3]

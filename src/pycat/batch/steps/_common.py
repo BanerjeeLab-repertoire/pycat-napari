@@ -102,8 +102,7 @@ def _load_image(image_path: Path, channel: int = 0):
     `to_unit_float32` divides by the SIGNED range's max (32767) instead of
     65535 -- a clean, exact 2x -- for exactly this reason: a signed-vs-unsigned
     dtype disagreement between readers (tifffile reports one TIFF's dtype as
-    int16; PIL, the GUI's own NumPy-2.0 fallback reader, can report the SAME
-    file differently) is a real, confirmed way for the two paths to disagree
+    int16; another reader can report the SAME file differently) is a real, confirmed way for the two paths to disagree
     without either being "wrong" about the file's nominal dtype tag.
 
     Parameters
@@ -124,44 +123,35 @@ def _load_image(image_path: Path, channel: int = 0):
         return to_unit_float32(arr, arr.dtype)
 
     microns_per_pixel = 1.0
-
+    img = open_image(str(image_path))
+    # `get_image_data` LOADS THE WHOLE SCENE (documented, both libraries). `read_plane`
+    # pulls exactly one YX plane through the lazy API — which matters in batch, where this
+    # runs once per file per step.
+    from pycat.file_io.image_reader import read_plane
+    data = read_plane(img, path=str(image_path), scene=0, t=0, c=channel)
+    data = _to_unit_float32_gui_convention(data)
     try:
-        img = open_image(str(image_path))
-        # `get_image_data` LOADS THE WHOLE SCENE (documented, both libraries). `read_plane`
-        # pulls exactly one YX plane through the lazy API — which matters in batch, where this
-        # runs once per file per step.
-        from pycat.file_io.image_reader import read_plane
-        data = read_plane(img, path=str(image_path), scene=0, t=0, c=channel)
-        data = _to_unit_float32_gui_convention(data)
-        try:
-            px_size = img.physical_pixel_sizes
-            microns_per_pixel = float(px_size.Y) if px_size.Y else 1.0
-        except Exception:  # broad-ok: optional_probe — pixel-size metadata probe → fallback (1.0 micron/px)
-            pass
-        return data, microns_per_pixel
+        px_size = img.physical_pixel_sizes
+        microns_per_pixel = float(px_size.Y) if px_size.Y else 1.0
+    except Exception:  # broad-ok: optional_probe — pixel-size metadata probe → fallback (1.0 micron/px)
+        pass
+    return data, microns_per_pixel
 
-    except AttributeError as e:
-        if "newbyteorder" not in str(e):
-            raise
-        print(f"[PyCAT Batch] AICSImage newbyteorder error on {image_path.name} "
-              f"— falling back to tifffile.")
 
-    # Fallback: tifffile for .tif/.tiff, skimage for everything else
-    suffix = image_path.suffix.lower()
-    if suffix in ('.tif', '.tiff'):
-        import tifffile
-        data = tifffile.imread(str(image_path))
-    else:
-        from skimage import io
-        data = io.imread(str(image_path))
+def _load_stack(image_path: Path, channel: int = 0):
+    """Every T plane of one channel as a (T, H, W) array in RAW counts (dtype kept), or None for a single plane.
 
-    # If multi-channel, select the requested channel; otherwise squeeze to 2D
-    if data.ndim == 3 and channel < data.shape[0]:
-        data = data[channel]
-    while data.ndim > 2:
-        data = data[0]
-
-    return _to_unit_float32_gui_convention(data), microns_per_pixel
+    The GUI's time-series layers hold the raw stack, and the time-series analyses are written against raw
+    counts (opto kinetics, partition, the camera offset). ``replay_open_stack`` used to delegate to
+    ``replay_open_image``, which reads ONE plane -- so a batch over a movie handed every time-series step a
+    2-D image and each skipped it as "not a (T, H, W) stack" (found by the real-data harness, 1.7.005)."""
+    from pycat.file_io.image_reader import read_plane
+    img = open_image(str(image_path))
+    n_t = int(getattr(img.dims, 'T', 1) or 1)
+    if n_t < 2:
+        return None
+    planes = [np.asarray(read_plane(img, path=str(image_path), scene=0, t=t, c=channel)) for t in range(n_t)]
+    return np.stack(planes)
 
 
 def _resolve_channel_for_layer(channel_assignment, layer_name_substring: str, default: int = 0) -> int:

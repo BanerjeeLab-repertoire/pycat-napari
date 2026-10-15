@@ -149,10 +149,10 @@ def _run_btn(form, label="\u25b6  Run"):
     return prog, btn
 
 
-def _show(title, tables):
+def _show(title, tables, service=None):
     from pycat.ui.ui_utils import show_dataframes_dialog
     show_dataframes_dialog(title, [(k, v.round(4) if hasattr(v, 'round') else v)
-                                   for k, v in tables])
+                                   for k, v in tables], service=service)
 
 
 def _add_zstack_bg_removal(ui, layout):
@@ -518,12 +518,17 @@ def _add_zstack_metrics(ui, layout):
             napari_show_warning(str(e)); return
 
         df = condensate_metrics_3d(mask, intensity, ui._mpx(), z_step_sp.value())
+        # Identity on the real columns (condensate_label, central slice as frame) -> a brushable table (F2).
+        from pycat.utils.entity_ref import finalize_entity_table, source_path_of
+        df = finalize_entity_table(df, 'zstack_condensate_metrics',
+                                   source_path=source_path_of(ui.central_manager.active_data_class))
         ui._dr()['zstack_condensate_df'] = df
         ui._record('zstack_3d_metrics', {
             'mask_layer': mask_dd.currentText(), 'intensity_layer': int_dd.currentText(),
             'z_step_um': z_step_sp.value(), 'n_condensates': len(df),
         })
-        _show("3D Condensate Metrics", [("Per-condensate 3D metrics", df)])
+        _show("3D Condensate Metrics", [("Per-condensate 3D metrics", df)],
+              service=getattr(ui.central_manager, 'selection', None))
         if len(df):
             napari_show_info(
                 f"3D metrics: {len(df)} condensates, "

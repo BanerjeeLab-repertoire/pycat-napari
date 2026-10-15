@@ -540,7 +540,14 @@ def _add_morphological_complexity(ui_instance, layout=None, separate_widget=Fals
             except Exception as e:
                 print(f"[PyCAT] morphology distribution plot failed: {e}")
             if all_tables:
-                show_dataframes_dialog("Morphological Complexity", all_tables)
+                # The per-object tables (tortuosity, orientation) carry 'label' + bbox: stamp them through the
+                # declared spec and show them on the selection bus (Completion Spec F1/F2).
+                from pycat.utils.entity_ref import finalize_entity_table, source_path_of
+                _src = source_path_of(getattr(ui_instance.central_manager, 'active_data_class', None))
+                all_tables = [(n, finalize_entity_table(d, 'fibril_morphology', source_path=_src)
+                               if 'per object' in n else d) for n, d in all_tables]
+                show_dataframes_dialog("Morphological Complexity", all_tables,
+                                       service=getattr(ui_instance.central_manager, 'selection', None))
         except Exception:
             pass
         bits = ", ".join(f"{k}={v}" for k, v in summary.items())

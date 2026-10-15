@@ -537,7 +537,10 @@ class PlottingWidget(QWidget):
         # can be located in an image has one; a row that averages forty objects cannot.
         has_bbox = ('bbox' in df.columns
                     or all(c in df.columns for c in ('bbox_y0', 'bbox_x0', 'bbox_y1', 'bbox_x1')))
-        if not has_bbox:
+        # A stamped table is a table of objects even without a bbox: it joins the selection bus on identity
+        # (Completion Spec F5), it just cannot be cropped.
+        from pycat.utils.entity_ref import has_entity_ids
+        if not (has_bbox or has_entity_ids(df)):
             return
 
         refs = refs_from_dataframe(df)
@@ -561,9 +564,12 @@ class PlottingWidget(QWidget):
             if _crop is None:
                 napari_show_warning(f"That point cannot be shown as an image. {message}")
 
-        make_pickable(figure, artist, refs, on_select=_on_select,
-                      viewer=getattr(self, 'viewer', None),
-                      central_manager=getattr(self, 'central_manager', None))
+        # The plot is a view on the ONE selection bus, keyed on `_pycat_entity_id` (sort-safe), rather than a
+        # second, position-keyed, one-way mechanism (Completion Spec F5).
+        cm = getattr(self, 'central_manager', None)
+        make_pickable(figure, artist, refs, on_select=_on_select if has_bbox else None,
+                      viewer=getattr(self, 'viewer', None), central_manager=cm,
+                      service=getattr(cm, 'selection', None), view_id=f'data_viz.plot.{id(figure)}')
 
     def plot_data(self):
         """

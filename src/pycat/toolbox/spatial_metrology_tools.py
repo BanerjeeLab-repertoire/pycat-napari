@@ -689,7 +689,7 @@ def minimum_spanning_tree(
     from scipy.sparse import csr_matrix
     from scipy.sparse.csgraph import minimum_spanning_tree as scipy_mst
 
-    dist_mat = spatial.distance_matrix(coords, coords)
+    dist_mat = spatial.distance.cdist(coords, coords)       # distance_matrix is removed in SciPy 1.20
     mst = scipy_mst(csr_matrix(dist_mat))
     cx  = mst.tocoo()
     edges   = list(zip(cx.row.tolist(), cx.col.tolist()))

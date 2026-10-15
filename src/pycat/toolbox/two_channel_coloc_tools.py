@@ -543,9 +543,10 @@ def _add_run_two_channel_coloc(ui_instance, layout=None, separate_widget=False):
             napari_show_warning("Select at least one colocalization metric.")
             return
 
+        from pycat.utils.pixel_size import pixel_size_um_or_default
         data_instance = ui_instance.central_manager.active_data_class
         ball_radius = float(data_instance.data_repository.get('ball_radius', 50))
-        mpx_sq = float(data_instance.data_repository.get('microns_per_pixel_sq', 1.0))
+        mpx_sq = pixel_size_um_or_default(data_instance.data_repository, context='two-channel coloc') ** 2
         cell_df = data_instance.data_repository.get('cell_df', None)
 
         refinement_ch1 = {k: s.value() for k, s in ch1_spins.items()}
@@ -599,6 +600,10 @@ def _add_run_two_channel_coloc(ui_instance, layout=None, separate_widget=False):
             return
 
         data_instance = ui_instance.central_manager.active_data_class
+        # Per-cell rows get the declared identity so the table is brushable, sort-safe (Completion Spec F1/F2).
+        from pycat.utils.entity_ref import finalize_entity_table, source_path_of
+        results_df = finalize_entity_table(results_df, 'two_channel_condensate_coloc',
+                                           source_path=source_path_of(data_instance))
         data_instance.data_repository['two_channel_coloc_df'] = results_df
 
         ui_instance.viewer.add_labels(
@@ -610,7 +615,8 @@ def _add_run_two_channel_coloc(ui_instance, layout=None, separate_widget=False):
 
         show_dataframes_dialog(
             "Two-Channel Condensate Colocalization",
-            [("Per-Cell Results", results_df.round(4))]
+            [("Per-Cell Results", results_df.round(4))],
+            service=getattr(ui_instance.central_manager, 'selection', None)
         )
 
         napari_show_info(
@@ -644,9 +650,10 @@ def _add_run_two_channel_coloc(ui_instance, layout=None, separate_widget=False):
                 "channels look 2-D. Use the single-frame run button instead.")
             return
 
+        from pycat.utils.pixel_size import pixel_size_um_or_default
         data_instance = ui_instance.central_manager.active_data_class
         ball_radius = float(data_instance.data_repository.get('ball_radius', 50))
-        mpx_sq = float(data_instance.data_repository.get('microns_per_pixel_sq', 1.0))
+        mpx_sq = pixel_size_um_or_default(data_instance.data_repository, context='two-channel coloc') ** 2
         refine1 = {k: s.value() for k, s in ch1_spins.items()}
         refine2 = {k: s.value() for k, s in ch2_spins.items()}
         methods = [name for name, cb in method_checks.items() if cb.isChecked()]

@@ -97,45 +97,14 @@ class _VptResultsDockMixin:
 
     # ── The per-track table (embedded, not a standalone dialog) ──────────────────
     def _vpt_build_table(self, per_track_metrics):
-        """Build the per-track ``QTableWidget`` for the dock's right pane and register
-        ``_track_table_registry`` so a selection from any view highlights the right row.
-        Row-click selects that track everywhere. Returns the QTableWidget (or None)."""
-        from qtpy.QtWidgets import QTableWidget, QTableWidgetItem
+        """The per-track table for the dock's right pane: a sort-safe ``BrushableTable`` keyed on the track's
+        entity id (``_vpt_track_table``). It replaced a ``QTableWidget`` whose ``row_for_id`` stored VISUAL rows,
+        so sorting it sent every highlight to the wrong track (Completion Spec F4). Row-click selects that track
+        everywhere. Returns the table view (or None)."""
         if per_track_metrics is None or getattr(per_track_metrics, 'empty', True):
             self._track_table_registry = None
             return None
-        cols = list(per_track_metrics.columns)
-        table = QTableWidget(len(per_track_metrics), len(cols))
-        table.setHorizontalHeaderLabels(cols)
-        table.setSelectionBehavior(QTableWidget.SelectRows)
-        table.setEditTriggers(QTableWidget.NoEditTriggers)
-        id_col = cols.index('track_id') if 'track_id' in cols else 0
-        row_for_id = {}
-        for r in range(len(per_track_metrics)):
-            for c, col in enumerate(cols):
-                val = per_track_metrics.iloc[r][col]
-                table.setItem(r, c, QTableWidgetItem('' if val is None else str(val)))
-            try:
-                row_for_id[int(per_track_metrics.iloc[r]['track_id'])] = r
-            except Exception:                        # broad-ok: ui_cleanup — a non-int id just isn't row-mapped
-                pass
-        table.resizeColumnsToContents()
-        self._track_table_registry = {'table': table, 'row_for_id': row_for_id,
-                                      'id_col': id_col}
-
-        def _on_row(*_):
-            if self._selection().is_busy:
-                return
-            items = table.selectedItems()
-            if not items:
-                return
-            try:
-                # Cell text can be float-formatted ("48.0"); int("48.0") throws, so via float.
-                tid = int(float(table.item(items[0].row(), id_col).text()))
-            except Exception:                        # broad-ok: ui_cleanup — unparsable id cell → no selection
-                return
-            self._select_track(tid, source='table')
-        table.itemSelectionChanged.connect(_on_row)
+        table, _brushable = self._vpt_track_table(per_track_metrics, 'vpt.track_table')
         return table
 
     # ── The dock itself ──────────────────────────────────────────────────────────

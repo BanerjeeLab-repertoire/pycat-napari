@@ -283,17 +283,20 @@ class _VptNapariMixin:
             pass
         # Centre on the bead, in the image's world frame.
         try:
-            self.viewer.camera.center = (y0 * sc_y, x0 * sc_x)
+            self.viewer.scene.camera.center = (y0 * sc_y, x0 * sc_x)
         except Exception:
             pass
         # Zoom so a small window around the bead fills the view. napari zoom is canvas-px per
         # world-unit, so zoom = canvas_px / (window_px · scale). Fall back to a sane canvas size.
         try:
-            canvas = getattr(getattr(self.viewer, 'window', None), 'qt_viewer', None)
+            # The private name first, as PyCAT's other qt_viewer reads do: the public `window.qt_viewer` warns
+            # (FutureWarning, "no earlier than 0.10") and this was the one read without the fallback.
+            _win = getattr(self.viewer, 'window', None)
+            canvas = getattr(_win, '_qt_viewer', None) or getattr(_win, 'qt_viewer', None)
             canvas_px = min(canvas.canvas.size) if canvas is not None else 600
             world_extent = self._BEAD_ZOOM_WINDOW_PX * max(sc_y, sc_x)
             if world_extent > 0:
-                self.viewer.camera.zoom = float(canvas_px) / world_extent
+                self.viewer.scene.camera.zoom = float(canvas_px) / world_extent
         except Exception:
             pass
 

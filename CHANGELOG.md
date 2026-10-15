@@ -1,3 +1,169 @@
+## [1.7.005] - 2026-10-14
+Works through `docs/audits/PyCAT_Completion_Spec.md`. **Published numbers change** in SpIDA, the field partition
+coefficient, Kp(t), texture entropy / LBP and size-distribution fits — each listed below with the bias it removes.
+
+### Added — **Phase 0: real data with known provenance, and a matrix that says what works.**
+- **Real-data corpus** (`tools/build_corpus.py` -> `tests/data/registry.txt`, SHA-256 per file; `tests/data/fetch.py`
+  resolves `$PYCAT_CORPUS_DIR` / the cache / `$PYCAT_CORPUS_URL` and refuses a file whose hash differs). One real
+  acquisition per pipeline, cut to the smallest that exercises it (36 MB in all). Negative fixtures from REAL files:
+  no pixel size at all (A488 1 hr), 12-bit data in a 16-bit container (Tirths C=0mM, max 4095, also saturated),
+  saturated (A488, 1.8 % at 255), (C, Y, X) multichannel; one derived (background-subtracted float, hard zero
+  floor). **No data** for cellular brightfield, the in-vitro time series and any z-stack: the test folder has none,
+  and the registry and matrix say so. Provenance the files cannot supply (instrument, objective, NA, who acquired
+  it) is recorded as `unknown`, to be filled from the acquisition records.
+- **Synthetic ground truth** (`tests/synthetic/`): seeded generators, every one with a noise and a pedestal parameter.
+- **The 14 x 4 route matrix** (`tools/route_matrix.py` -> `docs/pipeline_route_matrix.md`;
+  `tests/test_pipelines_on_real_data.py`, marker `realdata`): each pipeline's recorded config through the real batch
+  runner on its file, the toolbox called directly, the session round trip and the kernel; golden masters pinned
+  (`tests/data/golden_tables.json`); every cell a verdict, never blank.
+
+### Fixed — **found by running the pipelines on real data for the first time.**
+- **Batch never processed a time series.** `open_stack` replayed as `open_image`, which reads ONE plane, so every
+  time-series step received a 2-D image and skipped ("not a (T, H, W) stack") — the cellular and the in-vitro time
+  series both. It now loads the whole stack in raw counts, as the GUI's stack layers hold it.
+- **Every table restored from a session gained a column.** The writer saves with the index; the reader read it back
+  as data (`Unnamed: 0`). Restored as the index again.
+- **Batch pixel colocalization crashed** on an image whose condensate step found no puncta (an empty mask beat the
+  cell mask as the ROI; Pearson on < 2 pixels). It now takes the first segmentation that has pixels.
+- **Kinetics on a short trace** (a decimated movie, every n-th frame): the 5-frame smoothing flattened a real change
+  below the response gate (an 8-frame dissolution 0.31 -> 0 read "not responded"). The window is capped at a third
+  of the trace; unchanged for >= 15 frames.
+- **Local thresholding recorded a k that never ran**: the panel showed and recorded k = slider/50 - 1 (-1..1) while
+  the computation used slider*0.01 - 0.5 (-0.5..0.5). One function now defines all three.
+- **Batch loads every image as dtype-max-scaled float32** (the [0, 1] loader contract), so a ratio measured in batch
+  (optical density) agrees with the same computation on raw counts only to float32 precision (6e-7). Recorded in
+  the matrix as a finding, not hidden by a tolerance.
+
+### Fixed — **Phase A: science (published numbers change).**
+- **SpIDA read noise**: subtracted from the moments and convolved into the fit (`read_noise_var`; the panel has a
+  read-noise input); refuses when var <= s². It biased N by -50 % and ε by +113 % at read sd 80 (N = 8, ε = 25).
+  The low-density note no longer asserts sampling variance as the cause.
+- **SpIDA pedestal gate** no longer accuses every ROI with N >= 10: the statistic is (mean²/var)·skew² with a 3-SE
+  bootstrap margin (1 false flag in 500 clean fields). Where it has no power (high N) it says "cannot be ruled out".
+- **Field partition coefficient**: the dilute phase is the background median (the 10th percentile gave +7 % to
+  +335 % under noise, snapping to 0 % at CV 0.78); the scale-dependent 1e-6 floor is gone (K = 100 / 1000 / 10000
+  all read ~6 on a sub-1e-6 dilute phase; now NaN with `dilute_floor_reason` when unusable); a float image is no
+  longer "saturated" by its own maximum (always NaN before; also fixes `partition_coefficient_local` on floats);
+  new `dark_level`.
+- **Kp(t)** uses the local annulus estimator; without a dark reference it is NaN and `contrast` carries the series.
+- **Texture**: `8_bit_entropy` / `32_bit_entropy` over the mask, not the zeroed bbox (they swung -82 % with
+  eccentricity alone); `lbp_mean` / `lbp_std` from the LBP values, not the 256 bin counts (`lbp_mean` was
+  n_pixels/256); `lbp_entropy` from the normalised histogram.
+- **Size distributions** are left-truncated at the segmentation's own detection limit, sqrt(min_area·mpx²/π), in the
+  fluorescence and brightfield panels and batch. μ/σ were +50 % / -33 % with 35 % of droplets lost; the export
+  records `detection_limit_xmin`.
+- **Pixel size**: 25 more direct reads go through the gate; the structural test now flags any read of the key
+  outside a declared allowlist.
+
+### Fixed — **Phase G: Data QC runs, and says only what it can support.**
+- **The dashboard had never run**: `QC_MAX_FRAMES` was lost in the 1.6.350 decomposition and every Run click died on
+  the import. Each static UI contract test is now backed by one that clicks the real handler.
+- Photobleaching follows the objects, not the background median (a field bleached to 2.7 % read "96 % remains").
+- SNR per frame (median; best plane of a z-stack) and noise along both axes: the verdict no longer depends on the
+  frame count or the camera's orientation; a flat field is no longer "good".
+- NaN or placeholder pixel size gets no verdict; the dashboard no longer pre-fills the 1 µm placeholder.
+- Saturation is the same test for float and integer data; a hard-zero floor (a processed image) is not assessable.
+- A 3-D stack's axis must be stated (time / z / channels): an unstated axis declines the axis checks instead of
+  reporting phantom drift; a 4-D array is refused with a message.
+- Focus declines a field with no edge above the noise (blank noise scored "better than diffraction-limited").
+- Versioned result contract (`schema_version` 1.0, frozen keys, status/tier enums) and a JSON export; methods cited
+  in code; heuristics labelled where the user reads them; every threshold in `thresholds.py` with its provenance,
+  including "none — chosen by inspection". The overlap test the report cited now exists.
+
+### Changed — **Phase F: every object-producing pipeline is linked.**
+- `show_dataframes_dialog(..., service=)` puts a stamped table on the selection bus, sort-safe; adopted for region
+  props, time-series condensates, z-stack metrics, BF condensates and per cell, in-vitro BF, two-channel coloc and
+  fibril morphology. frap, fusion, temperature and fd_curve are declared not-applicable (rows are time points or
+  fits), checked by a contract test over every pipeline.
+- Entity specs on the REAL columns (time series, z-stack, BF, in-vitro BF, fibril, two-channel coloc;
+  `object_colocalization` labels by `Mask 1 Labels`); an explicit label column now wins over the parent
+  auto-detection, so `cell_label` tables no longer get an empty label segment.
+- VPT uses the one key (`{dataset uuid}/vpt_tracks/bead/-/{tid}`); its track tables stay right after a sort.
+- Generic plots join the bus on entity id. Results workspaces detach when their dock closes, a re-run replaces the
+  previous one instead of stacking pick handlers, and `unsubscribe` only removes a view's own subscription.
+- Opt-in keep-identity export (`export_keep_identity`) so an exported table can be re-linked.
+
+### Changed — **Phases B and E: batch says what it did not do.**
+- The 35 batch skip-stubs `print()`ed and the run looked complete. They now raise `StepNotImplemented`; the runner
+  records the step as skipped, runs the rest, and the run report lists every step not replayed and on how many
+  images. They live in `pycat.batch.steps.not_replayed`.
+- The 27 keys the GUI recorded but batch had never registered are registered: real replays for the brightfield
+  result steps (OD metrics, per-cell summary, in-vitro BF field summary, spatial metrology, size distribution and
+  contact angle; the computations are now shared by the panels and batch in `toolbox/brightfield_pipeline.py`),
+  the rest declared. A source scan fails on a new unregistered key.
+- No checklist step has an empty key: the fibril chain (bilateral, peak & edge, morphological Gaussian, local
+  thresholding, labelling, measuring) records the layer it ran on and replays exactly what the buttons compute; the
+  in-vitro time series' "Preprocess" box (no operation) left the checklist and its kinetics step joined it; the
+  time-series checklist follows the 1.7.004 workflow.
+
+### Changed — **Phases C and D: housekeeping the audit asked for.**
+- **Navigator**: "Build method panel" silently did nothing (`dict()` on a `ParamReview`); the reviewed values are
+  flattened for the panel.
+- **Reachability check**: a public toolbox/utils function with a test but no production caller must be declared in
+  `tests/reachability_gaps.json` (46 today, each to be wired or deleted).
+- The complexity ratchet is tight again: the longest-function ceiling 676 -> 450 (actual 423) and eleven stale file
+  ceilings set to their actual sizes. `utils/object_graph.py` (no production consumer) is deleted.
+- `config/requirements-base.txt` is generated from pyproject (`tools/sync_requirements.py`): it had lost 9
+  dependencies and the `cellpose<4` pin, so a requirements install took Cellpose 4 (no cyto2). `meta.yaml` declares
+  the same set (it still said `pyqt`). Tests keep all three in step.
+- BioIO and napari have tested floors AND ceilings: the 1.x plugins on bioio-base 3.x were verified by reading real
+  files through every plugin; napari < 0.10 until the deprecated names are gone. The 17 viewer attribute reads moved
+  to `scene.camera` / `canvas.grid` / `canvas.overlays.*`, and the no-op `scale_bar.unit` code is removed.
+- `fix_tifffile.py` is gone (importing it ran it and could rewrite site-packages; the bug is fixed upstream), with
+  its PIL fallback, help strings and README section. `scipy.spatial.distance_matrix` (removed in SciPy 1.20) ->
+  `cdist`. Bare `simplefilter("ignore")` calls are narrowed to the warnings they meant, and a function-level global
+  filter is scoped.
+
+## [1.7.004] - 2026-10-13
+### Changed — **cellular time series: every frame segmented as the 2D workflow segments one image, measured on raw counts, linked.**
+Optimised on `dissolution.tif` (opto condensates dissolving, 60 frames × 10 s, 561 nm, 2048², 13 transiently
+transfected cells of very different expression).
+- **Cells once, on the time average** (Cellpose at the Measure Line diameter): every cell is visible there whether
+  its signal is condensed or diffuse. Keyframe Cellpose (moving cells) stays available.
+- **Every frame is segmented with the 2D workflow's own code and settings.** The 2D runner's per-cell loop is now
+  `segment_condensates_in_cells` (headless) and its defaults `CELLULAR_2D_SETTINGS`; the time series calls the same
+  function, so it gains what its private copy lacked — regional boundaries, second pass, transfected route, ring
+  rejection, scale reconciliation, the background-level gate and the contrast floor — and frames are preprocessed on
+  raw counts like a 2D image (the old path subtracted the stack minimum first, which changes the rolling ball).
+  Measured: averaging neighbouring frames before segmenting made every score worse, so the time axis enters through
+  the measurements and tracks instead. The contrast floor alone cut false condensates after dissolution 10x (1.92 ->
+  0.19 per cell) and kept 98 % of the early ones.
+- **Intensities stay connected in time**: raw counts minus each frame's camera background, never rescaled per frame
+  or per cell (the old "Dissolution" preset did, which flattens exactly the opto signal). Per cell per frame: total,
+  dilute phase (trimmed mean — a median moves in whole counts on a dim cell), condensate signal, **condensed
+  fraction** and **partition coefficient** (ratios of the cell's own signal, so cells of different expression
+  compare), a **mask-free condensed fraction** (catches condensates too dim to segment; does not count static
+  texture), `signal_retained` (bleaching) and `expression` as the covariate. On the movie the dilute phase rises
+  (3 -> 9 counts in cell 1) while the cell's total stays put.
+- **Kinetics per cell** (the in-vitro time series' model-free estimator): 10/13 cells dissolve, median half-time
+  104 s; half-time rises with expression (Spearman 0.62; 0.73 mask-free) — low expressers 35–95 s, high 100–170 s.
+  Static nuclear texture is no longer called a response. Condensates are linked into tracks (1,047 on the movie)
+  with their persistence recorded; an optional minimum track length filters them.
+- **Linked results like every other workflow, plus the time axis**: one line per cell (coloured by expression) or per
+  condensate track of any measured column; click a line to select the object everywhere and jump the viewer to that
+  time; the viewer's time slider drives a cursor on the plots; half-time and initial condensed fraction vs
+  expression; tables; cell and condensate-track layers as click targets.
+- **Batchable**: `ts_cells_time_average` and `cell_timeseries` replay per movie and write brushable tables, the time
+  average and the labels; the batch results show every movie's traces and cells, linked, with the image navigator.
+- Performance options (worker count, process only the cells' region, every n-th frame) and the earlier steps (frame
+  range / crop, upscaling, the cached preprocessed stack, keyframe Cellpose, the area-only analysis) sit under one
+  collapsed checkbox.
+
+### Changed — **in-vitro time series: batchable, and its kinetics linked.**
+The panel recorded its steps from the start and batch skipped every one ("not registered"). Segment, link (every
+measured channel), object and field trajectories and kinetics now replay with the recorded settings; each movie
+writes brushable droplet kinetics, traces, the time average and the tracked-droplet footprints, and the batch results
+link them. The kinetics step also opens a linked dock (droplet traces with the time click, kinetics vs size, the
+table, the tracked layer). The per-frame segmenter moved out of the panel (`make_frame_segmenter`), so batch and
+panel share it.
+
+### Fixed — **faster and lighter.**
+- `cell_mask_stretching` ran each cell's CLAHE over the whole frame with everything else zeroed: 44 of 93 s per
+  2048² 13-cell frame. It now runs on a tile-aligned crop with the same pixels (pinned) — 25x faster, for the 2D
+  workflow too. The contrast floor counted each object's cell area over the whole image once per object.
+- Process-pool workers imported torch just to pin its threads (~0.47 GB each, unused). The default worker count is
+  now capped by available memory as well as cores — eight 2048² workers beside the viewer filled a 32 GB machine.
+
 ## [1.7.003] - 2026-10-13
 ### Fixed — **the test suite is green again; nine failures had shipped since 1.6.460.**
 None changed what PyCAT measures. Two were pins that the 1.6.460 boundary re-fit had made stale *by being right*:

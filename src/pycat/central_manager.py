@@ -79,8 +79,9 @@ class CentralManager:
         # It sits beside `_data_switch_callbacks` because it is the same shape of thing: a place
         # views register to be told something changed. It holds its subscribers WEAKLY, though — a
         # plot dock that is closed must not be kept alive by having once wanted to hear.
-        from pycat.utils.selection_service import SelectionService
+        from pycat.utils.selection_service import SelectionService, set_application_service
         self.selection = SelectionService()
+        set_application_service(self.selection)     # producers without a central_manager link through it (F1)
 
         # ── "Follow selection in viewer" — OFF, deliberately ─────────────────────────────
         #

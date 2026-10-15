@@ -32,6 +32,9 @@ class _VptTableMixin:
         tid = self._track_of(selection)
         if tid is None:
             return
+        # A row click in the brushable table selects through the service directly (its own view id), so record
+        # the track here too -- paging re-highlights from `_selected_track_id`.
+        self._selected_track_id = tid
         try:
             self._highlight_track_in_table(tid)
         except Exception as e:
@@ -75,39 +78,42 @@ class _VptTableMixin:
                     pass
 
     def _highlight_track_in_table(self, track_id):
-        """Select the track's row in the summary table (if the linked table is
-        open and registered)."""
-        reg = getattr(self, '_track_table_registry', None)
-        if not reg:
-            return
-        table = reg.get('table'); id_col = reg.get('id_col', 0)
-        row_for_id = reg.get('row_for_id')
-        if table is None or row_for_id is None:
-            return
-        r = row_for_id.get(int(track_id))
-        if r is None:
-            return
+        """Nothing to drive by hand any more: the per-track table is a ``BrushableTable`` subscribed to the
+        service itself, keyed on ``_pycat_entity_id`` through a sort proxy. The old ``row_for_id`` map stored the
+        VISUAL row, so a sorted table highlighted the wrong track, silently (Completion Spec F4). Kept as the
+        dispatcher's table hook."""
+        return None
+
+    def _vpt_source(self):
         try:
-            table.blockSignals(True)
-            table.selectRow(r)
-            table.scrollToItem(table.item(r, id_col))
-        except Exception:
-            pass
-        finally:
-            try:
-                table.blockSignals(False)
-            except Exception:
-                pass
+            from pycat.utils.entity_ref import source_path_of
+            return source_path_of(self.central_manager.active_data_class)
+        except Exception:                            # broad-ok: optional_probe — no dataset → 'unknown' dataset id
+            return None
+
+    def _vpt_track_table(self, per_track_metrics, view_id):
+        """The per-track results as a sort-safe ``BrushableTable`` on VPT's selection service: the table is
+        stamped through the declared ``vpt_tracks`` spec, so a row's id equals ``_track_entity_id(tid)`` and a
+        selection from any view lands on the right row however the table is sorted. Returns
+        ``(QTableView, BrushableTable or None)``; registers ``_track_table_registry`` for teardown."""
+        from pycat.ui.brushable_table import make_brushable
+        from pycat.ui.ui_utils import create_table_view
+        from pycat.utils.entity_ref import finalize_entity_table, without_identity
+        df = finalize_entity_table(per_track_metrics.copy(), 'vpt_tracks', source_path=self._vpt_source())
+        view = create_table_view(without_identity(df))
+        brushable = make_brushable(view, df, self._ensure_selection_views(), view_id)
+        old = getattr(self, '_track_table_registry', None) or {}
+        if old.get('brushable') is not None:
+            old['brushable'].close()
+        self._track_table_registry = {'table': view, 'brushable': brushable}
+        return view, brushable
 
     def _show_per_track_table(self, per_track_metrics):
-        """Non-modal per-track results table. Clicking a row selects that track
-        everywhere (row → plot curve + image bead) via the dispatcher, and the
-        dispatcher can select a row here when the selection comes from elsewhere.
-        Registers _track_table_registry {table, row_for_id, id_col}."""
+        """Non-modal per-track results table. Clicking a row selects that track everywhere (row → plot curve +
+        image bead) through the selection service, and a selection from elsewhere selects its row here —
+        keyed on identity, so sorting the table never misroutes a highlight (Completion Spec F4)."""
         try:
-            from qtpy.QtWidgets import (QDialog, QVBoxLayout, QTableWidget,
-                                         QTableWidgetItem, QLabel)
-            from qtpy.QtCore import Qt
+            from qtpy.QtWidgets import QDialog, QVBoxLayout, QLabel
         except Exception:
             return
         if per_track_metrics is None or per_track_metrics.empty:
@@ -118,53 +124,18 @@ class _VptTableMixin:
         v = QVBoxLayout(dlg)
         v.addWidget(QLabel("Click a track row to reveal it in the image and "
                            "highlight its MSD curve."))
-        cols = list(per_track_metrics.columns)
-        table = QTableWidget(len(per_track_metrics), len(cols))
-        table.setHorizontalHeaderLabels(cols)
-        table.setSelectionBehavior(QTableWidget.SelectRows)
-        table.setEditTriggers(QTableWidget.NoEditTriggers)
-        id_col = cols.index('track_id') if 'track_id' in cols else 0
-        row_for_id = {}
-        for r in range(len(per_track_metrics)):
-            for c, col in enumerate(cols):
-                val = per_track_metrics.iloc[r][col]
-                table.setItem(r, c, QTableWidgetItem('' if val is None else str(val)))
-            try:
-                row_for_id[int(per_track_metrics.iloc[r]['track_id'])] = r
-            except Exception:
-                pass
-        table.resizeColumnsToContents()
+        table, brushable = self._vpt_track_table(per_track_metrics, 'vpt.track_table_dialog')
         v.addWidget(table)
 
-        # Register for dispatcher-driven highlighting.
-        self._track_table_registry = {'table': table, 'row_for_id': row_for_id,
-                                      'id_col': id_col}
-
-        # Row-click → select that track everywhere. blockSignals during
-        # dispatcher-driven selectRow (in _highlight_track_in_table) prevents the
-        # loop; here we also guard via the dispatcher's busy state.
-        def _on_row(*_):
-            if self._selection().is_busy:
-                return
-            items = table.selectedItems()
-            if not items:
-                return
-            r = items[0].row()
-            try:
-                tid = int(table.item(r, id_col).text())
-            except Exception:
-                return
-            self._select_track(tid, source='table')
-        table.itemSelectionChanged.connect(_on_row)
-
-        # Clean up the registry when the table closes so the dispatcher stops
-        # trying to drive a dead widget.
+        # Detach from the service when the window closes, so the dispatcher stops driving a dead widget.
         def _closeEvent(ev):
             try:
-                if getattr(self, '_track_table_registry', None) \
-                        and self._track_table_registry.get('table') is table:
+                if brushable is not None:
+                    brushable.close()
+                reg = getattr(self, '_track_table_registry', None)
+                if reg and reg.get('table') is table:
                     self._track_table_registry = None
-            except Exception:
+            except Exception:                        # broad-ok: ui_cleanup — teardown is best-effort
                 pass
             ev.accept()
         dlg.closeEvent = _closeEvent

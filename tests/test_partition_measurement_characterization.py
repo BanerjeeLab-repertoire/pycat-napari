@@ -72,4 +72,6 @@ def test_the_other_assumptions_and_measurement_identity_are_unchanged(_field):
     names = {a.name for a in m.assumptions}
     assert names == {'no_saturation', 'background_subtracted', 'dilute_phase_measured_locally'}
     assert m.name == 'partition coefficient' and m.units == 'dimensionless'
-    assert {p.name for p in m.parameters} == {'percentile_bulk', 'saturation_level'}
+    # 'percentile_bulk' is gone: the dilute phase is the background MEDIAN now (Completion Spec A2b -- the 10th
+    # percentile biased Kp up under any noise), so there is no percentile to report.
+    assert {p.name for p in m.parameters} == {'saturation_level'}

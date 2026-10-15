@@ -23,6 +23,7 @@ from pycat.toolbox.segmentation_tools import (
     run_fz_segmentation_and_merging, run_cellpose_segmentation,
     run_train_and_apply_rf_classifier, run_local_thresholding,
     run_segment_subcellular_objects)
+from pycat.toolbox.segmentation.local_thresholding import local_threshold_k
 
 
 def _add_object_scale_controls(params_layout, widgets, make_spinbox):
@@ -453,14 +454,14 @@ class _SegmentationWidgetsMixin:
         k_slider.setRange(0, 100)  # 100 steps from 0 to 100
         k_slider.setValue(50)  # default is 0
         k_slider.setSingleStep(1)  # Adjust for 0.01 steps
-        k_label_value = QLabel("0.0") 
+        k_label_value = QLabel("0.0")
         k_label_value.setWordWrap(True)
  
         k_label_value.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Minimum)
         def update_k_label(val):
-            # Convert slider integer value to float
-            float_val = (val / 50.0) - 1 # Convert slider value to float range from -1 to 1 in 0.01 steps
-            k_label_value.setText(str(round(float_val, 2))) # Update the label number text
+            # The k the computation uses (run_local_thresholding: slider * 0.01 - 0.5, i.e. -0.5 .. 0.5). The label
+            # and the recording used (val / 50) - 1 (-1 .. 1) until 1.7.005, so both showed a k that never ran.
+            k_label_value.setText(str(round(local_threshold_k(val), 2)))
         k_slider.valueChanged.connect(update_k_label) # Connect the slider to the update function
         local_thresh_layout.addWidget(k_label) # Add the text label to the layout
         local_thresh_layout.addWidget(k_slider) # Add the slider to the layout
@@ -488,12 +489,14 @@ class _SegmentationWidgetsMixin:
 
         # Button to apply thresholding
         def _on_local_thresh():
+            src = self._active_layer_name()
             self.on_general_button_clicked(
                 run_local_thresholding, None, k_slider, window_slider,
                 local_thresh_mode_dropdown.currentText(), self.viewer)
             self._record('local_thresholding', {
+                'layer': src,
                 'method': local_thresh_mode_dropdown.currentText(),
-                'k_value': round((k_slider.value() / 50.0) - 1, 2),
+                'k_value': round(local_threshold_k(k_slider.value()), 2),
                 'window_size': window_slider.value(),
             })
         local_thresh_button = QPushButton("Apply Thresholding")

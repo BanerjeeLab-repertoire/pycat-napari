@@ -22,6 +22,10 @@ from pycat.utils.intensity_semantics import IntensitySemantics, require_intensit
 from pycat.utils.object_ref import bbox_columns_from_regionprops
 
 
+#: Kp above this is the ratio's noise floor, not a measurement (partition_coefficient_field refuses it).
+_KP_MAX_RESOLVABLE = 1e6
+
+
 def _pc_check_input(image_layer):
     """Is this image a valid input for an INTENSITY measurement? Returns ``(ok, why)`` — ``ok=False``
     means REFUSE (Kp is a ratio of intensities, meaningful only where pixel values still relate to photon
@@ -114,7 +118,15 @@ def _pc_estimate_gap(dist_out, img, gap_px):
     return max(5.0, 3.0 * iface)
 
 
-def _pc_measure_droplets(img, lab, ids, sat, I_dark, gap_px, ring_width_px, allow_no_reference):
+def _pc_window(obj_slice, shape, reach):
+    """The droplet's bbox grown by ``reach`` px, clipped to the frame. Every pixel the annulus or the interface
+    shell can touch is within ``reach`` of the droplet, and the droplet lies wholly inside the window, so a
+    distance transform computed on the window is EXACT there -- the per-droplet full-frame transform it replaces
+    made a per-frame Kp(t) unusably slow."""
+    return tuple(slice(max(0, s.start - reach), min(n, s.stop + reach)) for s, n in zip(obj_slice, shape))
+
+
+def _pc_measure_droplets(img, lab, ids, sat, I_dark, gap_px, ring_width_px, allow_no_reference, notify=True):
     """Per droplet: the dense-mask vs annular-dilute intensities → the per-droplet rows and the per-
     droplet mask CVs. Emits the OVER-INCLUSIVE-mask warning at the end.
 
@@ -125,27 +137,35 @@ def _pc_measure_droplets(img, lab, ids, sat, I_dark, gap_px, ring_width_px, allo
     from scipy import ndimage as _ndi
     rows = []
     _mask_cv = []          # per-droplet CV: an over-inclusive mask has a HIGH CV
+    slices = _ndi.find_objects(lab if np.issubdtype(lab.dtype, np.integer) else lab.astype(np.int64))
+    # The gap estimate reads a 12 px shell; the gap is at most 3 x 12 px unless the caller fixes it.
+    reach = int(np.ceil(max(36.0, float(gap_px) if gap_px is not None else 0.0) + float(ring_width_px))) + 2
     for lb in ids:
-        obj = (lab == lb)
+        sl = slices[int(lb) - 1] if int(lb) - 1 < len(slices) else None
+        if sl is None:
+            continue
+        win = _pc_window(sl, lab.shape, reach)
+        lab_w, img_w = lab[win], img[win]
+        obj = (lab_w == lb)
         if not obj.any():
             continue
 
         dist_out = _ndi.distance_transform_edt(~obj)
-        _gap = _pc_estimate_gap(dist_out, img, gap_px)
+        _gap = _pc_estimate_gap(dist_out, img_w, gap_px)
         ring = (dist_out > _gap) & (dist_out <= _gap + float(ring_width_px))
-        ring &= (lab == 0)                       # never sample another droplet
+        ring &= (lab_w == 0)                     # never sample another droplet
         if not ring.any():
             continue
 
-        dense_px = img[obj]
+        dense_px = img_w[obj]
         _cv = (float(np.std(dense_px) / max(abs(np.mean(dense_px)), 1e-9))
                if dense_px.size > 1 else 0.0)
         _mask_cv.append(_cv)
-        ring_px = img[ring]
+        ring_px = img_w[ring]
         I_dense = float(dense_px.mean())
         I_ring = float(ring_px.mean())
 
-        tol = 1e-6 * max(abs(sat), 1.0)
+        tol = 1e-6 * max(abs(sat), 1.0) if np.isfinite(sat) else 0.0
         frac_sat = float((dense_px >= sat - tol).mean())
         saturated = bool(frac_sat > 0.001)
 
@@ -171,7 +191,7 @@ def _pc_measure_droplets(img, lab, ids, sat, I_dark, gap_px, ring_width_px, allo
         ))
 
     # A high CV inside the dense mask means the mask is including dilute-phase pixels.
-    if _mask_cv:
+    if _mask_cv and notify:
         _cv_med = float(np.median(_mask_cv))
         if _cv_med > 0.25:
             napari_show_warning(
@@ -188,13 +208,18 @@ def _pc_measure_droplets(img, lab, ids, sat, I_dark, gap_px, ring_width_px, allo
     return rows, _mask_cv
 
 
-def _pc_verdict(floor_source, stype, allow_no_reference, df, kp_mean, I_dark, mask_cv):
+def _pc_verdict(floor_source, stype, allow_no_reference, df, kp_mean, I_dark, mask_cv, notify=True):
     """Build the human verdict for the measured field and emit the matching napari notification.
 
     Two honesty rules live here: a validation claim is NEVER printed next to a NaN (it tells the user the
     machinery is sound at the moment it refused to answer), and the "validated" message NEVER sounds
     confident when the MASK is suspect (a reassurance the user reads instead of the warning is worse than
-    none — the pedestal correction can be sound while an over-inclusive mask collapses Kp by 7x)."""
+    none — the pedestal correction can be sound while an over-inclusive mask collapses Kp by 7x).
+    ``notify=False`` builds the verdict silently (a per-frame Kp(t) would otherwise repeat it every frame)."""
+    def _say(show, text):
+        if notify:
+            show("Partition coefficient: " + text)
+
     if floor_source == 'dark_reference' and not np.isfinite(kp_mean):
         verdict = (
             f"Kp is NOT COMPUTABLE for this image — see the warning above. "
@@ -205,7 +230,7 @@ def _pc_verdict(floor_source, stype, allow_no_reference, df, kp_mean, I_dark, ma
             f"help**: a clipped dense phase truncates the numerator by an unknown amount, so "
             f"the ratio is meaningless rather than a lower bound. Re-acquire with a shorter "
             f"exposure or lower gain.")
-        napari_show_warning("Partition coefficient: " + verdict)
+        _say(napari_show_warning, verdict)
 
     elif floor_source == 'dark_reference':
         verdict = (f"Kp = {kp_mean:.2f}. The camera floor was measured directly from the "
@@ -217,7 +242,7 @@ def _pc_verdict(floor_source, stype, allow_no_reference, df, kp_mean, I_dark, ma
                         "sound and the MASK is not, and Kp is only as good as the worse of "
                         "the two.**")
         else:
-            napari_show_info("Partition coefficient: " + verdict)
+            _say(napari_show_info, verdict)
 
     elif floor_source == 'extracellular':
         verdict = (f"Kp = {kp_mean:.2f}. The camera floor ({I_dark:.1f} counts) came from "
@@ -228,7 +253,7 @@ def _pc_verdict(floor_source, stype, allow_no_reference, df, kp_mean, I_dark, ma
                    f"not the mean: the mean is dragged upward by cell-edge pixels (measured, "
                    f"against a true pedestal of 500 — mean 548.2, median 504.0). A dedicated "
                    f"dark frame remains the more direct measurement.")
-        napari_show_info("Partition coefficient: " + verdict)
+        _say(napari_show_info, verdict)
 
     elif stype == 'in_vitro':
         # In vitro there is NOTHING to fall back on. Say so plainly.
@@ -248,7 +273,7 @@ def _pc_verdict(floor_source, stype, allow_no_reference, df, kp_mean, I_dark, ma
             "immune to the droplet's PSF halo — a 5 px edge costs it 22%. Pass "
             "`allow_no_reference=True` to additionally receive the raw intensity ratio, "
             "which is NOT Kp and is biased toward 1 by an unknowable amount.")
-        napari_show_warning("Partition coefficient: " + verdict)
+        _say(napari_show_warning, verdict)
 
     elif allow_no_reference:
         verdict = (f"**NOT a partition coefficient — a raw intensity ratio ({kp_mean:.2f}), "
@@ -258,7 +283,7 @@ def _pc_verdict(floor_source, stype, allow_no_reference, df, kp_mean, I_dark, ma
                    f"and a 500-count pedestal, the raw ratio returns 5.81. Use it for "
                    f"RELATIVE comparison between images acquired identically; do not report "
                    f"it as Kp. The CONTRAST is exact regardless.")
-        napari_show_warning("Partition coefficient: " + verdict)
+        _say(napari_show_warning, verdict)
 
     else:
         verdict = (
@@ -273,7 +298,7 @@ def _pc_verdict(floor_source, stype, allow_no_reference, df, kp_mean, I_dark, ma
             "The CONTRAST (I_dense − I_dilute) is reported regardless and is exact: the "
             "pedestal cancels in the difference — though not immune to the PSF halo, "
             "which costs a 5 px edge 22%.")
-        napari_show_warning("Partition coefficient: " + verdict)
+        _say(napari_show_warning, verdict)
     return verdict
 
 
@@ -281,7 +306,7 @@ def partition_coefficient_local(image, labeled_droplets, sample_type='cellular',
                                 dark_reference=None, cell_mask=None,
                                 allow_no_reference=False,
                                 gap_px=None, ring_width_px=6, saturation_level=None,
-                                image_layer=None):
+                                image_layer=None, notify=True):
     """Kp from a LOCAL annular dilute phase, with an optional dark reference.
 
     Why a local annulus, and why it needs a gap
@@ -350,27 +375,29 @@ def partition_coefficient_local(image, labeled_droplets, sample_type='cellular',
         return dict(partition_coefficient=np.nan, per_droplet_df=pd.DataFrame(),
                     verdict='No droplets labelled.')
 
-    # Saturation ceiling (same logic as partition_coefficient_field).
+    # Saturation ceiling (same rule as partition_coefficient_field, A2c): inferred from an INTEGER dtype; a float
+    # image is checked only against a ceiling the caller supplies -- its own brightest pixel is not one (that made
+    # the brightest droplet saturated by definition, and every float image's Kp NaN).
     sat = saturation_level
     if sat is None:
         if np.issubdtype(np.asarray(image).dtype, np.integer):
             sat = float(np.iinfo(np.asarray(image).dtype).max)
         else:
-            mx = float(np.nanmax(img)) if img.size else 1.0
-            sat = 1.0 if mx <= 1.0 + 1e-6 else mx
+            sat = np.inf
 
     _stype = str(sample_type).lower()
     floor_source, I_dark = _pc_camera_floor(_stype, dark_reference, cell_mask, img)
 
     rows, _mask_cv = _pc_measure_droplets(img, lab, ids, sat, I_dark, gap_px,
-                                          ring_width_px, allow_no_reference)
+                                          ring_width_px, allow_no_reference, notify=notify)
 
     df = pd.DataFrame(rows)
     kp_vals = df['partition_coefficient'].to_numpy(dtype=float) if len(df) else np.array([])
     kp_vals = kp_vals[np.isfinite(kp_vals)]
     kp_mean = float(kp_vals.mean()) if kp_vals.size else np.nan
 
-    verdict = _pc_verdict(floor_source, _stype, allow_no_reference, df, kp_mean, I_dark, _mask_cv)
+    verdict = _pc_verdict(floor_source, _stype, allow_no_reference, df, kp_mean, I_dark, _mask_cv,
+                          notify=notify)
 
     return dict(
         # NaN unless a floor was available, or the caller explicitly accepted a raw ratio.
@@ -473,7 +500,6 @@ def partition_measurement(image, labeled_droplets, percentile_bulk=10.0,
                                          Interpretability)
 
     res = partition_coefficient_field(image, labeled_droplets,
-                                      percentile_bulk=percentile_bulk,
                                       saturation_level=saturation_level)
 
     img = np.asarray(image)
@@ -499,11 +525,14 @@ def partition_measurement(image, labeled_droplets, percentile_bulk=10.0,
             name='no_saturation',
             description=('neither phase is clipped at the detector ceiling — a truncated '
                          'numerator makes Kp meaningless, not a lower bound'),
-            checked=True,
-            holds=not sat,
+            checked=bool(res.get('saturation_checked', True)),
+            holds=(not sat) if res.get('saturation_checked', True) else None,
             detail=(f'{frac_sat:.1%} of dense-phase pixels at the ceiling; '
                     f'{n_sat_drops} droplet(s) affected'
-                    if sat else 'no clipping detected in the dense phase'),
+                    if sat else 'no clipping detected in the dense phase'
+                    if res.get('saturation_checked', True)
+                    else 'not checked: a float image has no inferable detector ceiling -- pass '
+                         'saturation_level'),
         ),
         Assumption(
             name='background_subtracted',
@@ -521,23 +550,20 @@ def partition_measurement(image, labeled_droplets, percentile_bulk=10.0,
                          'field does not have'),
             checked=False,
             holds=None,
-            detail=(f'the dilute phase was taken as the {percentile_bulk:.0f}th percentile '
-                    f'of the whole field. Check the vignetting QC; if illumination is not '
-                    f'flat, this over- or under-states the dilute phase depending on where '
-                    f'the droplets sit.'),
+            detail=('the dilute phase was taken as the median of the whole field outside the '
+                    'droplets. Check the vignetting QC; if illumination is not flat, this over- or '
+                    'under-states the dilute phase depending on where the droplets sit.'),
         ),
     ]
 
     parameters = [
-        Parameter(name='percentile_bulk', value=float(percentile_bulk), units='%',
-                  source=ParameterSource.ASSUMED,
-                  note='the percentile of the field taken as the dilute phase'),
         Parameter(name='saturation_level',
                   value=float(res.get('saturation_level', np.nan)), units='counts',
                   source=(ParameterSource.MANUFACTURER if saturation_level is not None
                           else ParameterSource.METADATA),
                   note=('supplied by the caller' if saturation_level is not None
-                        else 'inferred from the image dtype')),
+                        else 'inferred from the image dtype' if res.get('saturation_checked')
+                        else 'NOT CHECKED: a float image has no inferable ceiling -- pass saturation_level')),
     ]
 
     m = Measurement(
@@ -715,57 +741,69 @@ def estimate_phase_boundary(concentrations, fractions, n_boot=400,
 def partition_coefficient_field(
     image: np.ndarray,
     labeled_droplets: np.ndarray,
-    percentile_bulk: float = 10.0,
+    percentile_bulk: float = None,
     saturation_level: float = None,
+    dark_level: float = None,
 ) -> dict:
     """
     Compute the fluorescence partition coefficient for in vitro droplets.
 
-    For in vitro data, the bulk (dilute phase) intensity is estimated
-    from the background pixels. Using a low percentile (default 10th)
-    avoids contamination from dim droplets just below the segmentation
-    threshold.
+    For in vitro data the bulk (dilute phase) intensity is the MEDIAN of the background pixels.
 
     Parameters
     ----------
-    image           : (H, W) float32 in [0, 1]
+    image           : (H, W) intensity image (raw counts or any linear scale)
     labeled_droplets: (H, W) integer label mask
-    percentile_bulk : percentile of background pixels to use as bulk estimate
+    percentile_bulk : deprecated, ignored (kept so old callers do not break) -- see below
+    saturation_level: the detector ceiling. Inferred from an INTEGER dtype; for a float image it is checked
+                      only when supplied (a float image's own maximum is not a ceiling)
+    dark_level      : the camera pedestal (a dark reference), subtracted from both phases. Without it the
+                      ratio is pedestal-biased toward 1 and ``background_subtracted`` is False
+
+    Why these choices (Completion Spec A2, each measured)
+    ----------------------------------------------------
+    * **Dilute phase = median, not the 10th percentile.** Under any noise the 10th percentile of a uniform
+      dilute phase sits BELOW it, so Kp was biased UP: +6.8 % at a dilute CV of 0.05, +34 % at 0.2, +105 % at
+      0.4 -- and then, at CV ~ 0.78, a ``0.05 x mean`` guard engaged and the error snapped back to zero: a
+      100-point jump at a threshold the user could not see. The median of a symmetric dilute phase IS its
+      level; it is also robust to the dim sub-threshold droplets the percentile was meant to avoid.
+    * **No absolute 1e-6 floor.** It was scale-dependent: a float (e.g. background-subtracted) image whose
+      dilute phase is below 1e-6 silently divided by a different number than the ``c_sat_proxy`` it reported,
+      so true K = 100, 1000, 10000 ALL returned ~6 -- not even monotonic in K. Now a dilute level that is not
+      positive, or so small against the dense phase that Kp would exceed 1e6, makes Kp NaN with the reason
+      (``dilute_fallback_used`` / ``dilute_floor_reason``); ``dilute_denominator`` is what was divided by.
+    * **A float image is not saturated by its own maximum.** The ceiling used to be the brightest pixel, so
+      the brightest droplet was saturated by definition and every float image returned NaN.
 
     Returns
     -------
     dict with keys:
-        c_sat_proxy       : bulk (dilute phase) intensity
-        c_dense_proxy     : mean droplet interior intensity
-        partition_coeff   : C_dense / C_sat
+        c_sat_proxy       : dilute-phase intensity (above ``dark_level`` when given)
+        c_dense_proxy     : mean droplet interior intensity (above ``dark_level``)
+        partition_coeff   : C_dense / C_sat, or NaN with the reason
+        dilute_denominator, dilute_fallback_used, dilute_floor_reason
+        background_subtracted, saturation_checked
         enrichment        : (C_dense − C_sat) / C_sat
         per_droplet_df    : DataFrame with per-droplet partition coefficient
     """
+    image = np.asarray(image)
     bg_mask   = labeled_droplets == 0
     cond_mask = labeled_droplets > 0
+    dark = float(dark_level) if dark_level is not None else 0.0
 
-    # Bulk (dilute-phase) intensity estimate. The 10th percentile of background
-    # can collapse to ~0 on dark fluorescence backgrounds (many near-zero
-    # pixels), which then made per-droplet partition = intensity / ~0 explode to
-    # ~1e8. Use a ROBUST bulk: the percentile, but floored to the background MEAN
-    # if the percentile is degenerate (<=0 or a tiny fraction of the mean). This
-    # keeps the per-droplet partition on the same scale as the field-level one.
-    if bg_mask.sum() > 0:
-        bg_vals   = image[bg_mask]
-        bulk_pct  = float(np.percentile(bg_vals, percentile_bulk))
-        bulk_mean = float(bg_vals.mean())
-        # If the percentile is ~0 (dark background) fall back to the mean, which
-        # is what the field-level summary uses.
-        if bulk_pct <= 0 or (bulk_mean > 0 and bulk_pct < 0.05 * bulk_mean):
-            bulk = bulk_mean
-        else:
-            bulk = bulk_pct
-    else:
-        bulk = 0.0
-    # Final safety floor: never divide by (near-)zero.
-    bulk_div = bulk if bulk > 1e-6 else (float(image.mean()) if image.mean() > 1e-6 else 1.0)
-
-    dense  = float(image[cond_mask].mean()) if cond_mask.sum() > 0 else np.nan
+    bulk = float(np.median(image[bg_mask])) - dark if bg_mask.sum() > 0 else np.nan
+    dense_raw = float(image[cond_mask].mean()) if cond_mask.sum() > 0 else np.nan
+    dense = dense_raw - dark if np.isfinite(dense_raw) else np.nan
+    floor_reason = ''
+    if not np.isfinite(bulk) or bulk <= 0:
+        floor_reason = (f'the dilute phase ({bulk:.4g}) is not above zero'
+                        + (' after the dark level' if dark_level is not None else '')
+                        + ' -- Kp is not computable (a background-subtracted image with no dilute signal, or a '
+                          'dark level above the dilute phase)')
+    elif np.isfinite(dense) and bulk < abs(dense) / _KP_MAX_RESOLVABLE:
+        floor_reason = (f'the dilute phase ({bulk:.4g}) is under 1e-6 of the dense phase ({dense:.4g}) -- Kp would '
+                        f'exceed 1e6, which is the noise floor of the ratio, not a measurement')
+    bulk_div = np.nan if floor_reason else bulk
 
     # ── Detector saturation INVALIDATES the partition coefficient ────────────
     #
@@ -779,18 +817,18 @@ def partition_coefficient_field(
     # 655 looks like a measurement, not a floor. So the coefficient is marked INVALID and
     # the reason is returned with it.
     #
-    # The saturation ceiling is inferred from the dtype where possible (a uint16 image
-    # clips at 65535, a float image normalised to [0,1] clips at 1.0). Callers with a
-    # known full-well capacity can override it.
+    # The saturation ceiling is inferred from an INTEGER dtype (a uint16 image clips at
+    # 65535). Callers with a known full-well capacity -- or a float image rescaled from a
+    # known ceiling (pass 1.0 for a dtype-max-normalised image) -- supply it.
+    # A FLOAT image's ceiling is checked only when the caller states it (A2c): its own maximum is not one.
     sat_level = saturation_level
+    if sat_level is None and np.issubdtype(image.dtype, np.integer):
+        sat_level = float(np.iinfo(image.dtype).max)
+    saturation_checked = sat_level is not None
     if sat_level is None:
-        if np.issubdtype(image.dtype, np.integer):
-            sat_level = float(np.iinfo(image.dtype).max)
-        else:
-            mx = float(np.nanmax(image)) if image.size else 1.0
-            sat_level = 1.0 if mx <= 1.0 + 1e-6 else mx
+        sat_level = np.inf
 
-    tol = 1e-6 * max(abs(sat_level), 1.0)
+    tol = 1e-6 * max(abs(sat_level), 1.0) if np.isfinite(sat_level) else 0.0
     dense_px = image[cond_mask] if cond_mask.sum() > 0 else np.array([])
     n_sat = int((dense_px >= sat_level - tol).sum()) if dense_px.size else 0
     frac_sat = (n_sat / dense_px.size) if dense_px.size else 0.0
@@ -825,7 +863,7 @@ def partition_coefficient_field(
             # A saturated droplet's Kp is NOT a lower bound -- it is meaningless. NaN,
             # with the reason in the neighbouring columns.
             'partition_coeff':    (np.nan if d_sat
-                                   else float(prop.intensity_mean / bulk_div)),
+                                   else float((prop.intensity_mean - dark) / bulk_div)),
             'saturated':          d_sat,
             'saturated_fraction': float(d_frac),
             'area_um2':           np.nan,  # caller can fill from microns_per_pixel
@@ -841,16 +879,25 @@ def partition_coefficient_field(
             f"truncated by an unknown amount, so the true value cannot be bounded. "
             f"Re-acquire with a shorter exposure or lower gain.")
 
+    if floor_reason:
+        napari_show_warning(f"Partition coefficient: {floor_reason}.")
+
     return dict(
         c_sat_proxy=bulk,
         c_dense_proxy=dense,
         partition_coeff=part,
         enrichment=enrich,
+        # What Kp was divided by, and whether the dilute phase was usable (A2a): never a silent substitute.
+        dilute_denominator=float(bulk_div),
+        dilute_fallback_used=bool(floor_reason),
+        dilute_floor_reason=floor_reason,
+        background_subtracted=dark_level is not None,
+        saturation_checked=bool(saturation_checked),
         # Saturation diagnostics travel WITH the result, so a downstream consumer cannot
         # use the number without seeing why it is (or is not) trustworthy.
         saturated=saturated,
         saturated_fraction=float(frac_sat),
-        saturation_level=float(sat_level),
+        saturation_level=float(sat_level) if saturation_checked else float('nan'),
         n_saturated_droplets=n_sat_droplets,
         per_droplet_df=pd.DataFrame(rows),
     )

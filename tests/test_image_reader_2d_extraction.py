@@ -21,10 +21,6 @@ class _FakeDims:
 class _FakeImage:
     def __init__(self, S, C):
         self.dims = _FakeDims(S, C)
-        # a dask-metadata stand-in so the newbyteorder probe path is a no-op
-        class _X:
-            dims = ('Y', 'X')
-        self.xarray_dask_data = _X()
 
 
 def _install_fakes(monkeypatch, S, C):
@@ -79,10 +75,9 @@ def _original_loop(file_path, open_image, read_plane):
 def test_extracted_image_reader_matches_original(monkeypatch, S, C):
     from pycat.file_io.readers.image_reader_2d import read_2d_image_channels
     oi, rp, _ = _install_fakes(monkeypatch, S, C)
-    channels, channel_info, image, used_pil = read_2d_image_channels("f.tif")
+    channels, channel_info, image = read_2d_image_channels("f.tif")
     old = _original_loop("f.tif", oi, rp)
 
-    assert used_pil is False
     assert image is not None
     assert len(channels) == len(old)
     for n, o in zip(channels, old):

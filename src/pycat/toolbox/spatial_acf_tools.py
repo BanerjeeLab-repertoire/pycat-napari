@@ -72,7 +72,7 @@ import matplotlib.pyplot as plt
 # unimportable there — which is how the headless test caught this: my sandbox had STUBBED
 # the package, so it looked fine locally and failed in CI. Imported lazily, inside the one
 # function that needs it.
-from scipy.optimize import curve_fit
+from scipy.optimize import OptimizeWarning, curve_fit
 from scipy.signal import argrelextrema
 # ── napari and Qt are imported LAZILY ─────────────────────────────────────────
 #
@@ -382,7 +382,8 @@ def sacf_lir_mode(stack, labeled_cell_mask, microns_per_pixel=1.0):
                     microns_per_pixel, extra))
                 continue
             with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
+                warnings.simplefilter("ignore", RuntimeWarning)   # the fit's divide/overflow
+                warnings.simplefilter("ignore", OptimizeWarning)
                 sx, sy, _ = sacf_single_roi(roi)
             records.append(_make_record(
                 slice_idx, int(cell_label), sx, sy,
@@ -443,7 +444,8 @@ def sacf_drawn_rect_mode(stack, shapes_layer, microns_per_pixel=1.0):
         for rect_label, (r0, r1, c0, c1) in rects:
             roi = slice_img[r0:r1, c0:c1].copy().astype(float)
             with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
+                warnings.simplefilter("ignore", RuntimeWarning)   # the fit's divide/overflow
+                warnings.simplefilter("ignore", OptimizeWarning)
                 sx, sy, _ = sacf_single_roi(roi)
             records.append(_make_record(slice_idx, rect_label, sx, sy,
                                         microns_per_pixel))
@@ -475,7 +477,8 @@ def sacf_whole_image_mode(stack, microns_per_pixel=1.0):
         napari_show_info(f"[SACF] Slice {slice_idx + 1}/{stack.shape[0]} …")
         print(f"[PyCAT SACF] Slice {slice_idx + 1}/{stack.shape[0]}")
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
+            warnings.simplefilter("ignore", RuntimeWarning)   # the fit's divide/overflow
+            warnings.simplefilter("ignore", OptimizeWarning)
             sx, sy, _ = sacf_single_roi(stack[slice_idx].astype(float))
         records.append(_make_record(slice_idx, 'whole_image', sx, sy,
                                     microns_per_pixel))
@@ -564,9 +567,8 @@ def run_sacf_analysis(image_layer, mode, data_instance, viewer,
         napari_show_warning("SACF: Image must be 2D or 3D.")
         return
 
-    microns_per_pixel = np.sqrt(
-        data_instance.data_repository.get('microns_per_pixel_sq', 1.0)
-    )
+    from pycat.utils.pixel_size import pixel_size_um_or_default
+    microns_per_pixel = pixel_size_um_or_default(data_instance.data_repository, context='SACF')
 
     # ── LIR mode ──────────────────────────────────────────────────────────
     if mode == MODE_LIR:

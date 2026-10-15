@@ -310,8 +310,12 @@ def stamp_entity_ids(df, *, entity_type, source_path=None, operation_id=None,
 
         dataset = dataset_id_for(source_path)
 
+        # An explicit label column always wins over parent auto-detection: a time-series or z-stack table whose
+        # LABEL column is 'cell_label' must not have that same column auto-detected as its parent, or every id
+        # carries the label twice (Completion Spec F3).
         parents = None
-        for name in ([parent_column] if parent_column else _PARENT_COLUMNS):
+        candidates = [parent_column] if parent_column else [c for c in _PARENT_COLUMNS if c != label_column]
+        for name in candidates:
             if name and name in df.columns:
                 parents = df[name]
                 break
@@ -432,7 +436,22 @@ def _register_default_entity_specs():
     register_entity_spec('measure_region_props', EntitySpec('mask_object', label_column='label'))
     register_entity_spec('condensate_analysis', EntitySpec('condensate', label_column='label'))
     register_entity_spec('vpt_tracks', EntitySpec('bead', label_column='track_id', frame_column='frame'))
-    register_entity_spec('object_colocalization', EntitySpec('colocalized_object', label_column='label'))
+    # The REAL column the pairing table writes (coloc/object_based.py) -- 'label' matched nothing (F2).
+    register_entity_spec('object_colocalization', EntitySpec('colocalized_object', label_column='Mask 1 Labels'))
+    # Completion Spec F2 -- the pipelines whose object tables were displayed dead. Real column names; an explicit
+    # label column wins over parent auto-detection (F3), which is what makes 'cell_label' usable as a LABEL.
+    register_entity_spec('timeseries_condensate_analysis',
+                         EntitySpec('cell', label_column='cell_label', frame_column='frame'))
+    register_entity_spec('zstack_cell_metrics', EntitySpec('cell', label_column='cell_label', frame_column='frame'))
+    register_entity_spec('zstack_condensate_metrics',
+                         EntitySpec('condensate', label_column='condensate_label', frame_column='frame'))
+    register_entity_spec('bf_condensate_metrics', EntitySpec('condensate', label_column='condensate_label'))
+    register_entity_spec('bf_per_cell_summary', EntitySpec('cell', label_column='cell_label'))
+    register_entity_spec('ivbf_droplet_metrics', EntitySpec('droplet', label_column='condensate_label'))
+    # Fibril per-object tables (tortuosity, orientation) describe the SAME labelled objects of one mask, so they
+    # share one operation id: a fibril selected in either table is the same entity in the other.
+    register_entity_spec('fibril_morphology', EntitySpec('fibril', label_column='label'))
+    register_entity_spec('two_channel_condensate_coloc', EntitySpec('cell', label_column='cell_label'))
 
 
 _register_default_entity_specs()
@@ -488,6 +507,27 @@ def without_identity(df):
         return df.drop(columns=hidden) if hidden else df
     except Exception:
         return df
+
+
+#: User setting (opt-in, default off) that keeps the identity columns in exported results CSVs.
+KEEP_IDENTITY_SETTING = 'export_keep_identity'
+
+
+def for_export(df, keep_identity=None):
+    """``df`` as it should be WRITTEN to a results CSV: identity stripped (``without_identity``) by default.
+
+    ``keep_identity=True`` -- or the opt-in user setting ``export_keep_identity`` when ``None`` -- keeps the
+    ``_pycat_*`` columns, so a reviewer can round-trip an exported table back into the viewer and it re-links
+    (a stripped CSV never can). Off by default: in someone's spreadsheet the columns read as measurements
+    (Completion Spec F7)."""
+    if keep_identity is None:
+        try:
+            from pycat.utils.user_settings import settings
+            keep_identity = bool(settings().get(KEEP_IDENTITY_SETTING, False))
+        except Exception as exc:      # broad-ok: optional_probe — no settings store → the default (strip)
+            debug_log('entity_ref: could not read the keep-identity export setting', exc)
+            keep_identity = False
+    return df if keep_identity else without_identity(df)
 
 
 def has_entity_ids(df) -> bool:

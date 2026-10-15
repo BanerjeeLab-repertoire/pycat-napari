@@ -246,3 +246,17 @@ def test_a_plot_axis_is_never_offered_an_identity_column():
 
     df = _stamped()
     assert visible_columns(df) == ['label', 'area']
+
+
+def test_the_opt_in_export_KEEPS_identity_so_a_table_can_be_relinked(tmp_path):
+    """Completion Spec F7: the default strips; ``keep_identity`` (or the user setting) keeps the columns, and a
+    re-read table carries the same entity ids it was exported with."""
+    import pandas as pd
+    from pycat.utils.entity_ref import ENTITY_ID_COLUMN, for_export
+
+    df = _stamped()
+    assert ENTITY_ID_COLUMN not in for_export(df, keep_identity=False).columns
+    out = tmp_path / "results.csv"
+    for_export(df, keep_identity=True).to_csv(out, index=False)
+    back = pd.read_csv(out)
+    assert list(back[ENTITY_ID_COLUMN]) == list(df[ENTITY_ID_COLUMN])

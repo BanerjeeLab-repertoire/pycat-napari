@@ -395,9 +395,35 @@ def fit_size_distribution_mle(radii_um, xmin=None, candidates=None):
     )
 
 
+def detection_limit_radius_um(min_area_px, microns_per_pixel):
+    """The smallest radius a segmentation that drops objects under ``min_area_px`` can report:
+    ``sqrt(min_area * mpx^2 / pi)`` -- the same formula the radii are built with. ``None`` when either input is
+    missing or not positive (then the fit stays untruncated, and says so)."""
+    try:
+        a, m = float(min_area_px), float(microns_per_pixel)
+    except (TypeError, ValueError):
+        return None
+    if not (np.isfinite(a) and np.isfinite(m)) or a <= 0 or m <= 0:
+        return None
+    return float(np.sqrt(a * m * m / np.pi))
+
+
+def detection_limit_for_radii(radii_um, min_area_px, microns_per_pixel):
+    """The detection limit to fit ``radii_um`` with, or ``None``: the radius of the recorded minimum object area,
+    applied only when EVERY radius respects it. A mask holding smaller objects was not produced by that
+    segmentation (an edited or hand-drawn mask) -- truncating it would silently discard real objects."""
+    xmin = detection_limit_radius_um(min_area_px, microns_per_pixel)
+    r = np.asarray(radii_um, dtype=float)
+    r = r[np.isfinite(r) & (r > 0)]
+    if xmin is None or r.size == 0 or float(r.min()) < xmin * (1.0 - 1e-9):
+        return None
+    return xmin
+
+
 def fit_size_distribution(
     radii_um: np.ndarray,
     n_bins: int = 30,
+    xmin: float = None,
 ) -> dict:
     """
     Fit droplet size distribution to lognormal and power-law models.
@@ -412,6 +438,12 @@ def fit_size_distribution(
     ----------
     radii_um : 1D array of droplet radii in µm
     n_bins   : histogram bins for fitting
+    xmin     : the DETECTION LIMIT radius (µm) -- ``detection_limit_radius_um(min_area, mpx)``. The segmentation
+               drops every object below it, so the sample is LEFT-TRUNCATED and an untruncated fit is biased:
+               measured on lognormal(mu = ln 0.5, sigma = 0.6) radii, a cut at 0.4 um (35 % lost) put mu +50 % and
+               sigma -33 % off (Completion Spec A4). Given ``xmin`` the MLE uses the truncated likelihood
+               (mu +2.5 %, sigma -1.5 %) and ``lognormal_mu`` / ``lognormal_sigma`` report it; the sample
+               statistics (mean / median / PDI) remain those of the OBSERVED radii and are flagged as truncated.
 
     Returns
     -------
@@ -426,8 +458,12 @@ def fit_size_distribution(
     """
     r = np.asarray(radii_um)
     r = r[r > 0]
+    _trunc = xmin is not None and np.isfinite(xmin) and xmin > 0
+    if _trunc:
+        r = r[r >= xmin]
     if len(r) < 5:
-        return dict(preferred_model='insufficient_data')
+        return dict(preferred_model='insufficient_data',
+                    detection_limit_xmin=(float(xmin) if _trunc else np.nan))
 
     counts, edges = np.histogram(r, bins=n_bins, density=True)
     centres       = 0.5 * (edges[:-1] + edges[1:])
@@ -495,7 +531,7 @@ def fit_size_distribution(
     # the plot.
     _mle = {}
     try:
-        _mle = fit_size_distribution_mle(r)
+        _mle = fit_size_distribution_mle(r, xmin=(float(xmin) if _trunc else None))
         _preferred = _mle.get('best_model') or preferred
         if not _mle.get('distinguishable', True):
             napari_show_warning(
@@ -506,9 +542,18 @@ def fit_size_distribution(
         debug_log("size distribution: MLE fit failed; falling back to the histogram", _e)
         _preferred = preferred
 
+    # With a detection limit the lognormal parameters come from the TRUNCATED MLE (the log-moments of a truncated
+    # sample are exactly the biased numbers); without one they stay the log-moments, as before.
+    _ln = (_mle.get('models') or {}).get('lognormal', {}).get('params') if _trunc else None
+    if _ln:
+        mu_ln, sig_ln = float(_ln['mu']), float(_ln['sigma'])
+
     return dict(
         lognormal_mu=mu_ln,
         lognormal_sigma=sig_ln,
+        # The truncation travels with the result (and into every exported row): NaN = no limit was applied.
+        detection_limit_xmin=(float(xmin) if _trunc else np.nan),
+        sample_statistics_truncated=bool(_trunc),
         lognormal_r2=r2_ln,
         powerlaw_alpha=alpha_pl,
         powerlaw_r2=r2_pl,

@@ -94,6 +94,20 @@ def _start_dynamic_worker(ui_instance, prog_d, run_d, stop_d, stack_dd, linker_d
     worker.start()
 
 
+def _show_morph_tables(ui_instance, res):
+    """Show the morphology results; the per-fibril tables get the declared identity and join the selection bus
+    (Completion Spec F1/F2)."""
+    from pycat.ui.ui_utils import show_dataframes_dialog
+    from pycat.utils.entity_ref import finalize_entity_table, source_path_of
+    src = source_path_of(ui_instance.central_manager.active_data_class)
+    tables = [(k.replace('_', ' ').title(),
+               finalize_entity_table(v.round(4), 'fibril_morphology', source_path=src)
+               if k in ('tortuosity', 'orientation_per_object') else (v.round(4) if hasattr(v, 'round') else v))
+              for k, v in res.items()]
+    show_dataframes_dialog("Morphological Complexity", tables,
+                           service=getattr(ui_instance.central_manager, 'selection', None))
+
+
 def _build_morphological_tab(ui_instance, tabs):
     """Tab 1 — Morphological Complexity (split out of _add_advanced_analysis)."""
     morph_widget = QWidget()
@@ -187,10 +201,7 @@ def _build_morphological_tab(ui_instance, tabs):
             prog_m.setVisible(False); run_m.setEnabled(True); stop_m.setVisible(False)
             for k, v in res.items():
                 dr[f'morph_{k}'] = v
-            from pycat.ui.ui_utils import show_dataframes_dialog
-            tables = [(k.replace('_',' ').title(), v.round(4) if hasattr(v,'round') else v)
-                      for k, v in res.items()]
-            show_dataframes_dialog("Morphological Complexity", tables)
+            _show_morph_tables(ui_instance, res)
             ui_instance._record('morphological_complexity',
                                 {'analyses': [k for k, c in
                                   [('fd', cb_fd), ('lac', cb_lac),

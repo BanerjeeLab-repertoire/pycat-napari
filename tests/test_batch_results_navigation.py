@@ -56,6 +56,7 @@ class _Viewer:
     def __init__(self):
         self.layers = {}
         self.camera = type('C', (), {'center': (0, 0), 'zoom': 1.0})()
+        self.scene = __import__('types').SimpleNamespace(camera=self.camera)   # napari >= 0.9 path
         self.mouse_drag_callbacks = []
 
     def add_image(self, data, name, **kw):

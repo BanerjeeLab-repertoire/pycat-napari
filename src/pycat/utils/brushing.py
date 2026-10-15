@@ -149,7 +149,7 @@ def _follow_enabled(central_manager):
 
 
 def make_pickable(figure, artist, refs, *, hub=None, on_select=None, viewer=None,
-                  central_manager=None):
+                  central_manager=None, service=None, view_id=None):
     """**Attach identity to the points of a plot, and make clicking one mean something.**
 
     Parameters
@@ -160,6 +160,10 @@ def make_pickable(figure, artist, refs, *, hub=None, on_select=None, viewer=None
     hub : an optional ``SelectionHub``. If given, a pick propagates to every other registered view.
     on_select : an optional ``callback(ref)`` for a plot that just wants the ref.
     viewer : if given, a pick **reveals the object in napari** — the interactive resolver.
+    service, view_id : the application's ``SelectionService`` and this plot's view id. When given, the plot is a
+        view ON the one bus: a pick selects the point's ``_pycat_entity_id`` everywhere, and a selection made
+        elsewhere marks the point carrying that id. Keyed on identity, never row position, so it is sort-safe;
+        a table without ids stays one-way (Completion Spec F5).
 
     **A plot that supplies refs gets brushing. It does not need to know how.**
     """
@@ -230,6 +234,13 @@ def make_pickable(figure, artist, refs, *, hub=None, on_select=None, viewer=None
         if hub is not None:
             hub.select(ref, source='plot')
 
+        eid = getattr(ref, 'entity_id', None)
+        if service is not None and eid:
+            try:
+                service.select_entity(eid, source=state.get('view_id') or '')
+            except Exception as exc:      # broad-ok: ui_cleanup — a failed publish must not break the local pick
+                debug_log('brushing: could not publish the pick to the selection service', exc)
+
     def _on_key(event):
         """**Escape means nothing is selected** — not "nothing happened"."""
         if str(getattr(event, 'key', '')) != 'escape':
@@ -250,7 +261,43 @@ def make_pickable(figure, artist, refs, *, hub=None, on_select=None, viewer=None
                 debug_log('brushing: could not clear the viewer overlay', exc)
 
     _wire_pickable(figure, _on_pick, _on_key, state, refs)
+    if service is not None:
+        _join_selection_service(figure, artist, refs, service, view_id, state)
     return figure
+
+
+def _join_selection_service(figure, artist, refs, service, view_id, state):
+    """Subscribe the plot to ``service`` so a selection made elsewhere marks the point with that entity id.
+    Only a plot whose points carry ``_pycat_entity_id`` joins (a positional match is what F5 retires); the
+    subscription is dropped by `_teardown_pickable` when the figure closes."""
+    try:
+        ids = refs.entity_ids if hasattr(refs, 'entity_ids') else [getattr(r, 'entity_id', None) for r in refs]
+        index_of = {str(e): i for i, e in enumerate(ids) if e is not None and e == e}
+    except Exception as exc:      # broad-ok: optional_probe — no readable ids → the plot stays one-way
+        debug_log("brushing: could not read the plot points' entity ids", exc)
+        return
+    if not index_of:
+        return
+    vid = str(view_id or f'plot.{id(figure)}')
+    state['view_id'] = vid
+
+    def _apply(selection_state):
+        picked = [index_of[str(e)] for e in getattr(selection_state, 'entity_ids', ()) if str(e) in index_of]
+        if not picked:
+            return
+        state['indices'] = picked
+        _emphasise(artist, picked, state)
+        try:
+            figure.canvas.draw_idle()
+        except Exception as exc:      # broad-ok: ui_cleanup — a closed canvas cannot redraw; nothing to do
+            debug_log('brushing: could not redraw the inbound selection', exc)
+
+    state['service_apply'] = _apply      # held by the figure's state; the service holds the closure strongly
+    service.subscribe(vid, _apply)
+    try:
+        figure._pycat_brush_unsubscribe = lambda: service.unsubscribe(vid, _apply)
+    except Exception:      # broad-ok: ui_cleanup — a figure that rejects attributes just keeps its subscription
+        pass
 
 
 def attach_brushing(figure, brushable, refs, **kwargs):
@@ -314,6 +361,13 @@ def _teardown_pickable(figure) -> None:
     figure carried (releasing the ``LazyRefs`` cache). Safe to call more than once — a close signal can
     fire twice — and safe on a figure that was never made pickable (everything is a no-op then).
     """
+    unsubscribe = getattr(figure, '_pycat_brush_unsubscribe', None)
+    if callable(unsubscribe):
+        try:
+            unsubscribe()
+            figure._pycat_brush_unsubscribe = None
+        except Exception as exc:      # broad-ok: ui_cleanup — teardown is best-effort; never raise while cleaning up
+            debug_log('brushing: could not leave the selection service', exc)
     cids = getattr(figure, '_pycat_brush_cids', None) or []
     for cid in list(cids):
         try:

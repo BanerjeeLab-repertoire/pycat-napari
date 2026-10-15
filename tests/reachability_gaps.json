@@ -1,0 +1,186 @@
+{
+ "analyze_localizations": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "toolbox/smlm_tools.py:169"
+ },
+ "available_panels": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "toolbox/manuscript/panels.py:304"
+ },
+ "backend_provenance": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "utils/plot_backend_selection.py:56"
+ },
+ "bf_analyse_focus_series": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "toolbox/brightfield_tools.py:781"
+ },
+ "clean_spots_per_region": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "toolbox/clean_spot_detection_tools.py:225"
+ },
+ "clear_results": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "utils/results_store.py:83"
+ },
+ "cluster_count_significance": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "toolbox/organizational_metrics_tools.py:311"
+ },
+ "coloc_significance": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "toolbox/coloc/object_based.py:1086"
+ },
+ "count_molecules_single": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "toolbox/molecular_counting_tools.py:139"
+ },
+ "crop_to_bbox": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "toolbox/batch_roi_tools.py:242"
+ },
+ "curve_age_days": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "utils/calibration.py:354"
+ },
+ "dispose_pickable": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "utils/brushing.py:400"
+ },
+ "dose_response": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "utils/comparative_figures.py:395"
+ },
+ "dose_response_figure": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "utils/comparative_figures.py:104"
+ },
+ "export_figure": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "utils/figure_spec.py:563"
+ },
+ "export_stack_as_gif": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "toolbox/video_export_tools.py:165"
+ },
+ "filter_table": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "utils/filter_store.py:125"
+ },
+ "forget_channel_identity": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "utils/channel_designations.py:193"
+ },
+ "forget_designation": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "utils/channel_designations.py:141"
+ },
+ "format_with_reliability": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "utils/reliability.py:202"
+ },
+ "group_columns_by_family": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "utils/feature_families.py:92"
+ },
+ "inverse_capillary_velocity": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "toolbox/fusion_tools.py:679"
+ },
+ "is_advanced": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "utils/app_mode.py:55"
+ },
+ "is_pseudoreplicated": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "toolbox/condensate_modes.py:130"
+ },
+ "load_localization_table": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "toolbox/smlm_tools.py:92"
+ },
+ "make_pyqtgraph_pickable": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "utils/plot_backend_pyqtgraph.py:188"
+ },
+ "mark_timeseries_as_unit": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "toolbox/condensate_modes.py:136"
+ },
+ "measurement_matrix": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "utils/comparative_figures.py:426"
+ },
+ "object_ratios": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "toolbox/ratiometric_tools.py:78"
+ },
+ "orphan_parameter_keys": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "utils/analysis_presets.py:107"
+ },
+ "pixel_size_is_placeholder": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "utils/pixel_size.py:268"
+ },
+ "plotly_interaction_scope": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "utils/plot_backend_selection.py:63"
+ },
+ "quantity_status": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "toolbox/condensate_modes.py:70"
+ },
+ "ratio_image": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "toolbox/ratiometric_tools.py:55"
+ },
+ "read_provenance_sidecar": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "utils/feature_provenance.py:141"
+ },
+ "records_from_data_repository": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "utils/consolidated_table.py:282"
+ },
+ "rejection_reason": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "utils/metadata_validity.py:74"
+ },
+ "report_summary": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "toolbox/manuscript/report.py:66"
+ },
+ "resolve_render_tier": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "utils/filter_store.py:96"
+ },
+ "results_label": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "utils/results_store.py:49"
+ },
+ "rules_dismissed_across_many_fingerprints": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "utils/metadata_contradictions.py:175"
+ },
+ "select_aggregate_row": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "utils/cohort_targets.py:164"
+ },
+ "stack_frame_properties": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "toolbox/timeseries_invitro_tools.py:212"
+ },
+ "stitch_into": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "toolbox/batch_roi_tools.py:248"
+ },
+ "trace_step_indices": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "utils/feature_provenance.py:64"
+ },
+ "z_step_um_or_default": {
+  "reason": "UNREVIEWED (1.7.005 baseline): tested, but no production code calls it -- wire it, or delete it with its test",
+  "where": "utils/pixel_size.py:393"
+ }
+}

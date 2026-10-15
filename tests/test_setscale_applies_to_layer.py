@@ -33,8 +33,11 @@ class _FakeScaleBar:
 
 class _FakeViewer:
     def __init__(self, layers):
+        from types import SimpleNamespace
         self.layers = layers
         self.scale_bar = _FakeScaleBar()
+        # napari >= 0.9 location (the top-level name is deprecated; PyCAT reads this one since 1.7.005)
+        self.canvas = SimpleNamespace(overlays=SimpleNamespace(scale_bar=self.scale_bar))
 
 
 def test_enable_auto_scale_bar_applies_repo_pixel_size_to_layer():

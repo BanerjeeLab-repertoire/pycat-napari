@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pycat-napari"
-version = "1.7.003"
+version = "1.7.005"
 description = "Python Condensate Analysis Toolbox - A napari-based tool for biomolecular condensate analysis"
 readme = "README.md"
 # 3.13 is BLOCKED UPSTREAM, not by PyCAT's own code (which compiles and passes core on 3.13).
@@ -61,19 +61,25 @@ dependencies = [
     # FORMAT**, so the ones PyCAT actually opens are listed here, not left to chance.
     #
     # ``bioio-czi`` is **not optional**: Zeiss market share makes CZI non-negotiable.
-    "bioio>=1.0",
-    "bioio-ome-tiff",
-    "bioio-tifffile",
-    "bioio-czi",
+    # Tested floors AND ceilings (1.7.005, Completion Spec D4). The 1.x reader plugins declare only
+    # ``bioio-base>=1.4`` while bioio 3.x pulls bioio-base 3.x, so pip pairs them unbounded; this exact pairing
+    # (bioio 3.5.1 / base 3.5.0 / ome-tiff 1.4.0 / tifffile 1.3.1 / imageio 1.3.0 / czi 3.0.0) was verified by
+    # reading real files through every plugin (tests/test_bioio_plugin_pairing.py). A new major is untested.
+    "bioio>=3.5,<4",
+    "bioio-ome-tiff>=1.4,<2",
+    "bioio-tifffile>=1.3,<2",
+    "bioio-czi>=3.0,<4",
     # ``bioio-imageio`` reads PNG/JPG/BMP. **Not optional**: PyCAT's OWN save path writes PNGs
     # (Cellpose masks, overlay exports), so reopening what PyCAT saved REQUIRES this reader. The
     # bioio migration silently dropped PNG support that aicsimageio had natively — without this
     # declared, a fresh install cannot reopen a saved mask ("bioio has no reader installed for
     # .png files"). See the bioio plugin registry: bioio-imageio → .jpg, .png.
-    "bioio-imageio",
+    "bioio-imageio>=1.3,<2",
     "cellpose<4",
     "matplotlib",
-    "napari",
+    # napari 0.10 removes what PyCAT still reads through deprecated names (viewer.scale_bar.unit, window.qt_viewer);
+    # the ceiling holds until those are migrated (Completion Spec D, "Watch").
+    "napari>=0.9.1,<0.10",
     # ── numpy is UNPINNED at the top ────────────────────────────────────────────────
     #
     # ``numpy<2.0`` existed to satisfy **aicsimageio**, which is now gone. PyCAT's own code was
@@ -343,6 +349,7 @@ markers = [
     "slow: long-running; run deliberately, not on every push.",
     "gpu: requires a CUDA GPU (cupy / torch-cuda).",
     "benchmark: standing per-release validation suite; run deliberately, not on every commit (see benchmarks/).",
+    "realdata: runs the pipelines on the real-data corpus (tests/data/registry.txt); skipped when the corpus is absent. Scheduled, not per-commit.",
 ]
 
 [tool.black]

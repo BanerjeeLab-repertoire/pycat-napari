@@ -55,11 +55,18 @@ def test_in_vitro_with_dark_reference_is_the_true_kp(_silence):
     img, dark = _scene()
     r = it.partition_coefficient_local(img, _labels(), sample_type='in_vitro', dark_reference=dark)
 
-    assert r['partition_coefficient'] == pytest.approx(29.607976023896516, rel=_REL)
+    # RE-PINNED (Completion Spec A2c): this float image used to be "saturated" at its own brightest pixel, so
+    # droplet 3 -- which holds that pixel -- was dropped (Kp 29.607976, 1 saturated droplet). A float image has no
+    # inferable ceiling; all four droplets now count. Stating that ceiling explicitly reproduces the old pin.
+    assert r['partition_coefficient'] == pytest.approx(29.629793165707888, rel=_REL)
     assert r['floor_source'] == 'dark_reference' and r['is_true_kp'] is True
     assert r['camera_floor'] == pytest.approx(499.97701139195584, rel=_REL)
     assert r['contrast'] == pytest.approx(2861.47316796443, rel=_REL)
-    assert r['n_saturated_droplets'] == 1 and len(r['per_droplet_df']) == 4
+    assert r['n_saturated_droplets'] == 0 and len(r['per_droplet_df']) == 4
+    capped = it.partition_coefficient_local(img, _labels(), sample_type='in_vitro', dark_reference=dark,
+                                            saturation_level=float(img.max()))
+    assert capped['partition_coefficient'] == pytest.approx(29.607976023896516, rel=_REL)
+    assert capped['n_saturated_droplets'] == 1
     row = r['per_droplet_df'].iloc[0]
     assert row['I_dense'] == pytest.approx(3461.4313355449567, rel=_REL)
     assert row['I_dilute_local'] == pytest.approx(599.905289428796, rel=_REL)
@@ -97,7 +104,8 @@ def test_allow_no_reference_returns_the_raw_ratio_labelled_not_kp(_silence):
     img, _ = _scene()
     r = it.partition_coefficient_local(img, _labels(), sample_type='cellular', allow_no_reference=True)
 
-    assert r['partition_coefficient'] == pytest.approx(5.769151108598719, rel=_REL)
+    # RE-PINNED (A2c, see above): 5.769151108598719 with droplet 3 dropped as "saturated" by its own maximum.
+    assert r['partition_coefficient'] == pytest.approx(5.769720480989561, rel=_REL)
     assert r['floor_source'] == 'none' and r['is_true_kp'] is False   # a raw ratio, NOT Kp
 
 

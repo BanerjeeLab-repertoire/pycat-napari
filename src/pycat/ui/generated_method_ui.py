@@ -23,6 +23,7 @@ from qtpy.QtWidgets import QLabel, QScrollArea, QSizePolicy, QVBoxLayout, QWidge
 
 from pycat.ui.analysis_methods_ui import AnalysisMethodsUI
 from pycat.ui.base_ui import _relax_min_widths, _apply_scroll_guard
+from pycat.navigator.parameters import flat_reviewed_parameters
 from pycat.navigator.sections import resolve_plan_sections, builder_for, placeholder_text
 from pycat.utils.general_utils import debug_log
 
@@ -37,7 +38,7 @@ class GeneratedMethodUI(AnalysisMethodsUI):
         # Spec 4 rebuilds from it. Retrofitting provenance is always worse than storing it up front.
         self._plan = plan
         self._intent = intent if intent is not None else getattr(plan, "intent", None)
-        self._review = dict(review or {})
+        self._review = flat_reviewed_parameters(review)
         self._name = name or "Generated Method"
 
     # ── Spec 1.3: seed the reviewed parameters BEFORE building ──────────────────────────────────────────

@@ -2,7 +2,7 @@
 
 The napari/Qt widget builders: the upscale-stack panel (_build_ts_upscale_check_ui / _add_ts_upscale_stack),
 the lazy preprocess-stack panel (_add_lazy_preprocess_stack), the run-analysis panel
-(_add_run_timeseries_condensate_analysis) and the condensate-fraction plot (_plot_condensate_fraction).
+(_add_run_timeseries_condensate_analysis). The condensate-fraction plot moved to plots.py (1.7.005).
 Moved VERBATIM - napari/Qt/matplotlib stay imported LAZILY inside the builders so this module still imports
 headless. They compose the workers (execution), the analysis, the correlation estimate and the preprocessing
 science from their sibling modules; the tools module re-exports the builders the UI/menu wiring calls.
@@ -13,7 +13,6 @@ from types import SimpleNamespace
 
 from typing import Optional
 import numpy as np
-import pandas as pd
 from pycat.utils.general_utils import debug_log
 from pycat.utils.notify import show_info as napari_show_info
 from pycat.utils.notify import show_warning as napari_show_warning
@@ -150,8 +149,9 @@ def _add_ts_upscale_stack(ui_instance, layout=None, separate_widget=False):
             prog.setVisible(False); run_btn.setEnabled(True)
             new_name = f"Upscaled {f}x [{name}]"
             dr = ui_instance.central_manager.active_data_class.data_repository
-            _mpx_sq = float(dr.get('microns_per_pixel_sq', 0) or 0)
-            _cl = float(np.sqrt(_mpx_sq)) if _mpx_sq > 0 else 0.0
+            from pycat.utils.pixel_size import pixel_size_um
+            _cl = pixel_size_um(dr, context='upscaled layer scale')
+            _cl = float(_cl) if np.isfinite(_cl) else 0.0
             ui_instance.viewer.add_image(
                 out, name=new_name,
                 scale=(_cl / f, _cl / f) if _cl else None)
@@ -953,8 +953,8 @@ def _ts_cond_append_ripley(ui_instance, ns, results_df, condensate_stack, data_i
                 ripleys_l, pair_correlation_function, get_puncta_centroids,
                 spatial_null_envelope)
             import skimage as _sk
-            mpx = float(data_instance.data_repository.get(
-                'microns_per_pixel_sq', 1.0) ** 0.5)
+            from pycat.utils.pixel_size import pixel_size_um_or_default
+            mpx = pixel_size_um_or_default(data_instance.data_repository, context='time-series spatial metrology')
             _mask_name = _mask_name_ref[0]
             if not _mask_name:
                 raise RuntimeError(
@@ -1046,6 +1046,8 @@ def _ts_cond_on_finished(ui_instance, ns, results_df, condensate_stack, stack_na
 
     # Store results
     data_instance = ui_instance.central_manager.active_data_class
+    from pycat.utils.entity_ref import finalize_entity_table, source_path_of   # F2: identity per cell per frame
+    results_df = finalize_entity_table(results_df, 'timeseries_condensate_analysis', source_path=source_path_of(data_instance))
     data_instance.data_repository['timeseries_condensate_df'] = results_df
 
     # Add condensate stack to viewer
@@ -1082,7 +1084,7 @@ def _ts_cond_on_finished(ui_instance, ns, results_df, condensate_stack, stack_na
     # Optional post-run Ripley's L and PCF (per cell across all frames)
     _ts_cond_append_ripley(ui_instance, ns, results_df, condensate_stack, data_instance, tables)
 
-    show_dataframes_dialog("Time-Series Condensate Analysis", tables)
+    show_dataframes_dialog("Time-Series Condensate Analysis", tables, service=getattr(ui_instance.central_manager, 'selection', None))
 
     napari_show_info(
         f"Time-Series analysis complete: {results_df['frame'].nunique()} frames, "
@@ -1093,6 +1095,7 @@ def _ts_cond_on_finished(ui_instance, ns, results_df, condensate_stack, stack_na
           "with Bayesian or greedy linking."
     )
 
+    from pycat.toolbox.timeseries.plots import _plot_condensate_fraction
     _plot_condensate_fraction(results_df)
 
 
@@ -1151,7 +1154,9 @@ def _ts_cond_run(ui_instance, ns):
 
     data_instance = ui_instance.central_manager.active_data_class
     ball_radius   = float(data_instance.data_repository.get('ball_radius', 50))
-    mpx_sq        = float(data_instance.data_repository.get('microns_per_pixel_sq', 1.0))
+    from pycat.utils.pixel_size import pixel_size_um_or_default
+    mpx_sq        = pixel_size_um_or_default(data_instance.data_repository,
+                                             context='time-series condensate analysis') ** 2
 
     # IMPORTANT: do NOT call .astype()/np.asarray() on stack_data or
     # proc_data here. If these are lazy zarr-backed _ZarrStack layers
@@ -1242,46 +1247,3 @@ def _add_run_timeseries_condensate_analysis(
     ui_instance._add_widget_to_layout_or_dock(
         ts_widget, layout, separate_widget, "Time-Series Condensate Analysis"
     )
-
-
-# ---------------------------------------------------------------------------
-# Plot helper
-# ---------------------------------------------------------------------------
-
-def _plot_condensate_fraction(results_df: pd.DataFrame):
-    """
-    Plot mean condensate fraction vs frame for each cell, with a mean ± SD
-    across all cells overlay.
-    """
-    import matplotlib.pyplot as plt
-
-    fig, ax = plt.subplots(figsize=(9, 4))
-    frames = sorted(results_df['frame'].unique())
-
-    for cell_label, cell_data in results_df.groupby('cell_label'):
-        ax.plot(
-            cell_data['frame'], cell_data['condensate_fraction'],
-            alpha=0.5, linewidth=1, label=f"Cell {cell_label}"
-        )
-
-    # Mean ± SD across cells
-    grouped = results_df.groupby('frame')['condensate_fraction']
-    means = grouped.mean().reindex(frames).values
-    stds  = grouped.std().reindex(frames).fillna(0).values
-
-    ax.plot(frames, means, 'k-', linewidth=2, label='Mean')
-    ax.fill_between(frames,
-                    np.nan_to_num(means - stds),
-                    np.nan_to_num(means + stds),
-                    alpha=0.15, color='black')
-
-    ax.set_xlabel('Frame', fontsize=12)
-    ax.set_ylabel('Condensate fraction (area/cell area)', fontsize=12)
-    ax.set_title('Condensate area fraction vs time', fontsize=13)
-    ax.legend(fontsize=8, loc='upper right')
-    ax.minorticks_on()
-    plt.tight_layout()
-    # Non-blocking show: napari's Qt event loop is already running, so a blocking
-    # plt.show() triggers "QCoreApplication::exec: The event loop is already
-    # running". block=False lets the figure display without starting a second loop.
-    plt.show(block=False)

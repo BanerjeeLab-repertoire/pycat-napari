@@ -392,32 +392,29 @@ def run_morphological_gaussian_filter(filter_size_input, viewer):
         # Raise an error if no layer is currently active
         raise ValueError("No active image layer selected")
     
-    input_dtype = str(active_layer.data.dtype)  # Store the input data type for conversion back at the end
-    # Retrieve the image data from the active layer
-    image = active_layer.data
-    # Convert the image to float32 for processing
-    img = dtype_conversion_func(image, output_bit_depth='float32')
-    
     # Determine the filter size from the user input or default to 2
     filter_size = int(filter_size_input.text()) if filter_size_input.text() else 2
-    
-    # Create a disk-shaped structural element based on the filter size
-    selem = sk.morphology.disk(filter_size)
-    
-    # Apply morphological dilation to emphasize bright structures in the image
-    img = ndi.grey_dilation(img, footprint=selem)
-    
-    # Apply morphological erosion to refine bright structures
-    img = ndi.grey_erosion(img, footprint=selem)
-
-    # Apply Gaussian smoothing to reduce noise, with the filter size influencing the smoothing extent
-    img = ndi.gaussian_filter(img, filter_size)
-
-    # Convert the processed image back to the original data type
-    image = dtype_conversion_func(img, output_bit_depth=input_dtype)
+    image = morphological_gaussian_filter(active_layer.data, filter_size)
 
     # Add the processed image as a new layer to the viewer with a descriptive name
     _add_image(image, viewer, name=f"Filtered {active_layer.name}", operation='gaussian_blur')
+
+
+def morphological_gaussian_filter(image, filter_size=2):
+    """Grey dilation then erosion with a disk of ``filter_size``, then a Gaussian of sigma ``filter_size`` --
+    the computation behind the Morphological Gaussian button, callable headlessly (batch replay)."""
+    input_dtype = str(image.dtype)  # Store the input data type for conversion back at the end
+    # Convert the image to float32 for processing
+    img = dtype_conversion_func(image, output_bit_depth='float32')
+    # Create a disk-shaped structural element based on the filter size
+    selem = sk.morphology.disk(int(filter_size))
+    # Apply morphological dilation to emphasize bright structures, then erosion to refine them
+    img = ndi.grey_dilation(img, footprint=selem)
+    img = ndi.grey_erosion(img, footprint=selem)
+    # Apply Gaussian smoothing to reduce noise, with the filter size influencing the smoothing extent
+    img = ndi.gaussian_filter(img, filter_size)
+    # Convert the processed image back to the original data type
+    return dtype_conversion_func(img, output_bit_depth=input_dtype)
 
 
 def run_clahe(clip_input, k_size_input, viewer):

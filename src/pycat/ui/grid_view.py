@@ -81,7 +81,7 @@ def _toggle_grid_view(self, *args, **kwargs):
             pass
     else:
         try:
-            self.viewer.grid.enabled = False
+            self.viewer.canvas.grid.enabled = False
         except Exception:
             pass
         # Re-insert the non-image layers removed for grid mode.
@@ -121,7 +121,7 @@ def _apply_managed_grid(self):
         return
     self._grid_applying = True
     try:
-        g = self.viewer.grid
+        g = self.viewer.canvas.grid
         # 1. Remove pure annotation/drawing layers (recorded for restore).
         if not hasattr(self, '_grid_removed_nonimage'):
             self._grid_removed_nonimage = []

@@ -1,6 +1,6 @@
 """Focus QC — edge-width / diffraction-limit focus metrics and their stack/absolute checks.
 
-Moved VERBATIM out of `data_qc_tools` (data_qc_decomposition); that module re-exports these.
+Split out of `data_qc_tools` (data_qc_decomposition); that module re-exports these.
 """
 from __future__ import annotations
 
@@ -8,10 +8,26 @@ import numpy as np
 import scipy.ndimage as ndi
 
 from pycat.utils.general_utils import debug_log
-from pycat.toolbox.data_qc._base import _to_float
+from pycat.toolbox.data_qc._base import _robust_noise_std, _to_float, _usable
+
+#: Rendered into every `how` that uses it, so the reader sees it where they read the verdict (G11).
+HEURISTIC_NOTE = (" (PyCAT-defined heuristic, no literature anchor: the edge-width estimator's conversion "
+                  "constant is 2.51 for a step and 1.65 for a blob, so absolute values carry ~1.5x uncertainty.)")
+DOG_NOTE = (" (PyCAT-defined heuristic: difference-of-Gaussians sigma 1 vs 2 px band-pass energy, a relative "
+            "sharpness comparable only within one acquisition.)")
+
+def _steepest_gradient(a):
+    """99.9th percentile of the gradient magnitude: the sharpest edge's slope, robust to a few hot pixels."""
+    gy, gx = np.gradient(a)
+    return float(np.percentile(np.sqrt(gy ** 2 + gx ** 2), 99.9))
+
 
 def edge_width_px(image):
     """The **sharpest edge in the image**, in pixels. The basis of a single-image focus verdict.
+
+    **A PyCAT-defined heuristic with no literature anchor** (G11): intensity range over the steepest gradient,
+    scaled by 1/sqrt(2*pi) to a Gaussian-edge sigma. The constant is exact for a blurred step (2.51) and wrong by
+    ~1.5x for a blob (1.65), so an absolute value is a screen; across one dataset the constant cancels.
 
     **A single image CAN be judged for focus** — via the sharpness of the edges of its objects.
     The band-pass energy that ``qc_focus`` used could not do this, because it measures GLOBAL
@@ -45,9 +61,7 @@ def edge_width_px(image):
     if not np.isfinite(contrast) or contrast <= 0:
         return float('nan')
 
-    gy, gx = np.gradient(a)
-    grad = np.sqrt(gy ** 2 + gx ** 2)
-    steepest = float(np.percentile(grad, 99.9))
+    steepest = _steepest_gradient(a)
     if steepest <= 0:
         return float('nan')
 
@@ -73,8 +87,11 @@ def diffraction_limit_px(pixel_um, na, wavelength_nm):
     cannot be narrower than the diffraction limit — so ``edge_width / diffraction_limit`` says
     how many times worse than the optics allow the image actually is, and that is a statement
     about the image alone, with no reference needed.
+
+    Abbe 1873: d = lambda / (2 NA). Every input must be finite and positive: a NaN pixel size (what
+    ``pixel_size_um()`` returns when it does not know) is refused, never turned into a NaN limit (G4).
     """
-    if not (pixel_um and na and wavelength_nm):
+    if not _usable(pixel_um, na, wavelength_nm):
         return None
     # ── Abbe d is a RESOLUTION (~a FWHM). Convert it to a SIGMA to compare like with like. ─
     #
@@ -151,8 +168,28 @@ def qc_focus(data, pixel_um=None, na=None, wavelength_nm=None):
     # times worse than the optics allow this image is. Without them, the width is still reported
     # in pixels, and it is directly COMPARABLE ACROSS A DATASET — which is how focus is most
     # often used in practice: *which of my 40 fields is the soft one?*
+    from pycat.toolbox.data_qc import thresholds as th
     width = edge_width_px(a)
     limit = diffraction_limit_px(pixel_um, na, wavelength_nm)
+
+    # ── The sharpest "edge" must be an edge, not the noise ────────────────────────────────────────────
+    #
+    # On a field with no specimen the noise gradient IS the steepest gradient, and it is sharper than any optics
+    # permit: pure N(1000, 10) noise scored "good | sharpest edge 0.7 px vs a diffraction limit of 1.2 px, 0.6x"
+    # (G8). White noise alone puts the 99.9th-percentile gradient at ~2.6 sigma; an edge that does not stand
+    # clear of that is not evidence of focus, and the check declines.
+    noise = _robust_noise_std(a)
+    noise_only = bool(np.isfinite(width) and noise > 0
+                      and _steepest_gradient(a) < th.FOCUS_EDGE_OVER_NOISE * noise)
+    refusal = dict(
+        name='Focus / sharpness', tier='core', status='na', value=None, unit='px',
+        headline='no sharp edge stands clear of the noise — cannot assess focus',
+        how=(f"Focus is judged from the sharpest object edge in the image. Here the steepest gradient is no "
+             f"steeper than detector noise alone produces (noise sigma ≈ {noise:.1f}): there is no specimen, "
+             f"or no small objects with a sharp edge, so the 'sharpest edge' would be a noise measurement."
+             + HEURISTIC_NOTE),
+        good="Image a field with specimen in it, or a sub-resolution bead.",
+        diag=dict(edge_width_px=width, noise=noise))
 
     if not np.isfinite(width):
         return dict(
@@ -162,8 +199,14 @@ def qc_focus(data, pixel_um=None, na=None, wavelength_nm=None):
                 "no measurable intensity gradient (it may be blank, or uniformly saturated).",
             good='', diag=None)
 
-    if limit:
+    if limit is not None and _usable(limit):
+        # The established "nothing small in the field" refusal (ratio > 3) keeps precedence; the noise refusal
+        # catches the opposite failure, where noise makes a blank field look sharper than the optics permit.
+        if noise_only and width / limit <= th.FOCUS_ABS_REFUSE_ABOVE:
+            return refusal
         return _qc_focus_absolute(width, limit)
+    if noise_only:
+        return refusal
 
     return dict(
         name='Focus / sharpness', tier='core', status='info', value=float(width),
@@ -172,7 +215,7 @@ def qc_focus(data, pixel_um=None, na=None, wavelength_nm=None):
         how="The sharpest edge in the image, in pixels. This is scene-independent (a sparse "
             "field and a dense one measure the same when equally focused), so it is directly "
             "COMPARABLE ACROSS A DATASET: the soft field in a folder of acquisitions will "
-            "have a visibly larger value than its neighbours.",
+            "have a visibly larger value than its neighbours." + HEURISTIC_NOTE,
         good="Supply the pixel size and the NA and this becomes an ABSOLUTE verdict — the "
              "sharpest edge is compared against the diffraction limit, which is the narrowest "
              "an edge can physically be. Otherwise, compare this number across your dataset "
@@ -188,18 +231,19 @@ def _qc_focus_stack(a):
         f = np.asarray(f, dtype=float)
         band = ndi.gaussian_filter(f, 1.0) - ndi.gaussian_filter(f, 2.0)
         return float(np.var(band))
+    from pycat.toolbox.data_qc import thresholds as th
     vals = np.array([_sharp(f) for f in a])
     med = float(np.median(vals))
     # frames well below the median sharpness are likely defocused/drifted
-    lo = vals < 0.5 * med if med > 0 else np.zeros(len(vals), bool)
-    status = 'good' if not lo.any() else ('warn' if lo.mean() < 0.15 else 'bad')
+    lo = vals < th.FOCUS_STACK_DIP_FRACTION * med if med > 0 else np.zeros(len(vals), bool)
+    status = 'good' if not lo.any() else ('warn' if lo.mean() < th.FOCUS_STACK_WARN_FRACTION else 'bad')
     return dict(
         name='Focus / sharpness', tier='core', status=status,
         value=med, unit='band-pass energy',
         headline=f"{int(lo.sum())}/{len(vals)} frames below half-median sharpness",
         how="Band-pass (difference-of-Gaussians) energy per frame. A plain "
             "Laplacian is dominated by detector noise and cannot see defocus at "
-            "all; the band-pass rejects the noise and keeps real edges.",
+            "all; the band-pass rejects the noise and keeps real edges." + DOG_NOTE,
         good="All frames near the same sharpness. Frames dipping far below "
              "the others are out of focus or drifted axially.",
         diag=dict(per_frame=vals, median=med))
@@ -212,28 +256,10 @@ def _qc_focus_absolute(width, limit):
     object there is no evidence of focus), and otherwise returns a deliberately WIDE screen for
     gross defocus (the step-vs-blob conversion constant makes an absolute ratio uncertain by
     ~1.5x; the comparative use across a dataset cancels it exactly)."""
+    from pycat.toolbox.data_qc import thresholds as th
     ratio = width / limit
 
-    # ── If NOTHING in the field is small, focus cannot be judged. Refuse. ───
-    #
-    # The measure works because a **blurry cell cannot hide a sharp punctum** — the sharpest
-    # edge present is the best available evidence of focus. **But if there is no small
-    # object at all, there is no evidence.**
-    #
-    # A brightfield field of large smooth cells (sigma ~14 px) has no sharp edge anywhere.
-    # The check reported **4.0x the diffraction limit -> "bad"** — which is *true about the
-    # image* and *wrong about the focus*: those cells genuinely have soft boundaries, and
-    # the microscope may be perfectly focused.
-    #
-    # **The check cannot distinguish "soft objects, sharp focus" from "sharp objects, soft
-    # focus" when nothing small is present.** That is a real limit and it is not fixable by
-    # a better estimator. So it is DETECTED and the check refuses, rather than reporting a
-    # confident verdict it has no basis for.
-    #
-    # (The comparative use survives this untouched: across a dataset of the same specimen
-    # the object type is constant, so a field that IS softer than its neighbours still
-    # stands out. The refusal is only of the ABSOLUTE claim.)
-    if ratio > 3.0:
+    if ratio > th.FOCUS_ABS_REFUSE_ABOVE:
         return dict(
             name='Focus / sharpness', tier='core', status='na',
             value=float(ratio), unit='x the diffraction limit',
@@ -290,7 +316,8 @@ def _qc_focus_absolute(width, limit):
     # **Reporting a screen as a screen is the honest thing. A tighter threshold here would
     # be false precision**, and it would send someone to refocus a microscope that is
     # already at the diffraction limit.
-    status = 'good' if ratio < 1.5 else ('warn' if ratio < 2.5 else 'bad')
+    status = ('good' if ratio < th.FOCUS_ABS_GOOD_RATIO else
+              ('warn' if ratio < th.FOCUS_ABS_WARN_RATIO else 'bad'))
     return dict(
         name='Focus / sharpness', tier='core', status=status,
         value=float(ratio), unit='x the diffraction limit (±~1.5x systematic)',
@@ -300,7 +327,7 @@ def _qc_focus_absolute(width, limit):
             "against the narrowest edge the optics permit (Abbe lambda/2\u00b7NA, converted "
             "from a resolution to a sigma). **The conversion constant depends on the object "
             "type** — 2.51 for a step edge, 1.65 for a Gaussian blob — so this absolute "
-            "ratio is uncertain by about 1.5x. It is a screen, not a measurement.",
+            "ratio is uncertain by about 1.5x. It is a screen, not a measurement." + HEURISTIC_NOTE,
         good="**This is a SCREEN for gross defocus, not a measurement.** Near 1x is "
              "diffraction-limited. Above ~2.5x the boundaries are soft enough "
              "that object sizes are overestimated and any edge-dependent measurement (area, "

@@ -189,8 +189,13 @@ class _LabelsMasksWidgetsMixin:
         mbm_layout.addWidget(mbm_dropdown_images) # Add the dropdown to the layout
         mbm_button = QPushButton("Measure Binary Mask") # Create a button widget
         mbm_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        mbm_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_measure_binary_mask, self.viewer, mbm_dropdown_labels, mbm_dropdown_images, self.central_manager.active_data_class))
+        def _on_mbm():
+            self.on_general_button_clicked(
+                run_measure_binary_mask, self.viewer, mbm_dropdown_labels, mbm_dropdown_images,
+                self.central_manager.active_data_class)
+            self._record('measure_binary_mask', {'mask_layer': mbm_dropdown_labels.currentText(),
+                                                 'image_layer': mbm_dropdown_images.currentText()})
+        mbm_button.clicked.connect(_on_mbm)
         mbm_layout.addWidget(mbm_button) # Add the button to the layout
         mbm_widget = QWidget()
         mbm_widget.setLayout(mbm_layout)

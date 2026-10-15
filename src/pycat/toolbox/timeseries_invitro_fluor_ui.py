@@ -22,7 +22,6 @@ records built here.
 """
 
 import numpy as np
-from pycat.utils.general_utils import remove_small_objects_compat as _remove_small_objects_compat
 
 
 from pycat.utils.general_utils import debug_log
@@ -277,52 +276,8 @@ def _tsivf_segmentation(ui, layout):
     prog, run = _run_row(form, "▶  Segment Stack")
 
     def _segment_frame_fn_factory():
-        method = method_dd.currentText()
-        nclass = classes_sp.value()
-        min_area = min_area_sp.value()
-
-        def _seg(frame, t):
-            from skimage import filters, morphology, measure
-            if method.startswith("Droplet"):
-                # Per-droplet boundaries on the RAW frame (it rescales internally; no per-frame stretch).
-                from pycat.toolbox.invitro.droplets import segment_droplets_by_peak
-                return segment_droplets_by_peak(np.asarray(frame), min_area=max(int(min_area), 1))
-            f = np.asarray(frame, dtype=np.float32)
-            mn, mx = float(f.min()), float(f.max())
-            fn = (f - mn) / (mx - mn + 1e-8) if mx > mn else f
-            if method == "Multi-Otsu":
-                try:
-                    ths = filters.threshold_multiotsu(fn, classes=nclass)
-                    binary = fn > ths[-1]      # brightest class = droplets
-                except Exception:
-                    binary = fn > filters.threshold_otsu(fn)
-            elif method == "Otsu":
-                binary = fn > filters.threshold_otsu(fn)
-            else:  # Threshold + watershed
-                th = filters.threshold_otsu(fn)
-                binary = fn > th
-                from scipy import ndimage as ndi
-                dist = ndi.distance_transform_edt(binary)
-                from skimage.feature import peak_local_max
-                coords = peak_local_max(dist, min_distance=5, labels=binary)
-                markers = np.zeros(dist.shape, dtype=np.int32)
-                for i, (yy, xx) in enumerate(coords, 1):
-                    markers[yy, xx] = i
-                from skimage.segmentation import watershed
-                lab = watershed(-dist, markers, mask=binary)
-                if min_area > 0:
-                    lab = _drop_small(lab, min_area)
-                return lab
-            b = np.asarray(binary) > 0
-            if min_area > 0:
-                b = _remove_small_objects_compat(b, int(min_area))
-            return measure.label(b).astype(np.int32)
-        return _seg
-
-    def _drop_small(lab, min_area):
-        from skimage import measure, morphology
-        keep = _remove_small_objects_compat(lab > 0, int(min_area))
-        return measure.label(keep).astype(np.int32)
+        from pycat.toolbox.timeseries_invitro_tools import make_frame_segmenter
+        return make_frame_segmenter(method_dd.currentText(), classes_sp.value(), min_area_sp.value())
 
     def _on_run():
         from pycat.toolbox.timeseries_invitro_tools import segment_stack_per_frame

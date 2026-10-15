@@ -27,7 +27,6 @@ PyCAT (Python Condensate Analysis Toolbox) is an open-source application built o
 - [License](#license)
 - [Citation](#citation)
 - [Support & Troubleshooting](#support--troubleshooting)
-  - [NumPy 2.0 Compatibility](#numpy-20-compatibility)
 - [Project Status & Roadmap](#project-status--roadmap)
 - [Acknowledgments](#acknowledgments)
 
@@ -822,10 +821,7 @@ If you use PyCAT-Napari in your research, please cite:
    - Slow processing or a spinning wheel in Windows/Mac is normal for condensate segmentation
    - Check the terminal for the progress printouts of the analysis
 
-9. **File Loading Errors (`newbyteorder` / tifffile)**
-   - See [NumPy 2.0 Compatibility](#numpy-20-compatibility) below
-
-10. **TrackMate Integration Errors**
+9. **TrackMate Integration Errors**
    - `ImportError: TrackMate bridge requires pyimagej` — install with `pip install "pycat-napari[trackmate]"`
    - Java not found — install a JDK 11+ (`mamba install openjdk=11` is the most reliable cross-platform option) and confirm it's on `PATH` with `java -version`
    - Slow or failed first run — the first TrackMate run downloads a full Fiji distribution over the network; this can take several minutes and will fail without internet access, but only needs to happen once (cached afterward)
@@ -834,49 +830,6 @@ If you use PyCAT-Napari in your research, please cite:
 If the above suggestions did not help, you can use the info below to open an issue or contact the maintainers. Modern AIs (ChatGPT, Claude, etc) are very good at troubleshooting installation issues and error messages, and may be your best option for a fast solution to any non-critical issues.
 
 ---
-
-### NumPy 2.0 Compatibility
-
-PyCAT requires `numpy<2.0` by default. If you see an error like:
-
-```
-AttributeError: `newbyteorder` was removed from the ndarray class in NumPy 2.0
-```
-
-this means your environment has NumPy 2.0 installed, which is incompatible with the version of `tifffile` that PyCAT's dependencies require.
-
-#### Option A — Use a fresh environment with NumPy 1.x (recommended)
-
-This is the simplest fix and the one we recommend for most users:
-
-```bash
-mamba create -n pycat-env python=3.12
-mamba activate pycat-env
-pip install pycat-napari
-```
-
-A fresh environment will install `numpy<2.0` automatically per PyCAT's requirements.
-
-#### Option B — Patch tifffile in your existing NumPy 2.0 environment
-
-If you specifically need NumPy 2.0 for other packages in the same environment, download [`fix_tifffile.py`](fix_tifffile.py) from the repository root and run it once:
-
-```bash
-python fix_tifffile.py
-```
-
-This patches one line in your installed `tifffile.py` to use the NumPy 2.0-compatible equivalent and saves a backup as `tifffile.py.bak`. You only need to run it once per environment; it survives PyCAT upgrades.
-
-**What the script does:** replaces `result = result.newbyteorder()` with `result = result.view(result.dtype.newbyteorder('='))` — the equivalent call that NumPy 2.0 requires.
-
-#### Option C — Downgrade NumPy manually
-
-```bash
-pip install "numpy<2.0"
-```
-
-> ⚠️ **Note:** If you have other packages that require NumPy 2.0, Option B (patching tifffile) is preferable to downgrading.
-
 
 ### Getting Help
 

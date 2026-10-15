@@ -180,6 +180,13 @@ class MeasurementDialog(QDialog):
                 for checkbox, textbox in zip(self.checkboxes, self.textboxes) if checkbox.isChecked()]
 
 
+
+def _um2_per_px_gated(data_repository):
+    """um^2 per pixel through the one pixel-size gate (Completion Spec A5) -- the 1-um/px load placeholder falls
+    back on the record, never silently."""
+    from pycat.utils.pixel_size import pixel_size_um_or_default
+    return pixel_size_um_or_default(data_repository, context='mask measurement') ** 2
+
 def measure_region_props(labeled_mask, image, selected_props, *, data_instance=None):
     """
     Measures specified properties of labeled regions within an image. It maps the selected properties
@@ -273,22 +280,7 @@ def run_measure_binary_mask(mask_layer, image_layer, data_instance):
     if mask.shape != image.shape:
         raise ValueError("Mask and image must have the same dimensions.")
 
-    # Get the properties of the labeled mask using numpy
-    properties = {
-        'Intensity_Mean': np.mean(image[mask]),
-        'Intensity_Median': np.median(image[mask]),
-        'Intensity_StdDev': np.std(image[mask]),
-        'Intensity_Min': np.min(image[mask]),
-        'Intensity_Max': np.max(image[mask]),
-        'Intensity_Total': np.sum(image[mask]),
-        'Relative Intensity': np.sum(image[mask]) / np.sum(image),
-        'Area': np.sum(mask),
-        'Micron Area': np.sum(mask) * data_instance.data_repository['microns_per_pixel_sq'],
-        'Relative Area': np.sum(mask) / mask.size
-    }
-
-    # Convert the properties to a Pandas DataFrame with a single row
-    #properties_df = pd.DataFrame(properties, index=[0]).round(4)
+    properties = binary_mask_properties(mask, image, _um2_per_px_gated(data_instance.data_repository))
 
     # Create a DataFrame for the properties and append it to the existing DataFrame
     properties_df = pd.DataFrame([properties]).round(4)
@@ -303,6 +295,28 @@ def run_measure_binary_mask(mask_layer, image_layer, data_instance):
     window_title = "Analysis Results"
     from pycat.ui.ui_utils import show_dataframes_dialog
     show_dataframes_dialog(window_title, tables_info)
+
+
+def binary_mask_properties(mask, image, um2_per_px):
+    """Whole-mask intensity and area statistics -- the Measure Binary Mask computation, callable headlessly
+    (batch replays it). ``mask`` is any array whose non-zero pixels are the object; ``um2_per_px`` the pixel area."""
+    mask = np.asarray(mask).astype(bool)
+    image = np.asarray(image)
+    if mask.shape != image.shape:
+        raise ValueError("Mask and image must have the same dimensions.")
+    inside = image[mask]
+    return {
+        'Intensity_Mean': np.mean(inside),
+        'Intensity_Median': np.median(inside),
+        'Intensity_StdDev': np.std(inside),
+        'Intensity_Min': np.min(inside),
+        'Intensity_Max': np.max(inside),
+        'Intensity_Total': np.sum(inside),
+        'Relative Intensity': np.sum(inside) / np.sum(image),
+        'Area': np.sum(mask),
+        'Micron Area': np.sum(mask) * um2_per_px,
+        'Relative Area': np.sum(mask) / mask.size,
+    }
 
 
 def run_measure_region_props(mask_layer, image_layer, data_instance):
@@ -378,4 +392,6 @@ def run_measure_region_props(mask_layer, image_layer, data_instance):
     tables_info = [("Region Properties", data_instance.data_repository['generic_df'])]
     window_title = "Analysis Results"
     from pycat.ui.ui_utils import show_dataframes_dialog
-    show_dataframes_dialog(window_title, tables_info)
+    from pycat.utils.selection_service import application_service
+    # Stamped above (finalize_entity_table), so the table brushes on identity, sort-safe (Completion Spec F1).
+    show_dataframes_dialog(window_title, tables_info, service=application_service())

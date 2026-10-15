@@ -257,6 +257,35 @@ def make_console_output_safe():
             pass    # a stream that cannot be reconfigured (already closed / not a text wrapper) is left as is
 
 
+def record_not_replayed(collected: dict, image_name: str, step_results) -> list:
+    """Add one image's skipped steps (``BatchStepResult`` status ``skipped``) to the run's ``collected``
+    ``{step: {'reason': str, 'images': [names]}}`` and return this image's skipped step names."""
+    names = []
+    for step, res in step_results or []:
+        if getattr(res, 'status', None) != 'skipped':
+            continue
+        entry = collected.setdefault(step, {'reason': (res.warnings or ('',))[0], 'images': []})
+        entry['images'].append(image_name)
+        names.append(step)
+    return names
+
+
+def _not_replayed_note(skipped) -> str:
+    return f"  ({len(skipped)} recorded step(s) NOT replayed — see below)" if skipped else ""
+
+
+def not_replayed_report(collected: dict, total: int) -> str:
+    """The run report's "steps skipped" block: every recorded step batch did not replay, why, and on how many
+    images -- so a results folder missing those outputs never reads as complete (Completion Spec E1). Empty
+    when every recorded step ran."""
+    if not collected:
+        return ''
+    lines = ['', '', f'⚠ {len(collected)} recorded step(s) were NOT replayed — their outputs are missing:']
+    for step, entry in collected.items():
+        lines.append(f"  • {step} ({len(entry['images'])}/{total} image(s)): {entry['reason'] or 'no reason given'}")
+    return '\n'.join(lines)
+
+
 class BatchWorker(QThread):
     """Executes the recorded pipeline on a list of files."""
 
@@ -358,6 +387,7 @@ class BatchWorker(QThread):
             output_dir / 'consolidated_long.csv', _condition_fields)
         _pycat_version = _batch_pycat_version()
 
+        _not_replayed = {}      # step -> {'reason', 'images'}: the run report's "steps skipped" block (E1)
         for idx, image_path in enumerate(self.files):
             if self._cancelled:
                 self.finished.emit(
@@ -398,19 +428,19 @@ class BatchWorker(QThread):
                           f"{image_path.name}: {_cexc}")
                 # A step that failed mid-file → a visible partial, not a misleading clean ✓ (run continues).
                 _fail = next((r for _, r in (_step_results or []) if r.status == 'error'), None)
+                _skipped = record_not_replayed(_not_replayed, image_path.name, _step_results)
                 if _fail is not None:
                     results.append(self._partial_step_line(image_path, _step_results))
                 elif _consolidated_ok:
-                    results.append(f"✓ {image_path.name}")
+                    results.append(f"✓ {image_path.name}{_not_replayed_note(_skipped)}")
                 else:
                     results.append(
                         f"⚠ {image_path.name}: processed, but NOT added to the consolidated table — its "
                         f"rows are MISSING from consolidated_long.csv (see terminal). The per-image output "
                         f"folder is complete.")
             except Exception as exc:  # noqa: BLE001
-                tb = traceback.format_exc()
                 results.append(f"✗ {image_path.name}: {exc}")
-                print(f"[PyCAT Batch] ERROR on {image_path.name}:\n{tb}")
+                print(f"[PyCAT Batch] ERROR on {image_path.name}:\n{traceback.format_exc()}")
 
         print(f"[PyCAT Batch] {_consolidated.summary()}")
         # A provenance sidecar (feature units/definitions + software versions) next to the CSV, so the
@@ -429,7 +459,7 @@ class BatchWorker(QThread):
             except Exception as _wexc:
                 print(f"[PyCAT Batch] sample-metadata unmatched-row check failed: {_wexc}")
 
-        summary = "\n".join(results)
+        summary = "\n".join(results) + not_replayed_report(_not_replayed, total)
         self.finished.emit(
             f"Batch complete — {total} file(s) processed.\n"
             f"Output: {output_dir}\n\n{summary}"
@@ -450,7 +480,10 @@ class BatchWorker(QThread):
             return None
         try:
             from pycat.toolbox.data_qc_tools import run_full_qc
-            ctx = {'image_qc': run_full_qc(img)}
+            # State the axis batch knows: batch opens a 3-D input only through `open_stack`, which loads the time
+            # series of an IMS/TIFF movie (z-stack replay is not implemented), so a 3-D image here is frames. An
+            # unstated axis would be refused by run_full_qc (Completion Spec G6), not guessed.
+            ctx = {'image_qc': run_full_qc(img, axis='t' if getattr(img, 'ndim', 2) == 3 else None)}
             cal = getattr(self, '_last_calibration', None)
             if cal is not None:
                 ctx['calibration'] = cal
@@ -512,7 +545,7 @@ class BatchWorker(QThread):
         # Each step's outcome as a typed BatchStepResult (typed-result-models / exception_context_classification
         # Part 3), so a failed step is a structured 'error' status the caller can surface — not just a print.
         from pycat.utils.result_models import BatchStepResult
-        from pycat.utils.errors import PyCATError
+        from pycat.utils.errors import PyCATError, StepNotImplemented
         from pycat.batch.steps._common import analysis_results_for_step
         step_results = []
         for step_entry in self.config.get("steps", []):
@@ -521,7 +554,8 @@ class BatchWorker(QThread):
             fn = self.step_registry.get(step_name)
             if fn is None:
                 print(f"[PyCAT Batch] Step '{step_name}' not registered – skipping.")
-                step_results.append((step_name, BatchStepResult(status='skipped')))
+                step_results.append((step_name, BatchStepResult(
+                    status='skipped', warnings=('not registered in this PyCAT version',))))
                 continue
             try:
                 fn(state, image_path, params, output_dir)
@@ -529,6 +563,11 @@ class BatchWorker(QThread):
                 # (typed-result-models adoption) — validated identity, not just an 'ok' status. Additive.
                 step_results.append((step_name, BatchStepResult(
                     status='ok', outputs=analysis_results_for_step(step_name, state))))
+            except StepNotImplemented as _skip:
+                # A recorded step batch cannot replay: not a failure of this image (the remaining steps still
+                # run), but its outputs are missing, so it is recorded and listed in the run report.
+                print(f"[PyCAT Batch]   NOT REPLAYED: {_skip}")
+                step_results.append((step_name, BatchStepResult(status='skipped', warnings=(_skip.reason,))))
             except Exception as _step_exc:
                 import traceback
                 print(f"[PyCAT Batch] ERROR in step '{step_name}' for "
@@ -1243,7 +1282,7 @@ def add_batch_toolbar_button(viewer, processor: BatchProcessor):
                 mm._toggle_grid_view()
             else:
                 # Fallback: plain napari grid toggle if the manager isn't reachable.
-                viewer.grid.enabled = not bool(viewer.grid.enabled)
+                viewer.canvas.grid.enabled = not bool(viewer.canvas.grid.enabled)
         except Exception as e:
             print(f"[PyCAT] Grid toggle failed: {e}")
 

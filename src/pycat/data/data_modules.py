@@ -465,9 +465,8 @@ class BaseDataClass:
             napari_show_warning("No object diameter found, using default value. Please draw a line to measure the object diameter.")
         
         # Calculate the microns per pixel
-        microns_per_pixel_sq = self.data_repository['microns_per_pixel_sq']
-        microns_per_pixel = np.sqrt(microns_per_pixel_sq)
-        round(microns_per_pixel, 2)
+        from pycat.utils.pixel_size import pixel_size_um_or_default
+        microns_per_pixel = pixel_size_um_or_default(self.data_repository, context='measured diameters')
         #key = 'ball_radius'
         #self._notify(f"Data {key} in data class has been set!")
         # Print the length of the line

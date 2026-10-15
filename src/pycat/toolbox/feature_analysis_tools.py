@@ -47,6 +47,13 @@ from pycat.toolbox.image_processing_tools import apply_rescale_intensity
 
 # Image feature functions 
 
+def _um2_per_px(data_repository):
+    """um^2 per pixel through the one pixel-size gate (Completion Spec A5). The loader's 1-um/px placeholder is
+    not a calibration: the gate falls back to it ON THE RECORD (areas then in px^2), never silently."""
+    from pycat.utils.pixel_size import pixel_size_um_or_default
+    return pixel_size_um_or_default(data_repository, context='cell / puncta areas') ** 2
+
+
 def _masked_graycomatrix(image_8bit, mask, distances, angles, levels=256):
     """A gray-level co-occurrence matrix restricted to pairs where BOTH pixels are inside ``mask`` (N6-3 fix).
 
@@ -180,12 +187,14 @@ def calculate_image_entropy(image, ball_radius, roi_mask=None):
     scaled_img = apply_rescale_intensity(img)
     image_8bit = dtype_conversion_func(scaled_img, output_bit_depth='uint8')
 
-    # Apply the mask and calculate entropies for 32-bit float image
-    masked_img, cropped_mask, _ = crop_bounding_box(img, roi_mask)
-    bit32_entropy = sk.measure.shannon_entropy(masked_img)
-    # Apply the mask and calculate entropies for 8-bit uint image
-    masked_image_8bit, _, _ = crop_bounding_box(image_8bit, roi_mask)
-    bit8_entropy = sk.measure.shannon_entropy(masked_image_8bit)
+    # Entropy over the pixels INSIDE the mask only (A3', Completion Spec). It used to run over the whole bounding-box
+    # crop with the outside zeroed, so the zeros became spurious mass in one bin and the "texture" tracked the bbox
+    # FILL fraction: for an identical within-mask intensity multiset, 8_bit_entropy fell 81.5 % from a circle (fill
+    # 0.79) to a 16:1 ellipse (fill 0.10) -- an eccentricity proxy labelled as texture. Masked, it moves 1.8 %.
+    _, cropped_mask, cropped_img = crop_bounding_box(img, roi_mask)
+    bit32_entropy = sk.measure.shannon_entropy(cropped_img[cropped_mask])
+    masked_image_8bit, _, cropped_img_8bit = crop_bounding_box(image_8bit, roi_mask)
+    bit8_entropy = sk.measure.shannon_entropy(cropped_img_8bit[cropped_mask])
 
     # Calculate mean local rank entropy with specified ball radius
     footprint = sk.morphology.disk(ball_radius)
@@ -321,15 +330,18 @@ def calculate_lbp_features(image, roi_mask=None, min_object_size=3):
 
     # Calculate LBP for the masked and cropped image
     lbp = sk.feature.local_binary_pattern(masked_image_8bit, P=8, R=min_object_size)
-    # Compute histogram of LBP values within the ROI
-    lbp_hist, _ = np.histogram(lbp[cropped_mask].ravel(), bins=np.arange(257))
-
-    # Derive statistical measures from the LBP histogram
+    # Statistics of the LBP VALUES inside the ROI, and the entropy of their NORMALISED histogram (A3'', Completion
+    # Spec). They were taken over the 256 histogram BIN COUNTS: lbp_mean was then exactly n_pixels / 256 (15.597656
+    # = 3993/256 for one cell) -- unchanged when the texture was replaced by a constant -- and lbp_std scaled with
+    # area. Two area statistics labelled as texture.
+    lbp_vals = lbp[cropped_mask].ravel()
+    lbp_hist, _ = np.histogram(lbp_vals, bins=np.arange(257))
+    lbp_p = lbp_hist / lbp_hist.sum() if lbp_hist.sum() > 0 else lbp_hist.astype(float)
+    lbp_p = lbp_p[lbp_p > 0]
     lbp_features = {
-        'lbp_mean': lbp_hist.mean(),
-        'lbp_std': lbp_hist.std(),
-        'lbp_entropy': sk.measure.shannon_entropy(lbp_hist),
-        # Additional statistical measures could be included here
+        'lbp_mean': float(lbp_vals.mean()) if lbp_vals.size else np.nan,
+        'lbp_std': float(lbp_vals.std()) if lbp_vals.size else np.nan,
+        'lbp_entropy': float(-np.sum(lbp_p * np.log2(lbp_p))) if lbp_p.size else np.nan,
     }
 
     # Convert the LBP features dictionary to a DataFrame for easier handling and integration
@@ -517,10 +529,10 @@ def cell_analysis_func(image, cell_masks, omission_mask, data_instance, progress
     df['intensity_total'] = total_intensity_list
 
     # Convert cell area to microns squared using pixel size data
-    df['cell_micron_area'] = df['area'] * data_instance.data_repository['microns_per_pixel_sq']
+    df['cell_micron_area'] = df['area'] * _um2_per_px(data_instance.data_repository)
 
     # Add resolution information for contextual understanding
-    df['image_resolution_um_per_px_sq'] = data_instance.data_repository['microns_per_pixel_sq']
+    df['image_resolution_um_per_px_sq'] = _um2_per_px(data_instance.data_repository)
 
     # Calculate SNR based on background noise and Gaussian noise estimation
     df['cell_snr'] = df['intensity_mean'] / img_bg_noise
@@ -690,7 +702,7 @@ def _store_cell_puncta_stats(data_instance, label, df, labeled_puncta, image,
     cell's ``cell_df`` row, storing the frame back. Each value is coerced NaN → 0 (an absent measurement
     is 0, not a hole a later population mean would trip on). Behaviour-preserving — lifted verbatim out of
     ``puncta_analysis_func``'s per-cell loop so the loop stays within the review-length budget."""
-    mpp = data_instance.data_repository['microns_per_pixel_sq']
+    mpp = _um2_per_px(data_instance.data_repository)
 
     puncta_total_int = (df['intensity_mean'] * df['area']).sum()
     # One row per punctum, so this equals the label max -- and stays right when shape-filtered rows
@@ -811,7 +823,7 @@ def attach_excluded_objects(df, data_instance, cell_mask, image, cell_label, pro
             continue
         rows = normalise_bbox_columns(pd.DataFrame(
             sk.measure.regionprops_table(removed, intensity_image=image, properties=properties)))
-        rows = rows.assign(**{'micron area': rows['area'] * repo['microns_per_pixel_sq'],
+        rows = rows.assign(**{'micron area': rows['area'] * _um2_per_px(repo),
                               'cell label': cell_label, 'global_punctum_label': 0,
                               'label': -np.arange(n_removed + 1, n_removed + len(rows) + 1),
                               'shape_filtered': False, 'boundary_source': source,
@@ -910,7 +922,7 @@ def puncta_analysis_func(puncta_masks, image, labeled_cells, data_instance, prog
         df['ellipticity'] = 1 - (df['axis_minor_length'] / df['axis_major_length'])
         circularity = 4 * np.pi * df['area'] / (df['perimeter']**2)
         df['circularity'] = (circularity - np.min(circularity)) / (np.max(circularity) - np.min(circularity))
-        df['micron area'] = df['area'] * data_instance.data_repository['microns_per_pixel_sq']
+        df['micron area'] = df['area'] * _um2_per_px(data_instance.data_repository)
         df['cell label'] = label
         # The global label matching global_labeled_puncta above — the key a click in the image maps through.
         df['global_punctum_label'] = df['label'] + _global
@@ -1173,9 +1185,10 @@ def mount_cellular_workspace(viewer, central_manager):
                           label_col='global_punctum_label', source_path=src, reveal='overlay')
 
     try:
-        from pycat.utils.dock_space import add_results_dock
-        dock = add_results_dock(viewer.window, ws, name='Cellular Object Results')
-        central_manager._cellular_results_dock = (dock, ws)      # keep alive; detach on close
+        from pycat.utils.dock_space import mount_results_workspace
+        # Replaces (and detaches) the previous run's workspace; detaches this one when its dock closes (F6).
+        mount_results_workspace(central_manager, '_cellular_results_dock', viewer.window, ws,
+                                name='Cellular Object Results')
     except Exception as exc:                             # broad-ok: optional_probe — no viewer window headless — the workspace is still returned
         debug_log('feature_analysis: could not dock the cellular workspace', exc)
     return ws

@@ -151,7 +151,7 @@ class BrushablePlot:
 
     def close(self):
         try:
-            self.service.unsubscribe(self.view_id)
+            self.service.unsubscribe(self.view_id, self.apply_selection)
         except Exception as exc:                         # broad-ok: ui_cleanup — teardown is best-effort; never raise on close
             debug_log('brushable_workspace: plot unsubscribe failed', exc)
         if self._cid is not None:
@@ -266,7 +266,7 @@ class BrushableImageTier:
 
     def close(self):
         try:
-            self.service.unsubscribe(self.view_id)
+            self.service.unsubscribe(self.view_id, self.apply_selection)
         except Exception as exc:                         # broad-ok: ui_cleanup — teardown is best-effort; never raise on close
             debug_log('brushable_workspace: image tier unsubscribe failed', exc)
         if self._cb is not None:
@@ -349,7 +349,7 @@ class BatchCropView:
 
     def close(self):
         try:
-            self.service.unsubscribe(self.view_id)
+            self.service.unsubscribe(self.view_id, self.apply_selection)
         except Exception as exc:                         # broad-ok: ui_cleanup — teardown is best-effort; never raise on close
             debug_log('brushable_workspace: batch crop unsubscribe failed', exc)
 

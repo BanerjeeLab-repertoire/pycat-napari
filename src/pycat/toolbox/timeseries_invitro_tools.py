@@ -42,6 +42,57 @@ from pycat.utils.tag_registry import tags_layer
 # 1. Per-frame segmentation → a labelled (T, H, W) stack
 # ─────────────────────────────────────────────────────────────────────────────
 
+def make_frame_segmenter(method='Multi-Otsu', multiotsu_classes=3, min_area_px=20):
+    """The per-frame droplet segmenter the in-vitro time-series panel offers, as ``seg(frame, t) -> labels``
+    for `segment_stack_per_frame` -- shared by the GUI (Step 3) and batch replay (1.7.004).
+
+    ``method``: 'Droplet …' (per-droplet boundaries on the raw frame, `invitro.droplets.segment_droplets_by_peak`),
+    'Multi-Otsu' (brightest of ``multiotsu_classes`` classes), 'Otsu', or anything else for Otsu + distance
+    watershed. Objects under ``min_area_px`` are dropped.
+    """
+    from pycat.utils.general_utils import remove_small_objects_compat
+
+    def _drop_small(lab):
+        from skimage import measure
+        keep = remove_small_objects_compat(lab > 0, int(min_area_px))
+        return measure.label(keep).astype(np.int32)
+
+    def _seg(frame, t):
+        from skimage import filters, measure
+        if method.startswith("Droplet"):
+            # Per-droplet boundaries on the RAW frame (it rescales internally; no per-frame stretch).
+            from pycat.toolbox.invitro.droplets import segment_droplets_by_peak
+            return segment_droplets_by_peak(np.asarray(frame), min_area=max(int(min_area_px), 1))
+        f = np.asarray(frame, dtype=np.float32)
+        mn, mx = float(f.min()), float(f.max())
+        fn = (f - mn) / (mx - mn + 1e-8) if mx > mn else f
+        if method == "Multi-Otsu":
+            try:
+                ths = filters.threshold_multiotsu(fn, classes=int(multiotsu_classes))
+                binary = fn > ths[-1]      # brightest class = droplets
+            except ValueError:             # too few distinct values for that many classes
+                binary = fn > filters.threshold_otsu(fn)
+        elif method == "Otsu":
+            binary = fn > filters.threshold_otsu(fn)
+        else:  # Threshold + watershed
+            from scipy import ndimage as ndi
+            from skimage.feature import peak_local_max
+            from skimage.segmentation import watershed
+            binary = fn > filters.threshold_otsu(fn)
+            dist = ndi.distance_transform_edt(binary)
+            coords = peak_local_max(dist, min_distance=5, labels=binary)
+            markers = np.zeros(dist.shape, dtype=np.int32)
+            for i, (yy, xx) in enumerate(coords, 1):
+                markers[yy, xx] = i
+            lab = watershed(-dist, markers, mask=binary)
+            return _drop_small(lab) if min_area_px > 0 else lab
+        b = np.asarray(binary) > 0
+        if min_area_px > 0:
+            b = remove_small_objects_compat(b, int(min_area_px))
+        return measure.label(b).astype(np.int32)
+    return _seg
+
+
 @tags_layer('ts_droplet_segment', role='labels', target='condensate', inputs=('image',),
             summary='Time-series per-frame droplet segmentation')
 def segment_stack_per_frame(
@@ -479,14 +530,24 @@ def field_trajectories(
     microns_per_pixel: float = 1.0,
     frame_interval_s: float = 1.0,
     progress_callback: Optional[Callable[[int, int], None]] = None,
+    dark_reference=None,
 ) -> pd.DataFrame:
     """Whole-field summary per frame → a time-series table.
 
     Applies the validated 2D field-summary + partition functions
     (``invitro_tools``) to each frame, producing Φ(t), partition(t), C_sat(t),
     number-density(t), mean-radius(t). One row per frame.
+
+    partition(t) is ``partition_coefficient_local`` -- each droplet against its OWN annular dilute phase, the
+    estimator the 2D panel and batch use (Completion Spec A2). It used the global field estimator, whose
+    low-percentile dilute phase is biased by the frame's noise -- so a frame-to-frame change in noise read as
+    KINETICS. In vitro the camera pedestal cannot be separated from the dilute phase by any method, so without a
+    ``dark_reference`` (scalar or image: buffer, no fluorophore, same settings) Kp(t) is NaN and the exact,
+    pedestal-free ``contrast`` (I_dense − I_dilute) carries the time course; ``c_sat_proxy`` / ``c_dense_proxy``
+    are the mean local dilute / dense intensities (raw, above ``dark_reference`` when given).
     """
-    from pycat.toolbox.invitro_tools import field_summary, partition_coefficient_field
+    from pycat.toolbox.invitro_tools import field_summary
+    from pycat.toolbox.invitro.partition import partition_coefficient_local
     from pycat.file_io.file_io import iter_frames
 
     mpp = float(microns_per_pixel) if microns_per_pixel else 1.0
@@ -510,9 +571,16 @@ def field_trajectories(
         except Exception:
             summ = {}
         try:
-            part = partition_coefficient_field(fn, lab)
-        except Exception:
+            part = partition_coefficient_local(fn, lab, sample_type='in_vitro', dark_reference=dark_reference,
+                                               notify=False)
+        except Exception as exc:     # broad-ok: batch_step — one frame's Kp failure is a NaN row, never the series
+            from pycat.utils.general_utils import report_guarantee_failure
+            report_guarantee_failure('field_trajectories: per-frame partition coefficient', exc)
             part = {}
+        pdf = part.get('per_droplet_df')
+        _dark = part.get('camera_floor', np.nan)
+        _dark = float(_dark) if _dark is not None and np.isfinite(_dark) else 0.0
+        has_rows = isinstance(pdf, pd.DataFrame) and len(pdf) > 0
         rows.append({
             'frame': int(t),
             't_s': float(t) * dt,
@@ -520,10 +588,11 @@ def field_trajectories(
             'volume_fraction': summ.get('volume_fraction', np.nan),
             'mean_radius_um': summ.get('mean_radius_um', np.nan),
             'number_density_per_um2': summ.get('number_density_per_um2', np.nan),
-            'partition_coefficient': part.get('partition_coeff',
-                                              summ.get('partition_coefficient', np.nan)),
-            'c_sat_proxy': part.get('c_sat_proxy', np.nan),
-            'c_dense_proxy': part.get('c_dense_proxy', np.nan),
+            'partition_coefficient': part.get('partition_coefficient', np.nan),
+            'kp_is_true': bool(part.get('is_true_kp', False)),
+            'contrast': part.get('contrast', np.nan),
+            'c_sat_proxy': float(pdf['I_dilute_local'].mean()) - _dark if has_rows else np.nan,
+            'c_dense_proxy': float(pdf['I_dense'].mean()) - _dark if has_rows else np.nan,
         })
         done += 1
         if progress_callback is not None:

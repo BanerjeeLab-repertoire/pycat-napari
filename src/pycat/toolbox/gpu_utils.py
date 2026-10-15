@@ -265,7 +265,10 @@ def gpu_wavelet_bg_and_noise(image: np.ndarray,
     Background, Noise, BG_unfiltered : np.ndarray, np.ndarray, np.ndarray
     """
     with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
+        # pywavelets' boundary-effect UserWarning and divide RuntimeWarnings -- not DeprecationWarnings, which
+        # must surface (Completion Spec D "Watch": a bare simplefilter would hide a future deprecation).
+        warnings.simplefilter("ignore", UserWarning)
+        warnings.simplefilter("ignore", RuntimeWarning)
         coeffs  = wavedecn(image, 'db1', level=None)
         coeffs2 = coeffs.copy()
 

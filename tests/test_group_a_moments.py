@@ -64,10 +64,12 @@ import pytest
 
 # ── SpIDA ─────────────────────────────────────────────────────────────────────────────────
 
-def _spida_pixels(pedestal=0.0, n_true=8.0, epsilon=25.0, n=20000, seed=0):
-    """Each pixel sees Poisson(N) molecules, each emitting Poisson(ε) photons."""
-    rng = np.random.default_rng(seed)
-    return rng.poisson(rng.poisson(n_true, n) * epsilon).astype(float) + pedestal
+def _spida_pixels(pedestal=0.0, n_true=8.0, epsilon=25.0, n=20000, seed=0, read_sigma=0.0):
+    """Each pixel sees Poisson(N) molecules, each emitting Poisson(ε) photons, plus detector read noise -- the
+    shared ``tests.synthetic.spida_field`` generator (shot noise alone hid the read-noise bias, Completion Spec A1;
+    the read-noise sweep is in ``test_science_bias_sweeps``)."""
+    from tests.synthetic import spida_field
+    return spida_field(n_true, epsilon, read_sigma=read_sigma, pedestal=pedestal, n=n, seed=seed)
 
 
 @pytest.mark.base
@@ -80,6 +82,16 @@ def test_spida_recovers_n_and_epsilon_on_a_clean_histogram():
 
     assert fit["N"] == pytest.approx(8.0, rel=0.15), f"N = {fit['N']:.2f} against a true 8"
     assert fit["epsilon"] == pytest.approx(25.0, rel=0.15)
+
+
+@pytest.mark.base
+@pytest.mark.parametrize("read_sigma", [0.0, 80.0])
+def test_spida_with_read_noise_recovers_n_and_epsilon_when_the_noise_is_declared(read_sigma):
+    spida = pytest.importorskip("pycat.toolbox.spida_tools")
+    pixels = _spida_pixels(read_sigma=read_sigma)
+    x, y = spida.build_intensity_histogram(pixels, n_bins=256, read_noise_sd=read_sigma)
+    fit = spida.fit_spida_histogram(x, y, read_noise_var=read_sigma ** 2)
+    assert fit["N"] == pytest.approx(8.0, rel=0.15) and fit["epsilon"] == pytest.approx(25.0, rel=0.15)
 
 
 @pytest.mark.base

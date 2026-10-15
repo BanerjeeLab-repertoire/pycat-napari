@@ -72,6 +72,13 @@ _THRESMAX = 7.0
 # confirming against a monomeric control.
 _SPIDA_LOW_DENSITY_N = 4.0
 
+# A1'': the pedestal gate flags (mean^2/var) x skew^2 above 1 + max(this, 3 standard errors) -- see check_assumptions.
+_PEDESTAL_MIN_EXCESS = 0.25
+_PEDESTAL_SE_MULTIPLE = 3.0
+_PEDESTAL_BOOTSTRAPS = 60
+# Above this threshold the test has too little power to rule a pedestal OUT, and says so (see check_assumptions).
+_PEDESTAL_LOW_POWER_THRESHOLD = 1.5
+
 
 def _poisson_curve(amp, mea, div, x):
     """Port of ``poisson.m``: exp(-mea) * mea^(x/div) / Gamma(x/div + 1),
@@ -152,7 +159,7 @@ def spida_model(x, amp, N, epsilon):
 # ---------------------------------------------------------------------------
 # Histogram construction + guardrails
 # ---------------------------------------------------------------------------
-def build_intensity_histogram(pixels, n_bins=256, white_noise=0.0):
+def build_intensity_histogram(pixels, n_bins=256, white_noise=0.0, read_noise_sd=0.0):
     """
     Build a SpIDA intensity histogram from a 1-D array of ROI pixel values.
 
@@ -165,6 +172,10 @@ def build_intensity_histogram(pixels, n_bins=256, white_noise=0.0):
     white_noise : float
         Background offset (camera/PMT dark level, or mean intensity of a
         cell-free region). Subtracted before histogramming.
+    read_noise_sd : float
+        Detector read-noise sd (counts). When given, pixels read-noise-smeared
+        BELOW zero are kept (they are the zero-molecule population plus noise,
+        not junk); dropping them would bias the moments the fit is seeded from.
 
     Returns
     -------
@@ -180,11 +191,17 @@ def build_intensity_histogram(pixels, n_bins=256, white_noise=0.0):
     # (P(k=0)=e^-N) — and biased the density estimate upward. Only genuinely sub-floor NEGATIVE pixels are
     # dropped; the zeros stay, so the histogram (and the moments the fit reads from it) reflect the FULL pixel
     # population.
-    p = p[p >= 0]
+    lo = 0.0
+    if read_noise_sd and read_noise_sd > 0 and p.size:
+        # Read noise smears the k=0 population symmetrically about zero; keep it (cut only far outliers).
+        lo = min(0.0, float(np.percentile(p, 0.05)))
+        p = p[p >= lo]
+    else:
+        p = p[p >= 0]
     if p.size < 100:
         return None, None
     hi = np.percentile(p, 99.9)
-    edges = np.linspace(0, hi, int(n_bins) + 1)
+    edges = np.linspace(lo, hi, int(n_bins) + 1)
     y, edges = np.histogram(p, bins=edges, density=True)
     x = 0.5 * (edges[:-1] + edges[1:])
     return x, y
@@ -263,7 +280,35 @@ def check_modality(pixels, modality='confocal'):
     return warnings
 
 
-def check_assumptions(pixels, dtype_max=None):
+def _moment_ratio(p, read_noise_var):
+    mean = float(np.mean(p))
+    d = p - mean
+    var = float(np.mean(d * d)) - read_noise_var
+    if var <= 0 or mean <= 0:
+        return float('nan')
+    skew = float(np.mean(d ** 3)) / var ** 1.5
+    return (mean * mean / var) * skew * skew if skew > 0 else float('nan')
+
+
+def _pedestal_moment_ratio(p, read_noise_sd=0.0):
+    """``(ratio, threshold)``: (mean^2 / var) x skew^2 -- ~1 for a pedestal-free compound-Poisson emitter at ANY
+    density, larger with a pedestal -- and the level above which it is flagged: 1 + max(25 %, 3 bootstrap
+    standard errors of the ratio). A seeded bootstrap (60 resamples, deterministic): the analytic skewness
+    standard error under-states this heavy-tailed statistic and let 2-4 % of clean fields through.
+    ``(nan, inf)`` when the ratio cannot be formed."""
+    p = np.asarray(p, dtype=float)
+    s2 = float(read_noise_sd or 0.0) ** 2
+    ratio = _moment_ratio(p, s2)
+    if not np.isfinite(ratio):
+        return float('nan'), float('inf')
+    rng = np.random.default_rng(0)
+    boots = [_moment_ratio(p[rng.integers(0, p.size, p.size)], s2) for _ in range(_PEDESTAL_BOOTSTRAPS)]
+    boots = np.asarray([b for b in boots if np.isfinite(b)])
+    se = float(np.std(boots)) if boots.size > 2 else float('inf')
+    return ratio, 1.0 + max(_PEDESTAL_MIN_EXCESS, _PEDESTAL_SE_MULTIPLE * se)
+
+
+def check_assumptions(pixels, dtype_max=None, read_noise_sd=0.0):
     """
     Check the acquisition assumptions SpIDA depends on and return a list of
     human-readable warning strings (empty if the data look suitable). This is the
@@ -320,34 +365,36 @@ def check_assumptions(pixels, dtype_max=None):
     # it. **The whole point of the intensity histogram is that its SHAPE encodes N and epsilon,
     # and an additive offset changes the shape.**
     #
-    # It is detectable: a genuine fluorescence histogram of a Poisson emitter extends down
-    # toward zero, because some pixels see no molecules. **A pedestal puts a hard floor under
-    # it**, and a distribution whose minimum is far above zero relative to its spread has been
-    # offset.
+    # ── How it is detected (A1'', Completion Spec) ───────────────────────────────────────────
+    #
+    # The first gate compared the histogram's 0.5th-percentile floor with its spread (`floor > 0.17 x spread`),
+    # calibrated at N = 8 only. On a PEDESTAL-FREE field floor/spread grows as sqrt(N) -- 0.12 at N = 8, 0.41 at
+    # N = 20, 1.43 at N = 100 -- so every ROI with N >~ 10 got a confident pedestal accusation it did not deserve.
+    # A shape statistic cannot fix that: a pure shift moves the floor, the mean and every percentile together.
+    #
+    # The THIRD moment can. For a compound-Poisson emitter the density read from the first two moments,
+    # mean^2 / var, and the density read from the skewness, ~1 / skew^2, agree (their product is ~1.08 at
+    # epsilon = 25, ~1 for any epsilon >> 1). A pedestal P inflates only the mean, so the product grows as
+    # ((P + N eps) / (N eps))^2 -- whatever N is. The skewness is noisy at high N (its standard error is
+    # sqrt(6/n) while the skew itself falls as 1/sqrt(N)), so the gate requires the excess to be both material
+    # (> 25 %) and > 3 bootstrap standard errors. Measured, 50 clean fields per density: 1 false flag in 250 at
+    # n = 20000 px (N = 2..300) and none in 250 at n = 5000 -- against EVERY field at N >= 20 for the old gate. A
+    # 25-count pedestal at N = 8 (N +23 %) reads 1.46 against a threshold of 1.30 and is caught.
+    #
+    # **The honest limit**: at high density the skewness carries too little signal to rule a pedestal out (N = 20
+    # with a 200-count pedestal reads 1.56 against 1.80). Where the test has no power the warning says the pedestal
+    # CANNOT BE RULED OUT -- not that one is there, and not nothing. Read noise adds variance but no third moment, so it is removed from the variance
+    # first (``read_noise_sd``) -- uncorrected it LOWERS the ratio (a missed pedestal, never a false one).
     if p.size > 100:
         _lo = float(np.percentile(p, 0.5))
         _spread = float(np.percentile(p, 99.5) - _lo)
-        # ── The threshold is set by the DAMAGE, not by eye ───────────────────────
-        #
-        # A first version used 0.5, and it **missed a pedestal of 50 counts that already
-        # inflates N by 51 %.** Calibrated against the actual error:
-        #
-        #     pedestal    floor/spread    N error
-        #     0           0.120           -3 %       (clean)
-        #     10          0.148           +7 %
-        #     25          **0.189**       **+23 %**  <- unacceptable
-        #     50          0.257           +51 %
-        #     200         0.667           +287 %
-        #
-        # The error passes ~15 % between floor/spread 0.148 and 0.189, so the gate sits at
-        # **0.17**. Note the clean case is already at 0.120 — **the margin is thin**, which is
-        # itself the finding: SpIDA has very little tolerance for an offset, and a user on a
-        # camera with any meaningful pedestal must subtract it.
-        if _spread > 0 and _lo > 0.17 * _spread:
+        _excess, _threshold = _pedestal_moment_ratio(p, read_noise_sd)
+        if _spread > 0 and _excess > _threshold:
             warnings.append(
-                f"**The intensity histogram has a hard floor at {_lo:.0f} counts** — about "
-                f"{_lo / _spread:.0%} of its own spread above zero. That is the signature of a "
-                f"CAMERA PEDESTAL, and SpIDA cannot tolerate one.\n\n"
+                f"**This histogram carries a CAMERA PEDESTAL** — its mean is offset from its shape: "
+                f"the density implied by the mean and variance is {_excess:.2f}x the density implied "
+                f"by the skewness (a pedestal-free emitter gives ~1; flagged above {_threshold:.2f}), "
+                f"and its floor sits at {_lo:.0f} counts. SpIDA cannot tolerate a pedestal.\n\n"
                 f"SpIDA reads N and epsilon from the SHAPE of the histogram, and an additive "
                 f"offset changes the shape. Measured with a true N of 8: a pedestal of 200 "
                 f"counts fits **N = 31 (+287%)**, and 800 counts fits **N = 196 (+2347%)** — "
@@ -358,13 +405,19 @@ def check_assumptions(pixels, dtype_max=None):
                 f"adds to the mean but not the variance, so every moment-based estimator of "
                 f"molecular number is corrupted by it.**")
 
+        elif _spread > 0 and _threshold > _PEDESTAL_LOW_POWER_THRESHOLD:
+            warnings.append(
+                "A camera pedestal CANNOT BE RULED OUT for this ROI: at this density the histogram's shape is "
+                "almost insensitive to an additive offset, so the check has no power here (it is not saying one "
+                "is present). A pedestal still inflates N -- subtract the detector's dark level (the "
+                "white-noise background) if it has one.")
     return warnings
 
 
 # ---------------------------------------------------------------------------
 # The fit (port of fit_SpIDA_histo.m initialisation + bounds)
 # ---------------------------------------------------------------------------
-def fit_spida_histogram(x, y):
+def fit_spida_histogram(x, y, read_noise_var=0.0):
     """
     Fit the single-population SpIDA model to a histogram (x, y).
 
@@ -372,29 +425,44 @@ def fit_spida_histogram(x, y):
     N0 = mean^2/var (moment estimators), which is what makes the fit converge
     reliably.
 
+    ``read_noise_var`` is the detector read-noise VARIANCE (counts^2). Read noise adds variance without adding
+    signal, so uncorrected it inflates epsilon and deflates N: ``eps_hat = eps + s^2/(eps N)`` (A1, Completion
+    Spec -- at N = 8, eps = 25 a read sd of 80 gave N = 3.98 (-50 %) and eps = 53 (+113 %), silently). It is
+    subtracted from the moment estimators and convolved into the fitted model. When the histogram variance does
+    not exceed it, nothing can be measured and the fit REFUSES (``success`` False, NaN, ``reason``).
+
     Returns
     -------
-    dict with keys: 'N', 'epsilon', 'amp', 'success', 'y_fit', and 'r_squared'.
+    dict with keys: 'N', 'epsilon', 'amp', 'success', 'y_fit', 'r_squared',
+    'low_density_regime', 'read_noise_corrected' (and 'reason' on a refusal).
     """
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
     if x.size < 5 or np.sum(y) <= 0:
         return {'success': False}
 
+    s2 = float(read_noise_var or 0.0)
     mea = np.sum(x * y) / np.sum(y)
     var = np.sum(y * (x - mea) ** 2) / np.sum(y)
     if mea <= 0 or var <= 0:
         return {'success': False}
-    div = var / mea            # estimates epsilon
+    var_c = var - s2
+    if var_c <= 0:
+        return {'success': False, 'N': float('nan'), 'epsilon': float('nan'),
+                'reason': (f'the histogram variance ({var:.4g}) does not exceed the detector read-noise variance '
+                           f'({s2:.4g}): no molecular signal is resolvable above the read noise, so N and epsilon '
+                           f'cannot be measured')}
+    div = var_c / mea          # estimates epsilon
     x0 = mea / div             # estimates N  (= mea^2/var)
     amp = np.max(y)
     y_n = y / amp
 
+    model = spida_model if s2 <= 0 else _read_noise_model(x, s2)
     p0 = [1.0, x0, 1.2 * div]
     lb = [0.0, 0.0, 0.0]
     ub = [np.inf, np.inf, np.inf]
     try:
-        popt, _ = curve_fit(spida_model, x, y_n, p0=p0, bounds=(lb, ub),
+        popt, _ = curve_fit(model, x, y_n, p0=p0, bounds=(lb, ub),
                             maxfev=8000)
     except Exception as e:
         napari_show_warning(f"SpIDA fit did not converge: {e}")
@@ -406,10 +474,13 @@ def fit_spida_histogram(x, y):
     # zero-intensity bin at low density and badly under-estimate N (e.g. 0.6 against a true 2). So when the fit
     # has clearly collapsed below the moment anchor, report the moment estimate instead — the fit still governs
     # the peak-brightness shape at the densities where it is well-behaved.
+    # With read noise the convolved fit is well-conditioned only where molecules dominate the noise; where it
+    # wanders more than 20 % off the (unbiased, noise-corrected) moment anchor, the anchor is reported (measured:
+    # at N = 2 the fit gave 1.51 / 1.62 at read sd 40 / 80 against moments 1.97 / 2.05 and a true 2).
     N_fit, eps_fit = popt[1], popt[2]
-    if N_fit < 0.5 * x0:
+    if N_fit < 0.5 * x0 or (s2 > 0 and abs(N_fit / x0 - 1.0) > 0.2):
         N_fit, eps_fit = x0, div
-    y_fit = spida_model(x, popt[0], N_fit, eps_fit) * amp
+    y_fit = model(x, popt[0], N_fit, eps_fit) * amp
     # Align peaks before computing R^2: the model is peak-normalised internally,
     # so scale it to the data's peak to get a meaningful goodness-of-fit on the
     # histogram's own scale.
@@ -433,14 +504,32 @@ def fit_spida_histogram(x, y):
         # flagged as inherently higher-variance, worth confirming against a monomeric control, not as a wrong
         # number to distrust.
         'low_density_regime': bool(N < _SPIDA_LOW_DENSITY_N),
+        'read_noise_corrected': bool(s2 > 0),
     }
+
+
+def _read_noise_model(x, read_noise_var):
+    """The SpIDA model convolved with Gaussian read noise of variance ``read_noise_var`` (on the histogram grid
+    ``x``), peak-normalised like ``spida_model``. The noise-free model is zero below zero intensity."""
+    from scipy.ndimage import gaussian_filter1d
+    x = np.asarray(x, dtype=float)
+    bw = float(x[1] - x[0]) if x.size > 1 else 1.0
+    sigma_bins = float(np.sqrt(read_noise_var)) / bw
+
+    def model(xx, amp, N, epsilon):
+        m = spida_model(xx, 1.0, N, epsilon)
+        m[np.asarray(xx) < 0] = 0.0
+        m = gaussian_filter1d(m, sigma_bins, mode='constant')
+        mx = np.max(m)
+        return abs(amp) * m / mx if mx > 0 else m
+    return model
 
 
 # ---------------------------------------------------------------------------
 # Top-level runners wired to the UI
 # ---------------------------------------------------------------------------
 def run_spida_calibration(image_layer, roi_shapes_layer, n_bins, white_noise,
-                          viewer, modality='confocal'):
+                          viewer, modality='confocal', read_noise_sd=0.0):
     """
     Measure the **monomeric quantal brightness epsilon_0** from a control ROI
     (a region known to contain monomers, e.g. a monomeric-GFP control). The
@@ -454,15 +543,18 @@ def run_spida_calibration(image_layer, roi_shapes_layer, n_bins, white_noise,
 
     for w in check_modality(pixels, modality):
         napari_show_warning("SpIDA calibration: " + w)
-    for w in check_assumptions(pixels, dtype_max=_dtype_max(image_layer)):
+    for w in check_assumptions(pixels, dtype_max=_dtype_max(image_layer), read_noise_sd=read_noise_sd):
         napari_show_warning("SpIDA calibration: " + w)
 
-    x, y = build_intensity_histogram(pixels, n_bins=n_bins, white_noise=white_noise)
+    x, y = build_intensity_histogram(pixels, n_bins=n_bins, white_noise=white_noise,
+                                     read_noise_sd=read_noise_sd)
     if x is None:
         napari_show_warning("SpIDA calibration: not enough valid pixels in ROI.")
         return
-    res = fit_spida_histogram(x, y)
+    res = fit_spida_histogram(x, y, read_noise_var=float(read_noise_sd or 0.0) ** 2)
     if not res.get('success'):
+        if res.get('reason'):
+            napari_show_warning('SpIDA: ' + res['reason'])
         return
     eps0 = res['epsilon']
     viewer.metadata['spida_epsilon0'] = float(eps0)
@@ -473,7 +565,7 @@ def run_spida_calibration(image_layer, roi_shapes_layer, n_bins, white_noise,
 
 
 def run_spida_analysis(image_layer, roi_shapes_layer, n_bins, white_noise,
-                       epsilon0, viewer, modality='confocal'):
+                       epsilon0, viewer, modality='confocal', read_noise_sd=0.0):
     """
     Run SpIDA on an ROI: fit density N and quantal brightness epsilon, and — if a
     monomeric reference epsilon_0 is available (passed in or from a prior
@@ -489,16 +581,19 @@ def run_spida_analysis(image_layer, roi_shapes_layer, n_bins, white_noise,
     modality_issues = check_modality(pixels, modality)
     for w in modality_issues:
         napari_show_warning("SpIDA: " + w)
-    issues = check_assumptions(pixels, dtype_max=_dtype_max(image_layer))
+    issues = check_assumptions(pixels, dtype_max=_dtype_max(image_layer), read_noise_sd=read_noise_sd)
     for w in issues:
         napari_show_warning("SpIDA: " + w)
 
-    x, y = build_intensity_histogram(pixels, n_bins=n_bins, white_noise=white_noise)
+    x, y = build_intensity_histogram(pixels, n_bins=n_bins, white_noise=white_noise,
+                                     read_noise_sd=read_noise_sd)
     if x is None:
         napari_show_warning("SpIDA: not enough valid pixels in ROI.")
         return
-    res = fit_spida_histogram(x, y)
+    res = fit_spida_histogram(x, y, read_noise_var=float(read_noise_sd or 0.0) ** 2)
     if not res.get('success'):
+        if res.get('reason'):
+            napari_show_warning('SpIDA: ' + res['reason'])
         return
 
     N = res['N']
@@ -526,10 +621,18 @@ def run_spida_analysis(image_layer, roi_shapes_layer, n_bins, white_noise,
         lines.append("NOTE: R^2 is low — the single-population model may not fit "
                      "this ROI well (mixed oligomers or heterogeneity).")
     if res.get('low_density_regime'):
-        lines.append(f"NOTE: LOW DENSITY (N = {N:.1f}). Below ~{_SPIDA_LOW_DENSITY_N:.0f} particles/beam there "
-                     "are few molecules per beam-area, so the estimate has inherently higher variance — worth "
-                     "confirming against a monomeric control. (The old low-density truncation bias is fixed: the "
-                     "zero-molecule pixels are now kept and the density comes from the unbiased moment anchor.)")
+        # Do NOT assert a cause this has not tested (A1). A low fitted N is what a genuinely sparse ROI gives -- and
+        # ALSO what unsubtracted detector READ NOISE gives (it inflates the variance, so epsilon rises and N falls:
+        # a read sd of 80 turned a true N of 8 into 3.98).
+        lines.append(f"NOTE: LOW FITTED DENSITY (N = {N:.1f}, below ~{_SPIDA_LOW_DENSITY_N:.0f} particles/beam). "
+                     + ("Read noise was corrected for, so this is either a genuinely sparse region (few molecules "
+                        "per beam-area: higher variance, confirm against a monomeric control) or a mis-entered "
+                        "read noise."
+                        if res.get('read_noise_corrected') else
+                        "Two different causes give this, and the fit cannot tell them apart: a genuinely sparse "
+                        "region, or detector READ NOISE that was not entered (it adds variance, so epsilon is "
+                        "over- and N under-estimated). Enter the detector read-noise sd and re-run before "
+                        "interpreting it."))
     if modality_issues:
         lines.append("NOTE: modality warnings were raised above — if this is not "
                      "confocal/optically-sectioned data, the numbers are not "

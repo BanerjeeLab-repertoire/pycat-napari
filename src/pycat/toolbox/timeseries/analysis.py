@@ -48,9 +48,9 @@ def _init_worker_threads():
         cv2.setNumThreads(0)          # 0 = disable OpenCV's internal pool
     except Exception:
         pass
+    import sys      # torch only if already loaded: importing it cost ~0.47 GB per worker, unused (1.7.004)
     try:
-        import torch
-        torch.set_num_threads(1)
+        sys.modules['torch'].set_num_threads(1)
     except Exception:
         pass
 
@@ -66,7 +66,7 @@ def _phase_shift(frame: np.ndarray, reference: np.ndarray) -> tuple[int, int]:
     """
     from skimage.registration import phase_cross_correlation
     with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
+        warnings.simplefilter("ignore", RuntimeWarning); warnings.simplefilter("ignore", UserWarning)
         shift, _, _ = phase_cross_correlation(reference, frame, normalization=None)
     return int(round(shift[0])), int(round(shift[1]))
 
@@ -180,7 +180,7 @@ def _ts_analyze_frame_worker(args):
     if use_drift_correction and t != reference_frame:
         from skimage.registration import phase_cross_correlation
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
+            warnings.simplefilter("ignore", RuntimeWarning); warnings.simplefilter("ignore", UserWarning)
             shift, _, _ = phase_cross_correlation(
                 reference_raw, frame_raw, normalization=None)
         dr, dc = int(round(shift[0])), int(round(shift[1]))

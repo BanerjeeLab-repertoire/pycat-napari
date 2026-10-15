@@ -180,7 +180,7 @@ class PyQtGraphScatterView:
         except Exception:
             pass
         try:
-            self.service.unsubscribe(self.view_id)
+            self.service.unsubscribe(self.view_id, self.apply_selection)
         except Exception:
             pass
 

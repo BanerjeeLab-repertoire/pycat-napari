@@ -300,15 +300,6 @@ class FileIOClass(_LoadingMixin, _SessionActionsMixin, _DialogsMixin, _ProgressM
                 lambda e: self._align_layer_scales())
         except Exception:
             pass
-        # Update the scale bar whenever the active layer selection changes.
-        # This ensures that switching to an upscaled layer (whose scale is
-        # source_scale / 2) shows the correct physical bar length, rather than
-        # remaining frozen at the value set when the original was loaded.
-        try:
-            self.viewer.layers.selection.events.changed.connect(
-                lambda e: self._update_scale_bar_for_active_layer())
-        except Exception:
-            pass
 
     def _align_layer_scales(self):
         from pycat.file_io.napari_adapter import _align_layer_scales
@@ -387,33 +378,13 @@ class FileIOClass(_LoadingMixin, _SessionActionsMixin, _DialogsMixin, _ProgressM
             # identity + the reader object; the metadata-repository updates, the
             # user-facing fallback warning, and napari construction stay here.
             from pycat.file_io.readers.image_reader_2d import read_2d_image_channels
-            _channels, _channel_info, image, _used_pil = read_2d_image_channels(file_path)
+            _channels, _channel_info, image = read_2d_image_channels(file_path)
 
             # Enrich naming from a companion sidecar (an ISS _fbs.xml names Ch1/Ch2 from their emission
             # filters, so they never fall to 'Brightfield'), then apply any identity the user remembered for
             # this acquisition layout. Non-gating: on any failure the channels load with what the reader found.
             from pycat.file_io.load_channel_identity import resolve_channel_identity_on_load
             _channel_info = resolve_channel_identity_on_load(file_path, _channel_info)
-
-            if _used_pil:
-                # PIL NumPy-2.0 fallback path: reader already produced the channel
-                # tuples; emit the same user-facing warning and skip the structured
-                # metadata path (no reader object available).
-                if _channels:
-                    all_channels.extend(_channels)
-                    from napari.utils.notifications import show_warning as _warn
-                    _warn(
-                        f"{os.path.basename(file_path)} loaded via PIL fallback (NumPy 2.0 / tifffile conflict). "
-                        "Run 'python fix_tifffile.py' to permanently fix this."
-                    )
-                else:
-                    from napari.utils.notifications import show_warning as _warn
-                    _warn(
-                        f"Could not load {os.path.basename(file_path)}: NumPy 2.0 is incompatible with "
-                        "the installed tifffile version. Run 'python fix_tifffile.py' to fix this permanently, "
-                        "or downgrade NumPy: pip install 'numpy<2.0'"
-                    )
-                continue  # skip the structured-reader path below
 
             self.central_manager.active_data_class.update_metadata(image)
 
@@ -1003,9 +974,6 @@ class FileIOClass(_LoadingMixin, _SessionActionsMixin, _DialogsMixin, _ProgressM
         from pycat.file_io.napari_adapter import _enable_auto_scale_bar
         return _enable_auto_scale_bar(self.viewer, self.central_manager, image_layer)
 
-    def _update_scale_bar_for_active_layer(self):
-        from pycat.file_io.napari_adapter import _update_scale_bar_for_active_layer
-        return _update_scale_bar_for_active_layer(self.viewer, self.central_manager)
 
     def load_into_viewer(self, data, name, is_mask=False):
         from pycat.file_io.viewer_load import load_into_viewer

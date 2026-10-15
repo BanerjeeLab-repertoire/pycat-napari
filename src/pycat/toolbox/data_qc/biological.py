@@ -8,7 +8,10 @@ from __future__ import annotations
 from pycat.utils.general_utils import debug_log
 from pycat.toolbox.data_qc._base import _not_applicable
 
-def qc_biological_objects(object_table, labels=None, *, parent_labels=None, k=3.5):
+from pycat.toolbox.data_qc.thresholds import BIOLOGICAL_MAD_K, BIOLOGICAL_WARN_FRACTION
+
+
+def qc_biological_objects(object_table, labels=None, *, parent_labels=None, k=BIOLOGICAL_MAD_K):
     """Object-level QC as a report section — *"can I trust this OBJECT?"* beside the imaging checks.
 
     Runs ``biological_qc`` on the segmented-object table and returns one report dict per flag family,
@@ -83,7 +86,7 @@ def qc_biological_objects(object_table, labels=None, *, parent_labels=None, k=3.
         tripped = int(tripped)
         frac = tripped / n if n else 0.0
         if flag in _DEFINITIVE:
-            status = 'good' if tripped == 0 else ('warn' if frac <= 0.25 else 'bad')
+            status = 'good' if tripped == 0 else ('warn' if frac <= BIOLOGICAL_WARN_FRACTION else 'bad')
         else:
             # Observation flags never read 'bad' — they are hints; many just means a variable population.
             status = 'good' if tripped == 0 else 'warn'

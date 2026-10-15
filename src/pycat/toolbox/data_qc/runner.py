@@ -13,13 +13,27 @@ from pycat.toolbox.data_qc.illumination import qc_vignetting, qc_ghosting
 from pycat.toolbox.data_qc.aberration import qc_spherical_aberration, qc_chromatic
 from pycat.toolbox.data_qc.stability import qc_photobleaching, qc_drift, qc_vibration
 from pycat.toolbox.data_qc.biological import qc_biological_objects
+from pycat.toolbox.data_qc.schema import finalise_results
+
+#: A long time series is QC'd on this many evenly-spaced frames (memory; CHANGELOG 1.5.x). The dashboard imports
+#: it; the 1.6.350 decomposition dropped it, so every Run click died on the import (Completion Spec G1).
+QC_MAX_FRAMES = 64
+
 
 def run_full_qc(data, pixel_um=None, na=None, wavelength_nm=None, channels=None,
                 frame_interval_s=None, process_timescale_s=None, n_channels=1,
                 is_zstack=False, n_source_frames=None,
                 labels=None, modality=None, line_time_s=None,
-                object_table=None, parent_labels=None):
-    """Run every applicable metric and return an ordered list of result dicts.
+                object_table=None, parent_labels=None, axis=None):
+    """Run every applicable metric and return an ordered list of result dicts (the ``schema`` contract).
+
+    axis : what the first axis of a 3-D array IS — ``'t'`` (time series), ``'z'`` (focus series) or ``'c'``
+        (channels). ``is_zstack=True`` is the same as ``axis='z'``. **A 3-D array whose axis is not stated is
+        not assumed to be a time series** (Completion Spec G6): the checks whose meaning depends on the axis
+        (focus across planes, ghosting, drift, vibration, photobleaching, spherical aberration) are declined
+        with the reason, rather than a z-stack with zero drift being reported as "Drift bad, 101 px".
+        ``'c'`` runs the per-image checks on the first channel and compares all of them for chromatic shift.
+        A 4-D (or higher) array is refused outright: select one channel/plane series first.
 
     n_source_frames : if `data` is an evenly-spaced SUBSAMPLE of a longer time series (QC caps a long
         movie at `QC_MAX_FRAMES` to bound memory), pass the ORIGINAL frame count so the report can say
@@ -36,6 +50,16 @@ def run_full_qc(data, pixel_um=None, na=None, wavelength_nm=None, channels=None,
         enables containment. Absent → the section is simply not added (additive).
     """
     a = np.asarray(data)
+    if a.ndim not in (2, 3):
+        from pycat.utils.errors import UnsupportedFormatError
+        raise UnsupportedFormatError(
+            f"QC assesses a 2-D image or a 3-D (T, Z or C) stack; this array is {a.ndim}-D {tuple(a.shape)}. "
+            f"Select one channel / one plane series first — the axes of a {a.ndim}-D array cannot be assumed.")
+    axis = _resolve_axis(a, axis, is_zstack)
+    if axis == 'c':
+        return finalise_results(_run_channels(a, channels, pixel_um=pixel_um, na=na, wavelength_nm=wavelength_nm,
+                                              labels=labels, modality=modality, line_time_s=line_time_s,
+                                              object_table=object_table, parent_labels=parent_labels))
     is_stack = a.ndim == 3 and a.shape[0] > 1
     # ── A check that cannot apply must not RUN. It must not "pass", either. ─────
     #
@@ -65,12 +89,14 @@ def run_full_qc(data, pixel_um=None, na=None, wavelength_nm=None, channels=None,
     # the user to ignore the focus check, which is the one that matters most on a 2D image.
     #
     # **Ghosting** fires on the out-of-focus signal, which is not a double image.
-    is_zstack = bool(is_zstack)
-    is_timeseries = bool(is_stack) and not is_zstack
+    is_zstack = axis == 'z'
+    is_timeseries = axis == 't'
+    if axis == 'unknown':
+        return finalise_results(_run_unknown_axis(a))
 
     results = [
         qc_saturation(a),
-        qc_snr(a),
+        qc_snr(a, axis='z' if is_zstack else None),
         qc_vignetting(a),
     ]
 
@@ -171,4 +197,47 @@ def run_full_qc(data, pixel_um=None, na=None, wavelength_nm=None, channels=None,
                 "sampled across the whole run; the vibration check sees a lower sampling rate, so it "
                 "detects slower motion than a full-rate read would.",
             good="", diag=None))
+    return finalise_results(results)
+
+
+def _resolve_axis(a, axis, is_zstack):
+    """'2d', 't', 'z', 'c' or 'unknown' for this array."""
+    if a.ndim == 2 or a.shape[0] <= 1:
+        return '2d'
+    if is_zstack:
+        return 'z'
+    key = str(axis).lower().strip() if axis is not None else ''
+    return {'t': 't', 'time': 't', 'z': 'z', 'c': 'c', 'channel': 'c', 'channels': 'c'}.get(key, 'unknown')
+
+
+_AXIS_DEPENDENT = ('Focus / sharpness', 'Ghosting (double image)', 'Drift', 'Vibration', 'Photobleaching',
+                   'Spherical aberration')
+
+
+def _run_unknown_axis(a):
+    """A 3-D array whose first axis is not stated: the per-pixel checks run (they do not depend on what the axis
+    is); every axis-dependent check is declined with the reason (G6)."""
+    why = (f"This is a 3-D array of {a.shape[0]} planes and nothing says whether they are time points, focal "
+           "planes or channels. The answer changes what this check means — on a z-stack with ZERO drift, treating "
+           "the planes as frames reported 'Drift: bad, 101 px'; a 3-channel image reported 'Drift: bad, 45 px'. "
+           "State the axis (time / z / channels) and it will run.")
+    results = [dict(name='Stack axis', tier='core', status='na', value=float(a.shape[0]), unit='planes',
+                    headline="3-D stack of unknown axis — axis-dependent checks were NOT run",
+                    how=why, good="Pass axis='t', 'z' or 'c' (the dashboard's 'Stack axis' choice).", diag=None),
+               qc_saturation(a), qc_snr(a), qc_vignetting(a)]
+    results += [_not_applicable(name, why) for name in _AXIS_DEPENDENT]
     return results
+
+
+def _run_channels(a, channels, **kw):
+    """(C, Y, X): per-image checks on the first channel, chromatic shift across all of them."""
+    first = a[0]
+    results = [dict(name='Stack axis', tier='core', status='info', value=float(a.shape[0]), unit='channels',
+                    headline=f"{a.shape[0]} channels — per-image checks on channel 0; chromatic across all",
+                    how="The planes are channels, so drift, vibration and photobleaching do not apply, and the "
+                        "per-image checks describe the first channel.", good='', diag=None)]
+    body = run_full_qc(first, pixel_um=kw['pixel_um'], na=kw['na'], wavelength_nm=kw['wavelength_nm'],
+                       channels=list(channels) if channels is not None else list(a), n_channels=a.shape[0],
+                       labels=kw['labels'], modality=kw['modality'], line_time_s=kw['line_time_s'],
+                       object_table=kw['object_table'], parent_labels=kw['parent_labels'])
+    return results + body

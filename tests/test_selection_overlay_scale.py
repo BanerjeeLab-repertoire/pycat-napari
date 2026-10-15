@@ -56,6 +56,7 @@ class _Viewer:
         self.layers = _Layers(layers)
         self.dims = types.SimpleNamespace(ndim=ndim, current_step=(0,) * ndim, point=(0.0,) * ndim)
         self.camera = types.SimpleNamespace(center=(0.0, 0.0, 0.0))
+        self.scene = __import__('types').SimpleNamespace(camera=self.camera)   # napari >= 0.9 path
         self.layers.selection = set()
 
     def _add(self, name, data, kind, scale, translate):

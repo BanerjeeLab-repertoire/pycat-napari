@@ -402,7 +402,7 @@ def test_clean_data_of_every_type_raises_no_alarms(label):
         "2d_fluor": (_scene(), {}),
         "brightfield": (_brightfield(), {}),
         "zstack": (_zstack(), dict(is_zstack=True)),
-        "timeseries": (_stack(n=20), {}),
+        "timeseries": (_stack(n=20), dict(axis="t")),
     }[label]
 
     report = qc.run_full_qc(data, pixel_um=0.065, na=1.4, wavelength_nm=520, **kwargs)
@@ -978,7 +978,7 @@ def test_run_full_qc_notes_when_it_assessed_only_a_SAMPLE():
     qc = pytest.importorskip("pycat.toolbox.data_qc_tools")
     stack = np.random.rand(20, 32, 32).astype(np.float32)      # stands in for the sampled frames
 
-    results = qc.run_full_qc(stack, n_source_frames=600)
+    results = qc.run_full_qc(stack, n_source_frames=600, axis="t")
 
     note = next((r for r in results if r['name'] == 'Frames assessed'), None)
     assert note is not None and note['status'] == 'info'
@@ -992,10 +992,10 @@ def test_run_full_qc_adds_NO_note_when_it_read_everything():
     stack = np.random.rand(20, 32, 32).astype(np.float32)
 
     # n_source_frames == len(stack): nothing was dropped.
-    results = qc.run_full_qc(stack, n_source_frames=20)
+    results = qc.run_full_qc(stack, n_source_frames=20, axis="t")
     assert not any(r['name'] == 'Frames assessed' for r in results)
     # and the default (unknown source) adds nothing either
-    results2 = qc.run_full_qc(stack)
+    results2 = qc.run_full_qc(stack, axis="t")
     assert not any(r['name'] == 'Frames assessed' for r in results2)
 
 

@@ -512,7 +512,6 @@ def _add_bf_od_metrics(ui, layout):
     form.addRow(_bwc(run))
 
     def _on_run():
-        from pycat.toolbox.brightfield_tools import bf_condensate_metrics
         try:
             # RAW counts: bf_condensate_metrics computes optical density,
             # OD = -log10(I / I0), and a log of a ratio cannot be computed on min-max
@@ -530,7 +529,8 @@ def _add_bf_od_metrics(ui, layout):
         prog.setRange(0, 0); prog.setVisible(True); run.setEnabled(False)
 
         def _task():
-            return bf_condensate_metrics(raw, mask, cells, ui._mpx())
+            from pycat.toolbox.brightfield_pipeline import bf_od_metrics
+            return bf_od_metrics(raw, mask, cells, ui._mpx(), _source(ui))   # shared with batch replay
 
         worker = _BFWorker(_task)
         ui._bf_od_worker = worker
@@ -544,7 +544,7 @@ def _add_bf_od_metrics(ui, layout):
             })
             from pycat.ui.ui_utils import show_dataframes_dialog
             show_dataframes_dialog("BF Condensate Metrics",
-                                    [("Per-condensate OD metrics", df.round(4))])
+                                    [("Per-condensate OD metrics", df.round(4))], service=_service(ui))
             napari_show_info(
                 f"OD metrics: {len(df)} condensates — "
                 f"mean apparent OD={df['mean_od'].mean():.3f} (scattering/phase, "
@@ -570,6 +570,17 @@ def _add_bf_od_metrics(ui, layout):
 # Step 6 — Per-cell summary
 # ---------------------------------------------------------------------------
 
+def _service(ui):
+    """The application's selection bus, so a results table links to the image (Completion Spec F1)."""
+    return getattr(getattr(ui, 'central_manager', None), 'selection', None)
+
+
+def _source(ui):
+    """The open file's path, so the shared computations stamp each per-object table with its identity (F2)."""
+    from pycat.utils.entity_ref import source_path_of
+    return source_path_of(getattr(getattr(ui, 'central_manager', None), 'active_data_class', None))
+
+
 def _add_bf_per_cell_summary(ui, layout):
     grp  = QGroupBox("Step 6 — Per-Cell Summary")
     form = QFormLayout(grp)
@@ -588,7 +599,7 @@ def _add_bf_per_cell_summary(ui, layout):
     form.addRow(_bwc(run))
 
     def _on_run():
-        from pycat.toolbox.brightfield_tools import bf_per_cell_summary
+        from pycat.toolbox.brightfield_pipeline import bf_per_cell
         cond_df = ui._dr().get('bf_condensate_df')
         if cond_df is None or cond_df.empty:
             napari_show_warning("Run Step 5 (OD Metrics) first."); return
@@ -597,11 +608,11 @@ def _add_bf_per_cell_summary(ui, layout):
         except KeyError as e:
             napari_show_warning(f"Layer not found: {e}"); return
 
-        df = bf_per_cell_summary(cond_df, cells, ui._mpx())
+        df = bf_per_cell(cond_df, cells, ui._mpx(), _source(ui))      # shared with batch replay
         ui._dr()['bf_per_cell_df'] = df
         ui._record('bf_per_cell_summary', {'cell_layer': cell_dd.currentText(), 'n_cells': len(df)})
         from pycat.ui.ui_utils import show_dataframes_dialog
-        show_dataframes_dialog("BF Per-Cell Summary", [("Per-cell metrics", df.round(4))])
+        show_dataframes_dialog("BF Per-Cell Summary", [("Per-cell metrics", df.round(4))], service=_service(ui))
         napari_show_info(
             f"Per-cell summary: {len(df)} cells — "
             f"mean condensates/cell={df['n_condensates'].mean():.1f}, "

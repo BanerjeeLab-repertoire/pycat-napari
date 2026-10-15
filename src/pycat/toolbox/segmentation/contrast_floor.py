@@ -28,13 +28,17 @@ def object_local_cnr(labels, raw, cell_labels=None):
         return cnr
     occupied = labels > 0
     H, W = labels.shape
+    if cell_labels is not None:
+        cell_labels = np.asarray(cell_labels)
+        # every cell's area, counted once (not once per object: a movie has thousands of objects)
+        cell_areas = np.bincount(cell_labels.ravel())
     for lab, sl in enumerate(ndi.find_objects(labels), start=1):
         if sl is None:
             continue
         area = int((labels[sl] == lab).sum())
         if cell_labels is not None:
-            cell = int(np.bincount(np.asarray(cell_labels)[sl][labels[sl] == lab]).argmax())
-            cell_area = int((np.asarray(cell_labels) == cell).sum()) if cell else labels.size
+            cell = int(np.bincount(cell_labels[sl][labels[sl] == lab]).argmax())
+            cell_area = int(cell_areas[cell]) if cell else labels.size
         else:
             cell_area = labels.size
         erode_r, gap_r, band_r = _local_ring_radii(area, cell_area)

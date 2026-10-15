@@ -147,10 +147,10 @@ def _run_btn(form, label="▶  Run"):
     return prog, btn
 
 
-def _show(title, tables):
+def _show(title, tables, service=None):
     from pycat.ui.ui_utils import show_dataframes_dialog
     show_dataframes_dialog(title, [(k, v.round(4) if hasattr(v,'round') else v)
-                                   for k,v in tables])
+                                   for k,v in tables], service=service)
 
 
 def _ivbf_preprocessing(ui, layout):
@@ -294,6 +294,8 @@ def _ivbf_segmentation(ui, layout):
             except Exception:
                 pass    # broad-ok: optional_probe -- lineage recording is best-effort, never break the produced layer
             ui._dr()['ivbf_droplet_mask'] = labeled
+            # segment_bf_condensates drops objects under int(pi (d/2)^2) px: the size fit's detection limit (A4)
+            ui._dr()['ivbf_min_area_px'] = int(np.pi * (_mind / 2) ** 2)
             ui._record('ivbf_segmentation', {'enhanced_layer': enh_dd.currentText(),
                                               'method': _method,
                                               'texture_window': _tw, 'split': _split,
@@ -322,8 +324,6 @@ def _ivbf_od_field(ui, layout):
     form.addRow(_bwc(run))
 
     def _on_run():
-        from pycat.toolbox.brightfield_tools import bf_condensate_metrics
-        from pycat.toolbox.invitro_tools import field_summary
         try:
             # ── RAW counts, not ui._img() ────────────────────────────────────────
             #
@@ -343,25 +343,13 @@ def _ivbf_od_field(ui, layout):
                               dtype=np.float64)
             mask = np.asarray(ui.viewer.layers[mask_dd.currentText()].data)
         except KeyError as e: napari_show_warning(str(e)); return
-        mpx = ui._mpx()
-        # For in vitro BF, pass mask as both droplet and "cell" (whole field)
-        # `1 - raw` was an inverted-intensity proxy that ONLY made sense on [0, 1] data.
-        # On raw counts it is meaningless (it would be negative). Compute the real optical
-        # density instead: OD = -log10(I / I0), with I0 the transmitted background.
-        #
-        # This is not a cosmetic change. OD is what relates a brightfield image to
-        # concentration (Beer-Lambert); `1 - I` is a linear proxy that is only monotonic
-        # with OD, not proportional to it.
-        _i0 = float(np.percentile(raw[mask == 0], 90)) if (mask == 0).any() else float(raw.max())
-        od_proxy = -np.log10(np.clip(raw, 1e-6, None) / max(_i0, 1e-6))
-        summ = field_summary(mask, od_proxy, mpx)
-        per_drop = bf_condensate_metrics(raw, mask, None, mpx)
+        # OD = -log10(I / I0) on raw counts (see above); the computation is shared with batch replay.
+        from pycat.toolbox.brightfield_pipeline import ivbf_field_summary
+        from pycat.utils.entity_ref import source_path_of
+        summ, summ_df, per_drop = ivbf_field_summary(raw, mask, ui._mpx(), source_path_of(
+            getattr(getattr(ui, 'central_manager', None), 'active_data_class', None)))
         ui._dr()['ivbf_field_summary'] = summ
         ui._dr()['ivbf_droplet_df']    = per_drop
-        summ_df = pd.DataFrame([summ])
-        # The 2D-projection caveat now rides IN the table, not only the napari message (wire_orphans B2).
-        from pycat.toolbox.condensate_modes import annotate_summary_table
-        summ_df = annotate_summary_table(summ_df, mask)
         ui._record('ivbf_field_summary', {
             'raw_layer': raw_dd.currentText(), 'mask_layer': mask_dd.currentText(),
             'n_droplets': summ['n_droplets'],
@@ -369,7 +357,7 @@ def _ivbf_od_field(ui, layout):
         _show("IVBF Field Summary", [
             ("Field statistics", summ_df),
             ("Per-droplet OD metrics", per_drop),
-        ])
+        ], service=getattr(getattr(ui, 'central_manager', None), 'selection', None))
         napari_show_info(
             f"area fraction={summ['projected_area_fraction']:.3f} (2D projection, "
             f"not a volume fraction), n={summ['n_droplets']}, "
@@ -403,49 +391,31 @@ def _ivbf_size_contact(ui, layout):
     form.addRow(_bwc(run))
 
     def _on_run():
-        from pycat.toolbox.invitro_tools import (
-            fit_size_distribution, estimate_contact_angle)
+        from pycat.toolbox.brightfield_pipeline import ivbf_size_and_contact
         try:
             mask = np.asarray(ui.viewer.layers[mask_dd.currentText()].data)
         except KeyError as e: napari_show_warning(str(e)); return
-
-        mpx = ui._mpx()
-        props = sk.measure.regionprops(mask.astype(np.int32))
-        if not props:
+        size_res, size_df, ca_df = ivbf_size_and_contact(
+            mask, ui._dr().get('ivbf_source'), ui._mpx(), bins_sp.value(),
+            ui._dr().get('ivbf_min_area_px'), single_lbl_sp.value())
+        if size_res is None:
             napari_show_warning("No droplets in mask."); return
-
-        radii = np.array([np.sqrt(p.area * mpx**2 / np.pi) for p in props])
-        size_res = fit_size_distribution(radii, bins_sp.value())
         ui._dr()['ivbf_size_dist'] = size_res
-        size_df = pd.DataFrame([{k:v for k,v in size_res.items() if not hasattr(v,'__len__')}])
-
-        # Contact angle for selected or largest droplet
-        lbl_id = single_lbl_sp.value()
-        if lbl_id == 0:
-            lbl_id = max(props, key=lambda p: p.area).label
-        raw = ui._dr().get('ivbf_source')
         tables = [("Size distribution fit", size_df)]
-        if raw is not None:
-            ca_res = estimate_contact_angle(raw, mask, droplet_label=lbl_id)
-            if ca_res.get('fit_success'):
-                ca_df = pd.DataFrame([{k:v for k,v in ca_res.items()
-                                       if not hasattr(v,'__len__')}])
-                tables.append(("Contact angle", ca_df))
-                napari_show_info(
-                    f"Size: {size_res.get('preferred_model','?')}, "
-                    f"PDI={size_res.get('polydispersity_index',np.nan):.3f}. "
-                    f"Contact angle: {ca_res.get('contact_angle_deg',np.nan):.1f}°"
-                )
-            else:
-                napari_show_warning("Contact angle fit failed — check droplet boundary.")
+        summary = (f"Size: {size_res.get('preferred_model','?')}, "
+                   f"PDI={size_res.get('polydispersity_index',np.nan):.3f}")
+        if ca_df is not None:
+            tables.append(("Contact angle", ca_df))
+            napari_show_info(f"{summary}. Contact angle: {ca_df['contact_angle_deg'].iloc[0]:.1f}°")
+        elif ui._dr().get('ivbf_source') is not None:
+            napari_show_warning("Contact angle fit failed — check droplet boundary.")
         else:
-            napari_show_info(f"Size: {size_res.get('preferred_model','?')}, "
-                              f"PDI={size_res.get('polydispersity_index',np.nan):.3f}")
+            napari_show_info(summary)
 
-        ui._record('ivbf_size_distribution', {'mask_layer': mask_dd.currentText()})
+        ui._record('ivbf_size_distribution', {'mask_layer': mask_dd.currentText(), 'n_bins': bins_sp.value(),
+                                              'contact_label': single_lbl_sp.value()})
         _show("IVBF Size & Contact Angle", tables)
     run.clicked.connect(_on_run)
-    import skimage as sk
     layout.addWidget(grp)
 
 

@@ -96,7 +96,22 @@ def _fig3_generate(context):
 #: Acquisition parameters ``run_full_qc`` uses to decide which checks apply — passed through from the context
 #: when present (a check that lacks its input is reported ``na``, never guessed).
 _QC_PASSTHROUGH = ("pixel_um", "na", "wavelength_nm", "frame_interval_s", "process_timescale_s",
-                   "n_channels", "is_zstack", "n_source_frames", "modality", "line_time_s")
+                   "n_channels", "is_zstack", "n_source_frames", "modality", "line_time_s", "axis")
+#: Physical inputs passed only when finite and positive. NaN is what `pixel_size_um()` returns when it does not
+#: know, and an `is not None` filter let it through to a red verdict with NaN in the value column (G4).
+_QC_PHYSICAL = ("pixel_um", "na", "wavelength_nm", "frame_interval_s", "process_timescale_s", "line_time_s")
+
+
+def _qc_kwarg_usable(key, value):
+    if value is None:
+        return False
+    if key in _QC_PHYSICAL:
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return False
+        return v == v and v not in (float('inf'), float('-inf')) and v > 0
+    return True
 
 
 def _qc_image(context):
@@ -123,7 +138,7 @@ def _fig1_generate(context):
     import pandas as pd
     from pycat.toolbox.data_qc.runner import run_full_qc
     a = _qc_image(context)
-    kwargs = {k: context[k] for k in _QC_PASSTHROUGH if context and context.get(k) is not None}
+    kwargs = {k: context[k] for k in _QC_PASSTHROUGH if context and _qc_kwarg_usable(k, context.get(k))}
     return pd.DataFrame(run_full_qc(a, **kwargs))
 
 

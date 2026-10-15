@@ -180,7 +180,10 @@ def test_the_full_in_vitro_chain_runs_and_each_step_equals_manual():
     # INTERPRET: guided size-distribution fit == manual fit_size_distribution on the same radii
     mpx = 0.04 ** 0.5
     radii = np.array([np.sqrt(p.area * mpx ** 2 / np.pi) for p in sk.measure.regionprops(mask)])
-    manual_fit = fit_size_distribution(radii, n_bins=30)
+    # The manual fit uses the detection limit of the segmentation that produced the mask (its min_area, default 6
+    # px^2): the guided chain records it and fits left-truncated there (Completion Spec A4).
+    from pycat.toolbox.invitro_tools import detection_limit_for_radii
+    manual_fit = fit_size_distribution(radii, n_bins=30, xmin=detection_limit_for_radii(radii, 6, mpx))
     guided_fit = state["ivf_size_distribution"]
     scalar = {k: v for k, v in manual_fit.items() if not hasattr(v, "__len__")}
     assert {k: guided_fit[k] for k in scalar} == scalar                 # every scalar fit statistic matches

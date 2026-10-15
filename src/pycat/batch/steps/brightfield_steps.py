@@ -98,7 +98,8 @@ def replay_bf_condensate_analysis(state: dict, image_path: Path, params: dict, o
     # zero point and makes the OD of the darkest (strongest) condensate diverge. See invitro_bf_ui._on_run.
     raw = _raw_counts(state.get('image'))
     data_instance = state['data_instance']
-    mpx = float(np.sqrt(data_instance.data_repository.get('microns_per_pixel_sq', 1.0)))
+    from pycat.utils.pixel_size import pixel_size_um_or_default
+    mpx = pixel_size_um_or_default(data_instance.data_repository, context='batch brightfield condensates')
     df = bf_condensate_metrics(raw, np.asarray(mask), None, mpx, bg_kernel=params.get('bg_kernel', 50))
     state['bf_condensate_df'] = df
     data_instance.set_data('bf_condensate_df', df)
@@ -180,7 +181,103 @@ def replay_ivbf_segmentation(state: dict, image_path: Path, params: dict, output
     state['ivbf_droplet_mask'] = labeled
     state['cellpose_mask']     = labeled
     state['labeled_cells']     = labeled
+    # The segmentation's detection limit, as the panel stores it -- the size fit is truncated there (A4).
+    state['ivbf_min_area_px']  = int(np.pi * (float(params.get('min_d', 4.0)) / 2) ** 2)
 
     _save_array(labeled.astype(np.uint16),
                 output_dir / f"{image_path.stem}_ivbf_droplet_mask.tiff")
     print(f"[PyCAT Batch]   In vitro BF segmentation: {int(labeled.max())} droplets.")
+
+
+# ── 1.7.005: the brightfield panels' result steps (recorded, never registered -- Completion Spec E2) ─────────
+
+def _bf_mpx(state, context):
+    from pycat.utils.pixel_size import pixel_size_um_or_default
+    return pixel_size_um_or_default(state['data_instance'].data_repository, context=context)
+
+
+def _bf_source(state, image_path):
+    return state['data_instance'].data_repository.get('file_path') or str(image_path)
+
+
+def replay_bf_od_metrics(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """Per-condensate OD metrics on raw counts, with the cell each sits in when a cell mask was used."""
+    from pycat.toolbox.brightfield_pipeline import bf_od_metrics
+    mask = state.get('bf_condensate_mask')
+    if mask is None or int(np.asarray(mask).max()) == 0:
+        print(f'[PyCAT Batch]   BF OD metrics skipped for {image_path.name}: no condensate mask.')
+        return
+    cell_layer = params.get('cell_layer')
+    cells = state.get('bf_cell_mask') if cell_layer and str(cell_layer).lower() != 'none' else None
+    df = bf_od_metrics(_raw_counts(state['image']), mask, cells, _bf_mpx(state, 'batch bf_od_metrics'),
+                       _bf_source(state, image_path))
+    state['bf_condensate_df'] = df
+    state['data_instance'].set_data('bf_condensate_df', df)
+    df.to_csv(output_dir / f'{image_path.stem}_bf_condensate_df.csv', index=False)
+    print(f'[PyCAT Batch]   BF OD metrics: {len(df)} condensates.')
+
+
+def replay_bf_per_cell_summary(state: dict, image_path: Path, params: dict, output_dir: Path):
+    from pycat.toolbox.brightfield_pipeline import bf_per_cell
+    cond = state.get('bf_condensate_df')
+    cells = state.get('bf_cell_mask')
+    if cond is None or len(cond) == 0 or cells is None:
+        print(f'[PyCAT Batch]   BF per-cell summary skipped for {image_path.name}: needs OD metrics and a cell mask.')
+        return
+    df = bf_per_cell(cond, cells, _bf_mpx(state, 'batch bf_per_cell_summary'), _bf_source(state, image_path))
+    state['data_instance'].set_data('bf_per_cell_df', df)
+    df.to_csv(output_dir / f'{image_path.stem}_bf_per_cell_df.csv', index=False)
+    print(f'[PyCAT Batch]   BF per-cell summary: {len(df)} cells.')
+
+
+def replay_ivbf_field_summary(state: dict, image_path: Path, params: dict, output_dir: Path):
+    from pycat.toolbox.brightfield_pipeline import ivbf_field_summary
+    mask = state.get('ivbf_droplet_mask')
+    if mask is None:
+        print(f'[PyCAT Batch]   IVBF field summary skipped for {image_path.name}: no droplet mask.')
+        return
+    summary, summary_df, per_drop = ivbf_field_summary(
+        _raw_counts(state['image']), mask, _bf_mpx(state, 'batch ivbf_field_summary'), _bf_source(state, image_path))
+    di = state['data_instance']
+    di.set_data('ivbf_field_summary', summary)
+    di.set_data('ivbf_droplet_df', per_drop)
+    summary_df.to_csv(output_dir / f'{image_path.stem}_ivbf_field_summary.csv', index=False)
+    per_drop.to_csv(output_dir / f'{image_path.stem}_ivbf_droplet_df.csv', index=False)
+    print(f"[PyCAT Batch]   IVBF field summary: {summary.get('n_droplets', 0)} droplets.")
+
+
+def replay_ivbf_spatial_metrology(state: dict, image_path: Path, params: dict, output_dir: Path):
+    from pycat.toolbox.brightfield_pipeline import whole_field_spatial_metrics
+    from pycat.toolbox.spatial_metrology_ui import _results_to_dataframes
+    mask = state.get('ivbf_droplet_mask')
+    if mask is None:
+        print(f'[PyCAT Batch]   IVBF spatial metrology skipped for {image_path.name}: no droplet mask.')
+        return
+    results = whole_field_spatial_metrics(mask, _bf_mpx(state, 'batch ivbf_spatial_metrology'))
+    if not results:
+        print(f'[PyCAT Batch]   IVBF spatial metrology skipped for {image_path.name}: fewer than 2 droplets.')
+        return
+    for name, df in _results_to_dataframes(results).items():
+        slug = ''.join(c if c.isalnum() else '_' for c in name.lower()).strip('_')
+        df.to_csv(output_dir / f'{image_path.stem}_ivbf_spatial_{slug}.csv', index=False)
+    print('[PyCAT Batch]   IVBF spatial metrology done.')
+
+
+def replay_ivbf_size_distribution(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """Size-distribution fit (truncated at the segmentation's detection limit) + one droplet's contact angle."""
+    from pycat.toolbox.brightfield_pipeline import ivbf_size_and_contact
+    mask = state.get('ivbf_droplet_mask')
+    if mask is None:
+        print(f'[PyCAT Batch]   IVBF size distribution skipped for {image_path.name}: no droplet mask.')
+        return
+    fit, fit_df, contact = ivbf_size_and_contact(
+        mask, state.get('ivbf_source'), _bf_mpx(state, 'batch ivbf_size_distribution'),
+        int(params.get('n_bins', 30) or 30), state.get('ivbf_min_area_px'), int(params.get('contact_label', 0) or 0))
+    if fit is None:
+        print(f'[PyCAT Batch]   IVBF size distribution skipped for {image_path.name}: no droplets.')
+        return
+    state['data_instance'].set_data('ivbf_size_dist', fit)
+    fit_df.to_csv(output_dir / f'{image_path.stem}_ivbf_size_distribution.csv', index=False)
+    if contact is not None:
+        contact.to_csv(output_dir / f'{image_path.stem}_ivbf_contact_angle.csv', index=False)
+    print(f"[PyCAT Batch]   IVBF size distribution: {fit.get('preferred_model', '?')} preferred.")

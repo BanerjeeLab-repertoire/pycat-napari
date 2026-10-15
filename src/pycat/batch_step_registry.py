@@ -124,9 +124,13 @@ if TYPE_CHECKING:
 from pycat.batch.steps.io_steps import (replay_open_image, replay_open_stack, replay_save_and_clear, replay_set_frame_range, replay_auto_crop_roi)
 from pycat.batch.steps.preprocessing_steps import (replay_preprocessing, replay_upscaling, replay_calibration_correction)
 from pycat.batch.steps.segmentation_steps import (replay_cellpose_segmentation, replay_ts_cellpose_keyframe)
-from pycat.batch.steps.brightfield_steps import (replay_bf_preprocess, replay_bf_condensate_segmentation, replay_bf_condensate_analysis, replay_bf_cell_segmentation, replay_ivbf_preprocess, replay_ivbf_segmentation)
+from pycat.batch.steps.brightfield_steps import (replay_bf_preprocess, replay_bf_condensate_segmentation, replay_bf_condensate_analysis, replay_bf_cell_segmentation, replay_ivbf_preprocess, replay_ivbf_segmentation, replay_bf_od_metrics, replay_bf_per_cell_summary, replay_ivbf_field_summary, replay_ivbf_spatial_metrology, replay_ivbf_size_distribution)
 from pycat.batch.steps.invitro_steps import (replay_ivf_preprocess, replay_ivf_field_summary, replay_ivf_size_distribution, replay_ivf_spatial_metrology, replay_ivf_segmentation, replay_ivf_droplet_segment, replay_ivf_droplet_analysis, replay_client_enrichment)
 from pycat.batch.steps.vpt_steps import replay_vpt_microrheology
+from pycat.batch.steps.not_replayed import NOT_REPLAYED, _advice_only, _not_replayed  # noqa: F401  (re-exported)
+from pycat.batch.steps.fibril_steps import (replay_bilateral_filter, replay_peak_edge_enhancement, replay_morphological_gaussian, replay_local_thresholding, replay_label_binary_mask, replay_measure_binary_mask)
+from pycat.batch.steps.timeseries_cell_steps import replay_ts_cells_time_average, replay_cell_timeseries
+from pycat.batch.steps.timeseries_invitro_steps import (replay_tsivf_segment_stack, replay_tsivf_link_condensates, replay_tsivf_object_trajectories, replay_tsivf_field_trajectories, replay_tsivf_kinetics)
 from pycat.batch.steps.analysis_steps import (replay_condensate_analysis, replay_measure_line, replay_cell_analysis, replay_sacf_analysis, replay_condensate_segmentation, replay_pixel_coloc, replay_spatial_metrology, replay_dynamic_spatial, replay_msd_analysis)
 
 from pycat.batch.steps._common import _get_data, _save_array, _raw_counts, _normalize_to_float, _active_layer_channel_role  # for replay_background_removal (kept here: a source-level test pins it)
@@ -198,7 +202,6 @@ _STEP_MAP = {
     'open_stack':               replay_open_stack,    # unified IMS + TIFF stack
     'set_frame_range':          replay_set_frame_range,
     'auto_crop_roi':            replay_auto_crop_roi,
-    'lazy_preprocess_stack':    lambda s,p,pa,o: print('[PyCAT Batch]   TS preprocessing skipped in headless mode (zarr cache required).'),
     'open_ims_file':            replay_open_stack,    # legacy key — keep for old configs
     'open_image_stack':         replay_open_stack,    # legacy key — keep for old configs
     'measure_line':              replay_measure_line,
@@ -212,12 +215,15 @@ _STEP_MAP = {
     'condensate_analysis':      replay_condensate_analysis,
     'sacf_analysis':            replay_sacf_analysis,
     'ts_cellpose_keyframe':      replay_ts_cellpose_keyframe,
+    'ts_cells_time_average':     replay_ts_cells_time_average,   # 1.7.004 cellular time series
+    'cell_timeseries':           replay_cell_timeseries,
+    'tsivf_segment_stack':       replay_tsivf_segment_stack,       # in-vitro time series (1.7.004)
+    'tsivf_link_condensates':    replay_tsivf_link_condensates,
+    'tsivf_object_trajectories': replay_tsivf_object_trajectories,
+    'tsivf_field_trajectories':  replay_tsivf_field_trajectories,
+    'tsivf_kinetics':            replay_tsivf_kinetics,
     'spatial_metrology':        replay_spatial_metrology,
     'dynamic_spatial':        replay_dynamic_spatial,
-    'organizational_metrics':        lambda s,p,pa,o: print('[PyCAT Batch]   organizational_metrics skipped.'),
-    'export_timeseries_video':            lambda s,p,pa,o: print('[PyCAT Batch]   Video export skipped in headless mode.'),
-    'timeseries_condensate_analysis':     lambda s,p,pa,o: print('[PyCAT Batch]   TS condensate analysis skipped in headless mode.'),
-    'two_channel_condensate_coloc':       lambda s,p,pa,o: print('[PyCAT Batch]   Two-channel colocalization skipped in headless mode.'),
     'pixel_colocalization':       replay_pixel_coloc,
     'bf_preprocess':              replay_bf_preprocess,
     'bf_cell_segmentation':       replay_bf_cell_segmentation,
@@ -230,100 +236,27 @@ _STEP_MAP = {
     'ivf_field_summary':          replay_ivf_field_summary,
     'ivf_size_distribution':      replay_ivf_size_distribution,
     'ivf_spatial_metrology':      replay_ivf_spatial_metrology,
-    'ivf_dynamics':               lambda s,p,pa,o: print(
-        '[PyCAT Batch]   IVF dynamics skipped (time-series; not a per-image batch step).'),
-    'ivf_phase_diagram':          lambda s,p,pa,o: print(
-        '[PyCAT Batch]   IVF phase diagram skipped (dilution series; manual multi-condition input).'),
-    'ivf_frame_qc':               lambda s,p,pa,o: print(
-        '[PyCAT Batch]   IVF frame QC skipped (time-series; not a per-image batch step).'),
     'msd_analysis':               replay_msd_analysis,
     'ivbf_preprocess':            replay_ivbf_preprocess,
     'ivbf_segmentation':          replay_ivbf_segmentation,
-    'zstack_bg_removal':              lambda s,p,pa,o: print(
-        '[PyCAT Batch]   Z-stack background removal skipped in headless mode '
-        '(batch file loading only extracts single 2D planes — 3D volume batch '
-        'processing is not yet supported; run this step interactively in the '
-        'Z-Stack Condensate Analysis dock).'),
-    'zstack_cell_segmentation':       lambda s,p,pa,o: print(
-        '[PyCAT Batch]   Z-stack cell segmentation skipped in headless mode '
-        '(requires a 3D volume — not available via batch file loading).'),
-    'zstack_condensate_segmentation': lambda s,p,pa,o: print(
-        '[PyCAT Batch]   Z-stack condensate segmentation skipped in headless mode '
-        '(requires a 3D volume — not available via batch file loading).'),
-    # Interactive general-analysis steps — recorded for provenance but not
-    # replayed headlessly (they are exploratory tools that require interactive
-    # layer/ROI selection rather than a fixed automated sequence).
-    'local_thresholding':       lambda s,p,pa,o: print(
-        '[PyCAT Batch]   local_thresholding skipped in headless mode '
-        '(interactive general-analysis step).'),
-    'label_binary_mask':        lambda s,p,pa,o: print(
-        '[PyCAT Batch]   label_binary_mask skipped in headless mode '
-        '(interactive general-analysis step).'),
-    'measure_region_props':     lambda s,p,pa,o: print(
-        '[PyCAT Batch]   measure_region_props skipped in headless mode '
-        '(interactive general-analysis step).'),
-    # Video Particle Tracking — interactive microrheology; recorded for
-    # provenance but not headlessly replayed (requires interactive channel
-    # selection and produces terminal microrheology output, not stored masks).
-    'vpt_segment_host':         lambda s,p,pa,o: print(
-        '[PyCAT Batch]   VPT host segmentation skipped in headless mode '
-        '(interactive multichannel step).'),
-    'vpt_infer_host':           lambda s,p,pa,o: print(
-        '[PyCAT Batch]   VPT infer-host-from-beads skipped in headless mode '
-        '(interactive step).'),
-    'vpt_detect_beads':         lambda s,p,pa,o: print(
-        '[PyCAT Batch]   VPT bead detection skipped in headless mode.'),
-    'vpt_link_trajectories':    lambda s,p,pa,o: print(
-        '[PyCAT Batch]   VPT trajectory linking skipped in headless mode.'),
+    # The fibril chain (1.7.005): each step records the layer it ran on and replays on the same input.
+    'bilateral_filter':         replay_bilateral_filter,
+    'peak_edge_enhancement':    replay_peak_edge_enhancement,
+    'morphological_gaussian':   replay_morphological_gaussian,
+    'local_thresholding':       replay_local_thresholding,
+    'label_binary_mask':        replay_label_binary_mask,
+    'measure_binary_mask':      replay_measure_binary_mask,
     'vpt_microrheology':        replay_vpt_microrheology,
-    # FRAP — interactive ROI selection; recorded for provenance, not replayed.
-    'frap_define_roi':          lambda s,p,pa,o: print(
-        '[PyCAT Batch]   FRAP ROI definition skipped in headless mode.'),
-    'frap_analysis':            lambda s,p,pa,o: print(
-        '[PyCAT Batch]   FRAP analysis skipped in headless mode '
-        '(interactive ROI + terminal reporting step).'),
-    # Droplet Fusion — interactive fit-window selection; recorded, not replayed.
-    'fusion_build_signal':      lambda s,p,pa,o: print(
-        '[PyCAT Batch]   Fusion signal build skipped in headless mode.'),
-    'fusion_fit':               lambda s,p,pa,o: print(
-        '[PyCAT Batch]   Fusion fit skipped in headless mode '
-        '(interactive fit-window + terminal reporting step).'),
-    'spatial_randomness':       lambda s,p,pa,o: print(
-        '[PyCAT Batch]   spatial_randomness skipped in headless mode '
-        '(interactive image/ROI selection step).'),
-    # Temperature-dependent condensate — interactive sync/annotation; recorded.
-    'temperature_sync':         lambda s,p,pa,o: print(
-        '[PyCAT Batch]   Temperature sync skipped in headless mode '
-        '(interactive TIFF/CSV selection).'),
-    'temperature_turbidity':    lambda s,p,pa,o: print(
-        '[PyCAT Batch]   Temperature turbidity skipped in headless mode.'),
-    'temperature_export_video': lambda s,p,pa,o: print(
-        '[PyCAT Batch]   Temperature annotated export skipped in headless mode.'),
-    # Force-Distance curve — interactive .h5 load + channel/plot selection.
-    'fd_load':                  lambda s,p,pa,o: print(
-        '[PyCAT Batch]   FD load skipped in headless mode (interactive .h5 selection).'),
-    'fd_segment':               lambda s,p,pa,o: print(
-        '[PyCAT Batch]   FD segment skipped in headless mode.'),
-    'fd_plot':                  lambda s,p,pa,o: print(
-        '[PyCAT Batch]   FD plot skipped in headless mode.'),
-    'fd_export':                lambda s,p,pa,o: print(
-        '[PyCAT Batch]   FD export skipped in headless mode.'),
-    'fd_rips':                  lambda s,p,pa,o: print(
-        '[PyCAT Batch]   FD rip detection skipped in headless mode.'),
-    'molecular_counting':       lambda s,p,pa,o: print(
-        '[PyCAT Batch]   Molecular counting skipped in headless mode '
-        '(interactive stack/mask selection).'),
-    'gaussian_localization':    lambda s,p,pa,o: print(
-        '[PyCAT Batch]   Gaussian localization skipped in headless mode '
-        '(interactive image/points selection).'),
     'client_enrichment':        replay_client_enrichment,   # headless calibrated concentration (reliability_index roadmap)
-    'intensity_profile':        lambda s,p,pa,o: print(
-        '[PyCAT Batch]   Intensity profile skipped in headless mode '
-        '(interactive shapes/points selection).'),
-    'morphological_complexity': lambda s,p,pa,o: print(
-        '[PyCAT Batch]   Morphological complexity skipped in headless mode '
-        '(interactive mask selection).'),
+    # Recorded by the GUI but never registered until 1.7.005 (Completion Spec E2).
+    'bf_od_metrics':            replay_bf_od_metrics,
+    'bf_per_cell_summary':      replay_bf_per_cell_summary,
+    'ivbf_field_summary':       replay_ivbf_field_summary,
+    'ivbf_spatial_metrology':   replay_ivbf_spatial_metrology,
+    'upscale_advice':           _advice_only,
+    'ivbf_size_distribution':   replay_ivbf_size_distribution,
     'save_and_clear':           replay_save_and_clear,
+    **NOT_REPLAYED,             # recorded steps batch cannot replay (pycat.batch.steps.not_replayed)
 }
 
 
@@ -355,6 +288,8 @@ _STEP_OPERATIONS: dict[str, tuple[str, ...]] = {
     'auto_crop_roi':            ('multi_otsu',),
     'cellpose_segmentation':    ('cellpose', 'stardist'),
     'condensate_segmentation':  ('mask_stretch', 'subcellular_segment'),
+    'ts_cells_time_average':    ('cellpose',),
+    'cell_timeseries':          ('preprocess', 'mask_stretch', 'subcellular_segment'),
     # 'ivf_segmentation' deliberately NOT declared: a fixed op tuple misleads for 4 of its 5 recorded methods -- see test_batch_step_composition._MIN_STEPS_DECLARED for the rationale.
     'bf_condensate_segmentation': ('bf_segment',),
     'ivbf_segmentation':        ('bf_segment',),
@@ -405,7 +340,7 @@ def _warn_on_duplicate_step_keys():
             if not isinstance(node.value, ast.Dict):
                 continue
             keys = [k.value for k in node.value.keys
-                    if isinstance(k, ast.Constant) and isinstance(k.value, str)]
+                    if isinstance(k, ast.Constant) and isinstance(k.value, str)] + list(NOT_REPLAYED)
             dups = [k for k, n in collections.Counter(keys).items() if n > 1]
             if dups:
                 print("[PyCAT Batch] WARNING: duplicate replay step name(s) in "

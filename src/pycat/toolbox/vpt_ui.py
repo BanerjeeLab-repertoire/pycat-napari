@@ -117,7 +117,7 @@ class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin,
 
     @staticmethod
     def _track_of(selection):
-        """The track id inside a Selection. VPT's ids are `.../vpt/track/<tid>`."""
+        """The track id inside a Selection. VPT's ids are `.../vpt_tracks/bead/-/<tid>`."""
         try:
             return int(str(selection.entity_ids[0]).rsplit('/', 1)[-1])
         except (AttributeError, IndexError, TypeError, ValueError):
@@ -134,13 +134,15 @@ class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin,
         selection from any other plot are the same kind of thing to the service, and it costs one
         function call.
         """
-        from pycat.utils.entity_ref import entity_id_column, source_path_of
+        from pycat.utils.entity_ref import dataset_id_for, entity_id_column, source_path_of
         source = None
         try:
             source = source_path_of(self.central_manager.active_data_class)
         except Exception:
             source = None
-        return entity_id_column(source, 'vpt', 'track', None, tid)
+        # The ONE key (F4): the `vpt_tracks` spec's id over the dataset UUID, as the stamped per-track table carries
+        # (was `{raw path}/vpt/track/-/{tid}`, which matched no spec and no `invalidate_dataset` prefix).
+        return entity_id_column(dataset_id_for(source), 'vpt_tracks', 'bead', None, tid)
 
 
 

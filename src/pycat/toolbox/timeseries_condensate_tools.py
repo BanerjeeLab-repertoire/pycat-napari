@@ -175,6 +175,6 @@ from pycat.toolbox.timeseries.execution import (  # noqa: E402,F401
 # ---------------------------------------------------------------------------
 # Run-analysis UI builder + condensate-fraction plot  ->  moved to ui.py (1.6.247)
 # ---------------------------------------------------------------------------
-from pycat.toolbox.timeseries.ui import (  # noqa: E402,F401
-    _add_run_timeseries_condensate_analysis, _plot_condensate_fraction)
+from pycat.toolbox.timeseries.ui import _add_run_timeseries_condensate_analysis  # noqa: E402,F401
+from pycat.toolbox.timeseries.plots import _plot_condensate_fraction  # noqa: E402,F401  (moved 1.7.005)
 

@@ -93,10 +93,14 @@ def test_size_mle_recovers_an_untruncated_lognormal():
     assert p['sigma'] == pytest.approx(0.5, abs=0.05)
 
 
-def test_size_mle_default_fit_is_biased_by_detection_limit_truncation():
-    """CHARACTERISATION (survives the fix — the DEFAULT stays untruncated): dropping droplets below a detection
+def test_size_mle_without_a_detection_limit_is_biased_by_truncation():
+    """PREMISE (the bias the detection limit removes): fitted WITHOUT ``xmin``, dropping droplets below a detection
     limit (r < 4 um, ~35% of the sample) inflates the fitted median well past the true 5 um and deflates sigma.
-    Pins the bias so the fix can be measured against it."""
+
+    This used to be pinned as the intended DEFAULT ("survives the fix — the default stays untruncated"), and the
+    public wrapper every production path calls had no way to pass the limit, so the truncated fit never ran in
+    production (Completion Spec A4). The premise is retired: when the limit is known -- it always is, it is the
+    segmentation's own minimum object size -- the production fit is truncated (next tests)."""
     from pycat.toolbox.invitro_tools import fit_size_distribution_mle
     full = _lognormal_radii()
     truncated = full[full >= 4.0]
@@ -117,3 +121,14 @@ def test_size_mle_recovers_truth_from_truncated_data_when_xmin_is_honoured():
     assert p['mu'] == pytest.approx(np.log(5.0), abs=0.08)
     assert p['sigma'] == pytest.approx(0.5, abs=0.08)
     assert res['detection_limit_xmin'] == 4.0        # the fit records the truncation it applied
+
+
+def test_the_production_wrapper_fits_truncated_when_given_the_detection_limit():
+    """The UIs and batch call ``fit_size_distribution``; it now forwards ``xmin`` to the truncated MLE and reports
+    the truncation-corrected lognormal parameters and the limit it applied."""
+    from pycat.toolbox.invitro_tools import fit_size_distribution
+    full = _lognormal_radii()
+    res = fit_size_distribution(full[full >= 4.0], xmin=4.0)
+    assert res['lognormal_mu'] == pytest.approx(np.log(5.0), abs=0.08)
+    assert res['lognormal_sigma'] == pytest.approx(0.5, abs=0.08)
+    assert res['detection_limit_xmin'] == 4.0 and res['mle']['detection_limit_xmin'] == 4.0

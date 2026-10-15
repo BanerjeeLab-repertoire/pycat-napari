@@ -130,7 +130,7 @@ class BatchImageNavigator:
 
     def _centre(self, bbox):
         y0, x0, y1, x1 = bbox
-        camera = self.viewer.camera
+        camera = self.viewer.scene.camera
         camera.center = ((y0 + y1) / 2.0, (x0 + x1) / 2.0)
         span = max(y1 - y0, x1 - x0, 8.0) * 6.0       # the object and its surroundings fill the view
         canvas = getattr(self.viewer, '_canvas_size', None) or (600, 600)
@@ -174,7 +174,7 @@ class BatchImageNavigator:
 
     def close(self):
         try:
-            self.service.unsubscribe(self.view_id)
+            self.service.unsubscribe(self.view_id, self.apply_selection)
         except Exception as exc:                        # broad-ok: ui_cleanup — teardown is best-effort; never raise on close
             debug_log('batch_navigator: unsubscribe failed', exc)
         if self._cb is not None:

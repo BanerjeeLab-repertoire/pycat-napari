@@ -137,3 +137,47 @@ def test_the_README_does_not_point_at_a_DELETED_environment_file():
     assert not dangling, (
         f"the README still tells users to build from these deleted files: {set(dangling)}"
     )
+
+
+# conda-forge names for the pyproject packages whose conda name differs.
+_CONDA_NAME = {'opencv-python-headless': 'opencv', 'PySide6-Essentials': 'pyside6', 'torch': 'pytorch'}
+
+
+def _pyproject_dependencies():
+    import tomllib
+    with open(_ROOT / 'pyproject.toml', 'rb') as fh:
+        return list(tomllib.load(fh)['project']['dependencies'])
+
+
+@pytest.mark.core
+def test_requirements_base_IS_pyproject_dependencies():
+    """**It had drifted by 9 missing dependencies and 5 dropped constraints** (Completion Spec D1) -- among
+    them ``cellpose<4``, so a requirements install took Cellpose 4, which removed the cyto2 CNN PyCAT
+    segments with. The file is now generated; this keeps it generated."""
+    lines = [ln.strip() for ln in (_ROOT / 'config/requirements-base.txt').read_text(encoding='utf-8').splitlines()]
+    declared = [ln for ln in lines if ln and not ln.startswith('#')]
+    assert declared == _pyproject_dependencies(), \
+        'config/requirements-base.txt has drifted from pyproject.toml -- run `python tools/sync_requirements.py`'
+
+
+@pytest.mark.core
+def test_the_conda_recipe_declares_every_pyproject_dependency_with_its_constraint():
+    text = (_ROOT / 'meta.yaml').read_text(encoding='utf-8')
+    run = text[text.index('  run:'):text.index('test:')]
+    declared = {}
+    for line in run.splitlines():
+        m = re.match(r'\s*-\s*([A-Za-z0-9_.\-]+)\s*([<>=!][^#]*)?', line)
+        if m:
+            declared.setdefault(m.group(1).lower(), (m.group(2) or '').replace(' ', ''))
+    problems = []
+    for dep in _pyproject_dependencies():
+        name, spec = re.match(r'([A-Za-z0-9_.\-]+)(.*)', dep).groups()
+        conda = _CONDA_NAME.get(name, name).lower()
+        if conda not in declared:
+            problems.append(f'{dep}: missing')
+        elif spec and declared[conda] != spec.replace(' ', ''):
+            problems.append(f'{dep}: meta.yaml says {conda} {declared[conda] or "(bare)"}')
+    py = re.search(r'requires-python\s*=\s*"([^"]+)"', (_ROOT / 'pyproject.toml').read_text(encoding='utf-8')).group(1)
+    if declared.get('python', '').replace(' ', '') != py.replace(' ', ''):
+        problems.append(f'python: pyproject requires {py}, meta.yaml says {declared.get("python")}')
+    assert not problems, 'meta.yaml disagrees with pyproject.toml:\n  ' + '\n  '.join(problems)

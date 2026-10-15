@@ -1,13 +1,45 @@
 """Stability QC — photobleaching, lateral drift and vibration across a time series.
 
-Moved VERBATIM out of `data_qc_tools` (data_qc_decomposition); that module re-exports these.
+Split out of `data_qc_tools` (data_qc_decomposition); that module re-exports these.
 """
 from __future__ import annotations
 
 import numpy as np
 
 from pycat.utils.general_utils import debug_log
-from pycat.toolbox.data_qc._base import _to_float, _shift_normalise
+from pycat.toolbox.data_qc._base import _robust_noise_std, _to_float, _shift_normalise
+
+#: Registration method, cited where the user reads it (G11).
+_PHASE_CORRELATION = ("phase cross-correlation with sub-pixel upsampling (Guizar-Sicairos, Thurman & Fienup, "
+                      "Opt. Lett. 33, 156 (2008))")
+_FEATURE_SCALE_NOTE = (" The feature size is the autocorrelation half-width, a PyCAT-defined heuristic "
+                       "(measured to track object size within 1.6-2.0x; no literature anchor).")
+
+
+def _signal_trace(a):
+    """Per-frame SIGNAL for a bleaching estimate, and how it was measured.
+
+    The per-frame median is the BACKGROUND on a sparse fluorescence field, and background does not bleach
+    (G2: objects decaying to 2.7 % of their signal were reported "good | 96 % remains"). So the objects are
+    found once on the time average (Otsu), and the trace is their mean minus the background's median: the
+    pedestal cancels, and what remains is the specimen's own signal. Returns ``(trace, basis)``; ``basis`` is
+    ``'objects'`` or ``'median'`` (no separable foreground: the field is uniform, so its median IS the signal).
+    """
+    from skimage.filters import threshold_otsu
+    from pycat.toolbox.data_qc import thresholds as th
+    avg = a.mean(axis=0)
+    try:
+        fg = avg > threshold_otsu(avg)
+    except ValueError:                                   # a constant image has no threshold
+        fg = np.zeros(avg.shape, bool)
+    frac = float(fg.mean())
+    if 0.0005 < frac < 0.9:
+        contrast = float(np.mean(avg[fg]) - np.median(avg[~fg]))
+        noise = _robust_noise_std(a[0])
+        if contrast > th.BLEACH_FOREGROUND_SIGMAS * max(noise, 1e-9):
+            trace = np.array([float(np.mean(f[fg]) - np.median(f[~fg])) for f in a])
+            return trace, 'objects'
+    return np.array([float(np.median(f)) for f in a]), 'median'
 
 def qc_photobleaching(stack):
     """Is the sample FADING over the acquisition?
@@ -41,11 +73,12 @@ def qc_photobleaching(stack):
                     unit='', headline='needs a time series (≥ 4 frames)',
                     how='', good='', diag=None)
 
-    # Median, not mean: robust to a few saturated pixels and to objects entering the field.
-    per_frame = np.array([float(np.median(f)) for f in a])
+    from pycat.toolbox.data_qc import thresholds as th
+    per_frame, basis = _signal_trace(a)
     if not np.isfinite(per_frame).all() or per_frame[0] <= 0:
         return dict(name='Photobleaching', tier='core', status='na', value=None,
-                    unit='', headline='intensity trace unusable', how='', good='', diag=None)
+                    unit='', headline='intensity trace unusable',
+                    how="No positive specimen signal in the first frame to track.", good='', diag=None)
 
     # Fit a straight line in LOG space: an exponential decay is linear there, and the slope is
     # -1/tau. Doing it in log space also stops a few bright frames dominating the fit.
@@ -71,9 +104,25 @@ def qc_photobleaching(stack):
 
     # The thresholds are set by what a correction can actually rescue. Losing a third of the
     # signal is correctable; losing 70 % means the late frames are mostly noise.
-    if remaining >= 0.85:
+    # A flat MEDIAN is only evidence of no bleaching when the median is the specimen. If the brightest pixels fade
+    # while the median holds, the field is sparse and its objects could not be separated from the background:
+    # the median is measuring the background, and the honest answer is no verdict.
+    if basis == 'median' and remaining >= th.BLEACH_GOOD_REMAINING:
+        _p99 = np.array([float(np.percentile(f, 99)) for f in a])
+        if _p99[0] > 0 and _p99[-1] / _p99[0] < th.BLEACH_GOOD_REMAINING:
+            return dict(
+                name='Photobleaching', tier='core', status='na', value=None, unit='',
+                headline='cannot judge: the median holds but the brightest pixels fade (a sparse field)',
+                how="The per-frame median is the background on a sparse field, and background does not bleach. "
+                    "No objects could be separated from it to track, while the brightest 1 % of pixels lost "
+                    f"{(1 - _p99[-1] / _p99[0]) * 100:.0f}% of their intensity — so a flat median here is not "
+                    "evidence that the specimen kept its signal.",
+                good="Segment the objects and track their intensity directly.",
+                diag=dict(per_frame=per_frame, p99_per_frame=_p99, basis=basis))
+
+    if remaining >= th.BLEACH_GOOD_REMAINING:
         status = 'good'
-    elif remaining >= 0.50:
+    elif remaining >= th.BLEACH_WARN_REMAINING:
         status = 'warn'
     else:
         status = 'bad'
@@ -83,12 +132,17 @@ def qc_photobleaching(stack):
         value=remaining * 100.0, unit='% signal remaining',
         headline=(f"{remaining * 100:.0f}% of the initial signal remains at the last frame"
                   + (f" (tau ≈ {tau_frames:.0f} frames)" if np.isfinite(tau_frames) else "")),
-        how="Median intensity per frame, fitted as an exponential decay in log space. The "
-            "reported value is the fraction of the STARTING signal still present at the end.",
+        how=(("Mean intensity of the OBJECTS (found once on the time average) minus the background median, "
+              "per frame" if basis == 'objects' else
+              "Median intensity per frame (no objects separable from the background: the field is uniform, so "
+              "its median is the signal)")
+             + ", fitted as an exponential decay in log space. The reported value is the fraction of the "
+               "STARTING signal still present at the end. The background is subtracted because it does not "
+               "bleach: a sparse field's median IS the background."),
         good="Little or no fade. A bleach correction divides by exp(-t/tau), so an error in "
              "tau compounds exponentially — and if most of the signal is gone, the late frames "
              "are noise and no correction recovers them.",
-        diag=dict(per_frame=per_frame, tau_frames=tau_frames, remaining=remaining))
+        diag=dict(per_frame=per_frame, tau_frames=tau_frames, remaining=remaining, basis=basis))
 
 
 def qc_drift(stack):
@@ -149,15 +203,16 @@ def qc_drift(stack):
         below = np.flatnonzero(prof < 0.5)
         return float(below[0]) if below.size else float(prof.size)
 
+    from pycat.toolbox.data_qc import thresholds as th
     feat = _feature_scale(a[0])
     drift_in_objects = (total / feat) if (np.isfinite(feat) and feat > 0) else float('nan')
 
     if np.isfinite(drift_in_objects):
         # Sub-object drift is harmless; drift of an object diameter or more breaks
         # per-object time-series and tracking outright.
-        if drift_in_objects < 0.5:
+        if drift_in_objects < th.DRIFT_GOOD_FEATURES:
             status = 'good'
-        elif drift_in_objects < 1.0:
+        elif drift_in_objects < th.DRIFT_WARN_FEATURES:
             status = 'warn'
         else:
             status = 'bad'
@@ -165,30 +220,29 @@ def qc_drift(stack):
                     f"size ({frac*100:.1f}% of FOV)")
         basis = 'feature size'
     else:
-        status = 'good' if frac < 0.01 else ('warn' if frac < 0.05 else 'bad')
+        status = 'good' if frac < th.DRIFT_GOOD_FOV else ('warn' if frac < th.DRIFT_WARN_FOV else 'bad')
         headline = f"max drift {total:.1f} px ({frac*100:.1f}% of FOV)"
         basis = 'field of view (feature size unavailable)'
 
     return dict(
         name='Drift', tier='core', status=status, value=total, unit='px',
         headline=headline,
-        drift_in_features=drift_in_objects,
-        fov_fraction=float(frac),
-        basis=basis,
-        how="Each frame is registered to the first by phase cross-correlation. The drift "
+        how="Each frame is registered to the first by " + _PHASE_CORRELATION + ". The drift "
             "is judged against the IMAGE'S OWN FEATURE SIZE (autocorrelation half-width), "
             "because that is the scale on which drift does damage: a drift of one object "
             "diameter means the object no longer overlaps itself between the first and "
             "last frame. A fraction of the sensor is the wrong reference — the same stage "
-            "drift would then pass or fail depending on the camera.",
+            "drift would then pass or fail depending on the camera." + _FEATURE_SCALE_NOTE,
         good="Drift well under half a feature size. Larger drift misaligns per-object "
              "time-series and breaks tracking — register the stack, or fix the stage.",
-        diag=dict(shifts=shifts, magnitude=mag, feature_scale_px=feat))
+        diag=dict(shifts=shifts, magnitude=mag, feature_scale_px=feat,
+                  drift_in_features=drift_in_objects, fov_fraction=float(frac), basis=basis))
 
 
 def qc_vibration(stack):
     """Mechanical vibration: an oscillatory component in the frame-to-frame
     shift trace (advisory — needs several frames)."""
+    from pycat.toolbox.data_qc import thresholds as th
     a = _to_float(stack)
     if a.ndim != 3 or a.shape[0] < 8:
         return dict(name='Vibration', tier='advisory', status='na', value=None,
@@ -280,7 +334,7 @@ def qc_vibration(stack):
         _c = concs[_k]
         if not np.isfinite(_c):
             continue
-        _null = np.array([_conc(_rng.permutation(_v)) for _ in range(400)])
+        _null = np.array([_conc(_rng.permutation(_v)) for _ in range(th.VIBRATION_PERMUTATIONS)])
         _null = _null[np.isfinite(_null)]
         if _null.size:
             _ps.append(float((np.sum(_null >= _c) + 1) / (_null.size + 1)))
@@ -294,15 +348,15 @@ def qc_vibration(stack):
     if not np.isfinite(p_vib):
         status = 'na'
         headline = 'vibration could not be assessed'
-    elif n_frames < 20:
+    elif n_frames < th.VIBRATION_MIN_FRAMES:
         # Too few frequency bins for the test to have power. "Not assessed" is NOT "good".
         status = 'na'
         headline = (f'not assessable: {n_frames} frames (≥ 20 needed to detect a '
                     f'periodic component)')
-    elif p_vib < 0.01:
+    elif p_vib < th.VIBRATION_BAD_P:
         status = 'bad'
         headline = f'periodic vibration detected (p = {p_vib:.3f})'
-    elif p_vib < 0.05:
+    elif p_vib < th.VIBRATION_WARN_P:
         status = 'warn'
         headline = f'possible periodic vibration (p = {p_vib:.3f})'
     else:
@@ -313,8 +367,7 @@ def qc_vibration(stack):
         name='Vibration', tier='advisory', status=status, value=float(ratio),
         unit='spectral conc.',
         headline=headline,
-        p_value=p_vib,
-        how="Frame-to-frame shift jitter is Fourier-transformed, and its spectral "
+        how="Frame-to-frame shift jitter (" + _PHASE_CORRELATION + ") is Fourier-transformed, and its spectral "
             "concentration is compared against permutations of the SAME trace "
             "(which destroy periodicity but keep the amplitudes). The raw "
             "concentration depends strongly on the frame count; the p-value does not.",

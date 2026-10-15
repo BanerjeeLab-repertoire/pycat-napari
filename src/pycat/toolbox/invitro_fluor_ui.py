@@ -529,6 +529,7 @@ def _ivf_segmentation(ui, layout):
         except Exception:
             pass    # broad-ok: optional_probe -- lineage recording is best-effort, never break the produced layer
         ui._dr()['ivf_droplet_mask'] = labeled
+        ui._dr()['ivf_min_area_px'] = p_minarea      # the size fit's detection limit (A4)
         ui._record('ivf_segmentation', {
             'pre_layer': pre_dd.currentText(), 'raw_layer': raw_dd.currentText(),
             'method': method,
@@ -651,9 +652,9 @@ def _mount_droplet_workspace(ui, part_df, summ_df, mask_layer, source_path):
     ws.add_image_tier(ui.viewer, mask_layer, part_df, 'ivf.image',
                       label_col='droplet_label', source_path=source_path)
     try:
-        from pycat.utils.dock_space import add_results_dock
-        dock = add_results_dock(ui.viewer.window, ws, name='IVF Droplet Results')
-        ui._ivf_results_dock = (dock, ws)              # keep alive; detach the views if it closes
+        from pycat.utils.dock_space import mount_results_workspace
+        # Replaces (and detaches) the previous run's workspace; detaches this one when its dock closes (F6).
+        mount_results_workspace(ui, '_ivf_results_dock', ui.viewer.window, ws, name='IVF Droplet Results')
     except Exception as exc:                           # broad-ok: optional_probe — no viewer window headless — the workspace is still returned
         debug_log('invitro_fluor: could not dock the droplet workspace', exc)
     return ws
@@ -849,7 +850,7 @@ def _ivf_size_distribution(ui, layout):
     form.addRow(_bwc(run))
 
     def _on_run():
-        from pycat.toolbox.invitro_tools import fit_size_distribution
+        from pycat.toolbox.invitro_tools import detection_limit_for_radii, fit_size_distribution
         try:
             mask = np.asarray(ui.viewer.layers[mask_dd.currentText()].data)
         except KeyError as e: napari_show_warning(str(e)); return
@@ -858,7 +859,10 @@ def _ivf_size_distribution(ui, layout):
         radii = np.array([np.sqrt(p.area * mpx**2 / np.pi) for p in props])
         if len(radii) < 5:
             napari_show_warning("Need at least 5 droplets for size distribution fit."); return
-        res = fit_size_distribution(radii, n_bins=bins_sp.value())
+        # The segmentation dropped objects under its minimum area, so the sample is left-truncated there: fit with
+        # that detection limit, or mu / sigma are biased (+50 % / -33 % at 35 % of droplets below it; A4).
+        xmin = detection_limit_for_radii(radii, ui._dr().get('ivf_min_area_px'), mpx)
+        res = fit_size_distribution(radii, n_bins=bins_sp.value(), xmin=xmin)
         ui._dr()['ivf_size_dist'] = res
         ui._record('ivf_size_distribution', {
             'mask_layer': mask_dd.currentText(), 'n_bins': bins_sp.value()})

@@ -34,6 +34,7 @@ from pycat.toolbox.condensate_physics_ui import _add_condensate_physics
 from pycat.toolbox.data_viz_tools import PlottingWidget
 from pycat.toolbox.spatial_acf_tools import _add_run_sacf_analysis
 from pycat.toolbox.timeseries_condensate_tools import _add_run_timeseries_condensate_analysis, _add_lazy_preprocess_stack, _add_ts_upscale_stack
+from pycat.toolbox.cell_ts_ui import add_cell_timeseries_panel as _add_cell_timeseries_panel
 from pycat.ui.base_ui import BaseUIClass, _WheelScrollGuard, _wheel_guard, guard_wheel, _relax_min_widths, _apply_scroll_guard
 
 
@@ -65,6 +66,7 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
         #self.central_manager.add_observer(self) # placeholder for possible future implementation of observer pattern
         self._add_run_sacf_analysis = lambda **kw: _add_run_sacf_analysis(self, **kw)
         self._add_run_timeseries_condensate_analysis = lambda **kw: _add_run_timeseries_condensate_analysis(self, **kw)
+        self._add_cell_timeseries = lambda **kw: _add_cell_timeseries_panel(self, **kw)
         self._add_lazy_preprocess_stack = lambda **kw: _add_lazy_preprocess_stack(self, **kw)
         self._add_ts_upscale_stack = lambda **kw: _add_ts_upscale_stack(self, **kw)
         self._add_run_two_channel_coloc = lambda **kw: _add_run_two_channel_coloc(self, **kw)

@@ -320,7 +320,7 @@ class TemperatureDependentUI:
 
         # Use napari's canvas-fixed text overlay so the readout stays put while
         # zooming/panning, and update it as the T slider moves.
-        ov = self.viewer.text_overlay
+        ov = self.viewer.canvas.overlays.text
         ov.visible = True
         try:
             ov.color = 'yellow'
@@ -342,7 +342,7 @@ class TemperatureDependentUI:
                 idx = 0
             idx = max(0, min(idx, n - 1))
             try:
-                self.viewer.text_overlay.text = labels[idx]
+                self.viewer.canvas.overlays.text.text = labels[idx]
             except Exception:
                 pass
 
@@ -691,8 +691,8 @@ class TemperatureDependentUI:
             f"Added pattern-corrected stack (reference frame {self._ref_frame.value()}).")
 
     def _pixel_size(self):
-        stored = self._dr().get('microns_per_pixel_sq')
-        return float(stored) ** 0.5 if stored else 1.0
+        from pycat.utils.pixel_size import pixel_size_um_or_default
+        return pixel_size_um_or_default(self._dr(), context='temperature scale bar')
 
     def _on_scalebar(self):
         # Draw PyCAT's OWN scale bar (a Shapes-layer rectangle in data pixels)

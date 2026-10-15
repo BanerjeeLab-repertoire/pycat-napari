@@ -205,9 +205,17 @@ class SelectionService:
         self._deferred_subscribers[str(view_id)] = _as_callable(callback)
         return self
 
-    def unsubscribe(self, view_id):
-        self._subscribers.pop(str(view_id), None)
-        self._deferred_subscribers.pop(str(view_id), None)
+    def unsubscribe(self, view_id, callback=None):
+        """Drop ``view_id``'s subscription. With ``callback``, only if that is still the subscribed callback: a
+        re-run builds its new views (same view ids, re-subscribing replaces) BEFORE the old workspace detaches,
+        and an unconditional unsubscribe from the old view then silently unhooked the new one (F6)."""
+        for registry in (self._subscribers, self._deferred_subscribers):
+            handle = registry.get(str(view_id))
+            if handle is None:
+                continue
+            if callback is not None and handle() is not None and handle() != callback:
+                continue
+            registry.pop(str(view_id), None)
         return self
 
     def _prune_dead(self):
@@ -509,3 +517,25 @@ def _qt_debounce(fn):
         pass
     timer.timeout.connect(fn)
     timer.start(_DEBOUNCE_MS)
+
+
+# ── The application's one service, for producers that hold no central_manager ─────────────────────────
+#
+# Most result producers are toolbox functions handed a viewer or a data instance, not the central manager, so
+# they could not reach `central_manager.selection` and showed dead tables (Completion Spec F1). The central
+# manager registers its service here once; such a producer asks for it. Weakly held, like the subscribers: a
+# closed application must not be kept alive by a module global. ``None`` headless / in batch -> plain tables.
+_APPLICATION_SERVICE = None
+
+
+def set_application_service(service):
+    """Register ``service`` as the application's selection bus (called once by the central manager)."""
+    global _APPLICATION_SERVICE
+    import weakref
+    _APPLICATION_SERVICE = weakref.ref(service) if service is not None else None
+
+
+def application_service():
+    """The application's `SelectionService`, or ``None`` when no PyCAT window is running."""
+    ref = _APPLICATION_SERVICE
+    return ref() if ref is not None else None

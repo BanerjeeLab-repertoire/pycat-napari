@@ -152,6 +152,10 @@ def _crossing_time(t, frac, level):
 
 
 def _track_kinetics(t, y, smooth_frames, response_k):
+    # The smoothing window is capped at a third of the trace: on a short trace (a decimated movie, every n-th
+    # frame) a 5-frame median flattened a real change below the response gate -- an 8-frame dissolution from
+    # 0.31 to 0 read as amplitude -0.16, "not responded" (real-data harness, 1.7.005). Unchanged for >= 15 frames.
+    smooth_frames = max(1, min(int(smooth_frames), len(y) // 3))
     s = pd.Series(y).rolling(smooth_frames, center=True, min_periods=1).median().to_numpy()
     k = max(3, len(s) // 10)
     baseline, plateau = float(np.median(s[:k])), float(np.median(s[-k:]))
@@ -256,3 +260,42 @@ def heterogeneity_over_time(per_object_df: pd.DataFrame, kin_df: pd.DataFrame, c
                      'progress_iqr': float(np.subtract(*np.percentile(pr, (75, 25)))) if len(pr) else np.nan,
                      'fraction_activated': float(((progress.loc[idx] >= 0.5) & responded.loc[idx]).mean())})
     return pd.DataFrame(rows, columns=cols).sort_values('frame').reset_index(drop=True)
+
+
+def brush_ready_kinetics(linked: pd.DataFrame, kin_df: pd.DataFrame, channel: str, frame_interval_s: float = 1.0,
+                         microns_per_pixel: float = 1.0, source_path=None):
+    """The kinetics as linked tables (1.7.004): ``droplets`` (one row per tracked droplet with kinetics: the
+    `droplet_kinetics` row + its first-frame position and bbox) and ``droplet_frames`` (one row per droplet
+    per frame: ``time_s`` and every measured column -- the traces). Both carry the droplet's entity id
+    (``droplet_label`` = track_id + 1, the value of the tracked-labels layer), so selecting a droplet anywhere
+    selects its trace too."""
+    from pycat.utils.entity_ref import stamp_entity_ids
+    if kin_df is None or not len(kin_df) or linked is None or 'track_id' not in linked:
+        return {'droplets': pd.DataFrame(), 'droplet_frames': pd.DataFrame()}
+    frames = linked[linked['track_id'].isin(kin_df['track_id'])].sort_values(['track_id', 'frame']).copy()
+    frames['time_s'] = frames['frame'] * float(frame_interval_s or 1.0)
+    frames['droplet_label'] = frames['track_id'].astype(int) + 1
+    first = frames.groupby('track_id').first()
+    r_px = first['equiv_radius_um'] / float(microns_per_pixel or 1.0)
+    pos = pd.DataFrame({'track_id': first.index.astype(int), 'y_px': first['y_px'].to_numpy(),
+                        'x_px': first['x_px'].to_numpy(),
+                        'bbox_y0': np.floor(first['y_px'] - r_px).clip(lower=0).astype(int).to_numpy(),
+                        'bbox_x0': np.floor(first['x_px'] - r_px).clip(lower=0).astype(int).to_numpy(),
+                        'bbox_y1': np.ceil(first['y_px'] + r_px + 1).astype(int).to_numpy(),
+                        'bbox_x1': np.ceil(first['x_px'] + r_px + 1).astype(int).to_numpy()})
+    droplets = kin_df.merge(pos, on='track_id', how='left')
+    droplets['droplet_label'] = droplets['track_id'].astype(int) + 1
+    droplets['frame'] = droplets['first_frame']
+    droplets['channel'] = channel
+    for df in (droplets, frames):
+        stamp_entity_ids(df, entity_type='droplet_track', label_column='droplet_label', parent_column='_none_',
+                         frame=None, source_path=source_path, operation_id='tsivf_kinetics')
+    return {'droplets': droplets, 'droplet_frames': frames}
+
+
+def short_channel_name(layer_name):
+    """'sub-HHrz-Trial-4 C0-488 Stack' -> 'C0-488': the channel part of a PyCAT stack layer name, so result
+    columns read ``net_C0_488`` instead of ``net_sub_HHrz_Trial_4_C0_488_Stack``. The full name if none.
+    (Here, not in the panel, so batch replay can name channels the way the panel does.)"""
+    m = re.search(r'(?:^|\s)(C\d+-[^\s\[\]]+)', str(layer_name))
+    return m.group(1) if m else str(layer_name)

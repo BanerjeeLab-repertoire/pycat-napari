@@ -1,6 +1,6 @@
 """Aberration QC — spherical-aberration (axial sharpness asymmetry) and chromatic-shift checks.
 
-Moved VERBATIM out of `data_qc_tools` (data_qc_decomposition); that module re-exports these.
+Split out of `data_qc_tools` (data_qc_decomposition); that module re-exports these.
 """
 from __future__ import annotations
 
@@ -114,7 +114,9 @@ def qc_spherical_aberration(data, is_zstack=False):
         val = asymmetry
         # A 20 % imbalance between the two sides of focus is visible and worth flagging; 40 % is
         # a clear one-sided tail.
-        status = 'good' if val < 0.20 else ('warn' if val < 0.40 else 'bad')
+        from pycat.toolbox.data_qc import thresholds as th
+        status = ('good' if val < th.SPHERICAL_GOOD_ASYMMETRY else
+                  ('warn' if val < th.SPHERICAL_WARN_ASYMMETRY else 'bad'))
         return dict(
             name='Spherical aberration', tier='advisory', status=status,
             value=val, unit='axial asymmetry',
@@ -123,7 +125,8 @@ def qc_spherical_aberration(data, is_zstack=False):
             how="A band-pass (difference-of-Gaussians) sharpness is profiled through "
                 "the z-stack; spherical aberration makes this through-focus curve "
                 "asymmetric about best focus. A plain Laplacian cannot be used here — "
-                "detector noise dominates it and flattens the axial response.",
+                "detector noise dominates it and flattens the axial response. (The DoG "
+                "sharpness is a PyCAT-defined heuristic with no literature anchor.)",
             good="A near-symmetric axial response (|skew| ≲ 0.4). Strong "
                  "asymmetry suggests a coverslip/coating thickness mismatch — "
                  "adjust the correction collar or use the right coverslip.",
@@ -192,7 +195,12 @@ def qc_chromatic(n_channels, channels=None):
                     good="Assess with multi-colour bead images.", diag=None)
 
     from skimage.registration import phase_cross_correlation
+    from pycat.toolbox.data_qc import thresholds as th
 
+    # A channel STACK is registered on its mean frame. Audited for the SNR mean-frame artefact (G3): averaging
+    # lowers the registration noise floor (a 1.1 px true shift read 1.62 / 1.22 / 1.18 px at 1 / 16 / 64
+    # frames) without changing the verdict, and the gates below were measured on SINGLE frames, so they stay
+    # conservative for an average.
     ref = _mean_frame(channels[0]).astype(float)
     shifts = []
     for ch in channels[1:]:
@@ -215,7 +223,7 @@ def qc_chromatic(n_channels, channels=None):
     # A shift this large is not an optical defect — it means the channels are not imaging
     # the same structures, and calling it "chromatic aberration" would be a wrong result,
     # not merely a strict one.
-    if worst > 0.05 * fov:
+    if worst > th.CHROMATIC_MAX_FOV_FRACTION * fov:
         return dict(
             name='Chromatic aberration', tier='advisory', status='na',
             value=worst, unit='px',
@@ -254,11 +262,11 @@ def qc_chromatic(n_channels, channels=None):
     # of different structures with independent noise — measuring on multi-colour BEADS
     # (identical objects in both channels) pushes the floor far lower, and that is the
     # right way to calibrate a channel registration.
-    if worst < 2.0:
+    if worst < th.CHROMATIC_GOOD_PX:
         status = 'good'
         headline = (f"max channel shift {worst:.2f} px — within the measurement floor "
                     f"(~1-2 px)")
-    elif worst < 4.0:
+    elif worst < th.CHROMATIC_WARN_PX:
         status = 'warn'
         headline = f"max channel shift {worst:.2f} px"
     else:
@@ -269,7 +277,8 @@ def qc_chromatic(n_channels, channels=None):
         name='Chromatic aberration', tier='advisory', status=status,
         value=worst, unit='px',
         headline=headline,
-        how="Phase cross-correlation between channels measures a rigid lateral shift — "
+        how="Phase cross-correlation between channels (Guizar-Sicairos, Thurman & Fienup, Opt. Lett. 2008) "
+            "measures a rigid lateral shift — "
             "the signature of lateral chromatic aberration. NOTE the measurement floor: "
             "two channels with independent noise read ~1 px (95th percentile ~2 px) even "
             "when perfectly registered, so a shift below ~2 px cannot be distinguished "

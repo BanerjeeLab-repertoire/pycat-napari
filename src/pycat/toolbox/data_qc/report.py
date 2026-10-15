@@ -23,6 +23,10 @@ def plot_qc_report(results, title='Data Quality Report', interactive=True, relia
     ``reliability_scores`` is an optional iterable of ``(label, ReliabilityScore)`` for the scored
     measurement family; when given, a footer section lists the measurements whose reliability is capped
     below `high` and why — so the report says which numbers to trust less."""
+    # Conform every row to the result contract first (G10): a row missing `status`/`headline`/... renders with
+    # the contract's defaults instead of raising KeyError half-way through drawing the figure.
+    from pycat.toolbox.data_qc.schema import finalise_results
+    results = finalise_results(results)
     import matplotlib
     if not interactive:
         matplotlib.use('Agg')
@@ -88,7 +92,7 @@ def plot_qc_report(results, title='Data Quality Report', interactive=True, relia
     # ``SubFigure`` with ``constrained_layout`` packs the grid — tick labels, titles and
     # captions included — **by construction.** The scorecard gets its own subfigure and is laid
     # out as what it is: a list. Neither can intrude on the other, and the mechanical overlap
-    # test (``test_the_report_has_no_overlapping_text``) is what proved it.
+    # test (``tests/test_qc_report_layout.py::test_the_report_has_no_overlapping_text``) pins it.
     _fig_h = _score_in + _diag_in
     # constrained_layout on the PARENT; SubFigures inherit it.
     fig = plt.figure(figsize=(12.5, _fig_h), constrained_layout=bool(nrows_diag))

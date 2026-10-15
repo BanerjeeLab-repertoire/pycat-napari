@@ -448,7 +448,7 @@ def resolve_in_viewer(ref: ObjectRef, viewer, *, centre=True, pad_px=8):
                     sy, sx = float(sc[-2]), float(sc[-1])
                 if tr.size >= 2:
                     ty, tx = float(tr[-2]), float(tr[-1])
-            viewer.camera.center = (0.0, cy * sy + ty, cx * sx + tx)
+            viewer.scene.camera.center = (0.0, cy * sy + ty, cx * sx + tx)
         except Exception as exc:
             debug_log('resolve_in_viewer: could not centre the camera', exc)
 

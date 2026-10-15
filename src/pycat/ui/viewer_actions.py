@@ -34,7 +34,7 @@ def _home_fit_view(self):
         nd = self.viewer.dims.ndisplay
         dims = list(self.viewer.dims.displayed)[-nd:]
         center = (mins + maxs) / 2.0
-        self.viewer.camera.center = tuple(float(center[d]) for d in dims)
+        self.viewer.scene.camera.center = tuple(float(center[d]) for d in dims)
 
         # Zoom to fit: need the canvas size in pixels. Prefer the private
         # `_qt_viewer` attribute — the public `window.qt_viewer` property is
@@ -55,7 +55,7 @@ def _home_fit_view(self):
         if nd == 2 and cw and ch and all(s > 0 for s in sizes):
             # displayed dims are [y, x]; canvas is (width=x, height=y)
             zoom = min(ch / sizes[0], cw / sizes[1]) * 0.9   # 10% margin
-            self.viewer.camera.zoom = zoom
+            self.viewer.scene.camera.zoom = zoom
         else:
             # Couldn't compute a fit zoom — at least re-center via reset.
             self.viewer.reset_view()

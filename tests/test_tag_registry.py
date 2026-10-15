@@ -210,6 +210,7 @@ _KNOWN_UNTAGGED = {
     # is a deliberate exclusion, and the list is short on purpose: **if it grows, the vocabulary
     # is being eroded by exception rather than extended by design.**
     'detect_transitions',            # returns a dict of temperatures, not a layer
+    'make_frame_segmenter',          # returns the per-frame segmenter FUNCTION; segment_stack_per_frame (tagged) makes the layer
     'detect_rips', 'detect_all_rips', 'segment_fd_cycles',   # force-curve segmentation, not image
     # These two match only because 'contour' is in the keyword list. They compute a DNA CONTOUR
     # LENGTH from a freely-jointed-chain fit — a number, not an image contour. No layer.

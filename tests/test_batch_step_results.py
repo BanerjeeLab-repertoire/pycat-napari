@@ -109,3 +109,63 @@ def test_an_analysis_step_that_wrote_no_table_carries_no_output(tmp_path):
         _worker([{"step": "cell_analysis"}], {"cell_analysis": lambda s, p, pa, o: None}),
         Path("x.tif"), tmp_path)
     assert out[0][1].status == 'ok' and out[0][1].outputs == ()
+
+
+# ── Completion Spec E1: a step batch cannot replay is LOUD, not a print() that reads like it ran ─────────────
+
+def test_every_not_replayed_registry_entry_raises_StepNotImplemented_with_its_reason(tmp_path):
+    from pycat.batch_step_registry import _STEP_MAP
+    from pycat.utils.errors import StepNotImplemented
+    stubs = {k: f for k, f in _STEP_MAP.items() if getattr(f, 'not_replayed', False)}
+    assert stubs, 'expected the not-replayed entries to be marked'
+    for key, fn in stubs.items():
+        with pytest.raises(StepNotImplemented) as info:
+            fn({}, Path('x.tif'), {}, tmp_path)
+        assert info.value.step == key and info.value.reason
+
+
+def test_no_registry_entry_is_a_bare_lambda():
+    """A ``lambda ...: print(...)`` entry is the silent stub E1 removed; a new one must use ``_not_replayed``."""
+    from pycat.batch_step_registry import _STEP_MAP
+    lambdas = [k for k, f in _STEP_MAP.items() if getattr(f, '__name__', '') == '<lambda>']
+    assert not lambdas, f'bare-lambda registry entries (use _not_replayed(step, reason)): {lambdas}'
+
+
+def test_a_not_replayed_step_is_skipped_and_the_rest_still_run(tmp_path):
+    from pycat.batch_step_registry import _not_replayed
+    ran = []
+    reg = {"a": lambda s, p, pa, o: ran.append("a"),
+           "stub": _not_replayed("stub", "interactive only"),
+           "c": lambda s, p, pa, o: ran.append("c")}
+    out = BatchWorker._process_file(
+        _worker([{"step": "a"}, {"step": "stub"}, {"step": "c"}], reg), Path("x.tif"), tmp_path)
+    assert [(nm, r.status) for nm, r in out] == [("a", "ok"), ("stub", "skipped"), ("c", "ok")]
+    assert dict(out)["stub"].warnings == ("interactive only",)
+    assert ran == ["a", "c"]
+
+
+def test_the_run_report_lists_every_step_that_was_not_replayed():
+    from pycat.batch_processor import not_replayed_report, record_not_replayed
+    collected = {}
+    for name in ('one.tif', 'two.tif'):
+        record_not_replayed(collected, name, [("a", BatchStepResult(status="ok")),
+                                              ("fd_load", BatchStepResult(status="skipped", warnings=("why",))),
+                                              ("gone", BatchStepResult(status="skipped",
+                                                                       warnings=("not registered",)))])
+    report = not_replayed_report(collected, 2)
+    assert "2 recorded step(s) were NOT replayed" in report
+    assert "fd_load (2/2 image(s)): why" in report and "gone (2/2 image(s)): not registered" in report
+    assert not_replayed_report({}, 2) == ''
+
+
+def test_a_real_replay_is_never_shadowed_by_a_not_replayed_declaration():
+    """``_STEP_MAP`` ends with ``**NOT_REPLAYED``: a key in both would silently run the stub, not the replay."""
+    import ast
+    import inspect
+    import pycat.batch_step_registry as reg
+    from pycat.batch.steps.not_replayed import NOT_REPLAYED
+    tree = ast.parse(inspect.getsource(reg))
+    node = next(n for n in ast.walk(tree) if isinstance(n, ast.Assign)
+                and any(getattr(t, 'id', None) == '_STEP_MAP' for t in n.targets))
+    explicit = {k.value for k in node.value.keys if isinstance(k, ast.Constant)}
+    assert not explicit & set(NOT_REPLAYED), explicit & set(NOT_REPLAYED)

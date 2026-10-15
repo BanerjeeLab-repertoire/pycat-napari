@@ -876,8 +876,9 @@ def object_based_colocalization_analysis(object_mask1, object_mask2, roi_mask, m
     # Perform distance analysis if selected.
     if distance_analysis_selected:
         mean_distance, percent_noncoincident = method_functions["Calculate Distance Between Objects"](object_mask1, object_mask2, roi_mask)
-        microns_per_pixel_sq = data_instance.data_repository['microns_per_pixel_sq']
-        microns_per_pixel = np.sqrt(microns_per_pixel_sq)
+        from pycat.utils.pixel_size import pixel_size_um_or_default
+        microns_per_pixel = pixel_size_um_or_default(data_instance.data_repository,
+                                                     context='object colocalization distance')
 
         # Compile results into a DataFrame.
         table2_data = {

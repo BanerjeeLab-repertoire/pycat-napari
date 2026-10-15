@@ -155,7 +155,7 @@ class BrushableTable:
     def close(self):
         """Stop the dispatcher driving this table (its dialog closed) — SelectionView.close()."""
         try:
-            self.service.unsubscribe(self.view_id)
+            self.service.unsubscribe(self.view_id, self.apply_selection)
         except Exception as exc:
             debug_log('brushable_table: could not detach', exc)
 

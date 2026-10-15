@@ -62,8 +62,9 @@ def load_into_viewer(viewer, central_manager, data, name, is_mask=False):
             if len(viewer.layers):
                 _mpp = None
                 try:
-                    _mps = central_manager.active_data_class.data_repository.get('microns_per_pixel_sq')
-                    _mpp = (float(_mps) ** 0.5) if _mps else None
+                    from pycat.utils.pixel_size import pixel_size_um
+                    _mpp = pixel_size_um(central_manager.active_data_class.data_repository, context='layer tag')
+                    _mpp = float(_mpp) if np.isfinite(_mpp) else None
                 except Exception:
                     _mpp = None
                 _tag_loaded_layer(central_manager, 
@@ -112,8 +113,9 @@ def load_into_viewer(viewer, central_manager, data, name, is_mask=False):
             if len(viewer.layers):
                 _mpp = None
                 try:
-                    _mps = central_manager.active_data_class.data_repository.get('microns_per_pixel_sq')
-                    _mpp = (float(_mps) ** 0.5) if _mps else None
+                    from pycat.utils.pixel_size import pixel_size_um
+                    _mpp = pixel_size_um(central_manager.active_data_class.data_repository, context='layer tag')
+                    _mpp = float(_mpp) if np.isfinite(_mpp) else None
                 except Exception:
                     _mpp = None
                 _tag_loaded_layer(central_manager, 

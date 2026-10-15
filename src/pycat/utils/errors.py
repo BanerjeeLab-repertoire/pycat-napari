@@ -62,6 +62,19 @@ class LayerResolutionError(PyCATError):
     empty one."""
 
 
+class StepNotImplemented(PyCATError):
+    """A recorded step has no headless replay: batch cannot reproduce it, so its outputs are absent for every
+    image. Raised by the registry's not-replayed entries -- which used to ``print()`` a note, so a run over a
+    pipeline with stubbed steps produced a results folder that looked complete (Completion Spec E1). The batch
+    runner records it as a ``skipped`` step, continues with the remaining steps, and lists it in the run report.
+    ``step`` is the recorded step key, ``reason`` why it is not replayed."""
+
+    def __init__(self, step: str, reason: str = ''):
+        self.step = step
+        self.reason = reason
+        super().__init__(f"step '{step}' is not replayed in batch" + (f': {reason}' if reason else ''))
+
+
 class StackLoadCancelled(Exception):
     """The user gave up on a long, uninterruptible open (e.g. the BioFormats CZI index parse).
 
@@ -79,5 +92,5 @@ class StackLoadCancelled(Exception):
 __all__ = [
     'PyCATError', 'UnsupportedFormatError', 'MetadataUnavailableError',
     'InvalidCalibrationError', 'ScientificAssumptionError', 'OptionalDependencyError',
-    'LayerResolutionError', 'StackLoadCancelled',
+    'LayerResolutionError', 'StepNotImplemented', 'StackLoadCancelled',
 ]

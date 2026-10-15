@@ -1493,7 +1493,8 @@ def run_autocorrelation_analysis(image_layer, roi_mask_layer, lower_lim_input, u
     concatenated_fitted_params_df_1d = pd.DataFrame()
 
     # Calculate the physical pixel size from stored data
-    microns_per_pixel = np.sqrt(data_instance.data_repository["microns_per_pixel_sq"])
+    from pycat.utils.pixel_size import pixel_size_um_or_default
+    microns_per_pixel = pixel_size_um_or_default(data_instance.data_repository, context='correlation functions')
 
     # Process differently based on the presence and type of ROI mask
     if roi_mask is not None and np.unique(roi_mask).size > 2:  # Labeled mask scenario

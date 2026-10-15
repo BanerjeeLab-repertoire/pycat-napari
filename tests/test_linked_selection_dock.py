@@ -91,6 +91,7 @@ class _Viewer:
         self.layers = _Layers(layers)
         self.dims = self._Dims()
         self.camera = self._Cam()
+        self.scene = __import__('types').SimpleNamespace(camera=self.camera)   # napari >= 0.9 path
         self.added = []
 
     def _add(self, data, **kw):

@@ -119,6 +119,7 @@ class _Viewer:
         self.layers = _Layers(_Image())
         self.dims = _Dims(ndim)
         self.camera = _Camera()
+        self.scene = __import__('types').SimpleNamespace(camera=self.camera)   # napari >= 0.9 path
 
     def add_points(self, data, **kw):
         l = _Layer(data, **kw)

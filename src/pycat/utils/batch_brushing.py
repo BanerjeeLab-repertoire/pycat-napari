@@ -84,8 +84,13 @@ def mount_batch_workspace(output_dir, source_paths, central_manager, viewer=None
     cell_df = tables.get('cell')
     puncta_df = tables.get('puncta')
     droplet_df = tables.get('droplet')
-    if service is None or (cell_df is None and puncta_df is None and droplet_df is None):
+    ts_cells, ts_droplets = tables.get('ts_cells'), tables.get('tsivf_kinetics')
+    if service is None or all(t is None for t in (cell_df, puncta_df, droplet_df, ts_cells, ts_droplets)):
         return None
+    if cell_df is None and puncta_df is None and droplet_df is None:      # a time-series batch
+        if ts_cells is not None:
+            return _mount_cell_timeseries(output_dir, source_paths, tables, service, viewer)
+        return _mount_invitro_timeseries(output_dir, source_paths, ts_droplets, service, viewer)
     if puncta_df is not None:
         puncta_df = with_cell_context(puncta_df, cell_df)
 
@@ -162,3 +167,80 @@ def field_summaries(output_dir, source_paths):
             df.insert(0, 'image', stem)
             rows.append(df)
     return pd.concat(rows, ignore_index=True) if rows else None
+
+
+def per_image_csvs(output_dir, source_paths, suffix):
+    """Every image's ``<stem>_<suffix>.csv`` concatenated, each row tagged with its image (path and name);
+    None when no image wrote one."""
+    rows = []
+    for src in source_paths:
+        stem = pathlib.Path(src).stem
+        csv = pathlib.Path(output_dir) / stem / f'{stem}_{suffix}.csv'
+        if csv.is_file():
+            df = pd.read_csv(csv)
+            df[SOURCE_PATH_COLUMN] = str(src)
+            df.insert(0, 'image', stem)
+            rows.append(df)
+    return pd.concat(rows, ignore_index=True) if rows else None
+
+
+def _mount_cell_timeseries(output_dir, source_paths, tables, service, viewer):
+    """The batch results of the cellular time series (1.7.004): every movie's per-cell traces on one plot
+    (coloured by expression), half-time and initial condensed fraction against expression across movies, the
+    per-movie summaries, and -- with a viewer -- each movie's time average opened at a clicked cell."""
+    from pycat.ui.brushable_workspace import BrushableWorkspace
+    from pycat.toolbox.timeseries.results_view import CELL_TRACE_METRICS, TraceView
+
+    cells, tracks = tables.get('ts_cells'), tables.get('ts_condensate_tracks')
+    cells = cells.assign(image=cells[SOURCE_PATH_COLUMN].map(lambda p: pathlib.Path(p).stem))
+    ws = BrushableWorkspace(service)
+    frames = per_image_csvs(output_dir, source_paths, 'ts_cell_frames')
+    if frames is not None and 'expression' in frames:
+        frames = frames.assign(trace=frames['image'] + ':' + frames['cell'].astype(str))
+        tv = TraceView(frames, service, 'batch.ts.traces', group_col='trace', metrics=CELL_TRACE_METRICS,
+                       color_col='expression', color_label='expression (net counts)')
+        ws.add_view_widget(tv, tv.widget, title='Per-cell traces, every movie (click: select the cell)')
+    ws.add_plot(cells, 'expression', 't_half_s', 'batch.ts.thalf', title='Half-time vs expression (all movies)')
+    ws.add_plot(cells, 'expression', 'initial_condensed_fraction', 'batch.ts.frac',
+                title='Initial condensed fraction vs expression (all movies)')
+    ws.add_plot_builder({'Cells': cells, 'Condensate tracks': tracks}, 'batch.ts.builder')
+    if viewer is not None:
+        from pycat.ui.batch_navigator import BatchImageNavigator
+        ws.add_view_widget(BatchImageNavigator(viewer, output_dir, {'cell': cells}, service, 'batch.ts.image'))
+    ws.add_table(cells, 'batch.ts.cells', title='Cells (all movies)')
+    if tracks is not None:
+        ws.add_table(tracks, 'batch.ts.tracks', title='Condensate tracks (all movies)')
+    summary = per_image_csvs(output_dir, source_paths, 'ts_summary')
+    if summary is not None:
+        ws.add_table(summary.drop(columns=[SOURCE_PATH_COLUMN]), 'batch.ts.summary', title='Per movie')
+    return ws
+
+
+def _mount_invitro_timeseries(output_dir, source_paths, droplets, service, viewer):
+    """The batch results of the in-vitro time series (1.7.004): every movie's droplet traces, kinetics against
+    size, the per-movie heterogeneity summaries, and -- with a viewer -- the movie's time average opened at a
+    clicked droplet."""
+    from pycat.ui.brushable_workspace import BrushableWorkspace
+    from pycat.toolbox.timeseries.results_view import TraceView, droplet_trace_metrics
+
+    droplets = droplets.assign(image=droplets[SOURCE_PATH_COLUMN].map(lambda p: pathlib.Path(p).stem))
+    ws = BrushableWorkspace(service)
+    frames = per_image_csvs(output_dir, source_paths, 'tsivf_droplet_frames')
+    if frames is not None:
+        frames = frames.assign(trace=frames['image'] + ':' + frames['track_id'].astype(str))
+        tv = TraceView(frames, service, 'batch.tsivf.traces', group_col='trace',
+                       metrics=droplet_trace_metrics(frames), max_lines=400)
+        ws.add_view_widget(tv, tv.widget, title='Droplet traces, every movie (click: select the droplet)')
+    for x, y, title in (('mean_area_um2', 't_half_s', 'Half-time vs size (all movies)'),
+                        ('mean_area_um2', 'amplitude', 'Amplitude vs size (all movies)')):
+        if {x, y} <= set(droplets.columns):
+            ws.add_plot(droplets, x, y, f'batch.tsivf.{y}', title=title)
+    ws.add_plot_builder({'Droplets': droplets}, 'batch.tsivf.builder')
+    if viewer is not None:
+        from pycat.ui.batch_navigator import BatchImageNavigator
+        ws.add_view_widget(BatchImageNavigator(viewer, output_dir, {'droplet': droplets}, service, 'batch.tsivf.image'))
+    ws.add_table(droplets, 'batch.tsivf.droplets', title='Droplets with kinetics (all movies)')
+    summary = per_image_csvs(output_dir, source_paths, 'tsivf_kinetics_summary')
+    if summary is not None:
+        ws.add_table(summary.drop(columns=[SOURCE_PATH_COLUMN]), 'batch.tsivf.summary', title='Per movie')
+    return ws

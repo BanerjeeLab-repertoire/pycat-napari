@@ -16,8 +16,42 @@ from napari.utils.notifications import show_info as napari_show_info
 from napari.utils.notifications import show_warning as napari_show_warning
 from qtpy.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox, QLabel, QPushButton,
-    QDoubleSpinBox, QSpinBox, QCheckBox, QWidget, QSizePolicy, QProgressBar,
+    QDoubleSpinBox, QSpinBox, QComboBox, QWidget, QSizePolicy, QProgressBar,
 )
+
+#: (label, axis passed to run_full_qc). A 3-D stack's axis is STATED, never assumed (Completion Spec G6).
+_AXIS_CHOICES = (("Not specified — axis-dependent checks are refused", None),
+                 ("Time series (frames)", 't'),
+                 ("Z-stack (through-focus)", 'z'),
+                 ("Channels", 'c'))
+
+
+def _suggested_axis(ui_instance, layer_data):
+    """'t' when the loaded image's recorded frame count matches this stack's first axis, else None (unstated).
+    A suggestion only — the user's choice in the dropdown is what runs."""
+    try:
+        repo = ui_instance.central_manager.active_data_class.data_repository
+        n_t = int(repo.get('n_t') or 0)
+        shape = getattr(layer_data, 'shape', ())
+        return 't' if len(shape) == 3 and n_t > 1 and int(shape[0]) == n_t else None
+    except Exception as exc:  # broad-ok: optional_probe — no suggestion means the axis stays unstated (refused)
+        debug_log('QC: could not suggest the stack axis', exc)
+        return None
+
+
+def _prefill_pixel_size(ui_instance, spinbox):
+    """Pre-fill the pixel size ONLY from a real calibration (G4): the loaders write the 1-µm/px placeholder when
+    a file has no scale, and pre-filling it fabricated a Nyquist ratio and an absolute focus verdict for every
+    uncalibrated image. Routed through the single pixel-size gate."""
+    try:
+        from pycat.utils.pixel_size import has_real_pixel_size, pixel_size_um
+        repo = ui_instance.central_manager.active_data_class.data_repository
+        if has_real_pixel_size(repo):
+            value = pixel_size_um(repo, context='data QC')
+            if value == value and value > 0:
+                spinbox.setValue(float(value))
+    except Exception as exc:  # broad-ok: optional_probe — an unreadable repository leaves the field at 0 = unknown
+        debug_log('QC: could not pre-fill the pixel size', exc)
 
 
 def _sibling_channels(ui_instance, active_name, active_data):
@@ -68,6 +102,29 @@ def _qc_object_table(ui_instance):
     return None
 
 
+def _axis_dropdown(ui_instance, image_dd):
+    """The "Stack axis" choice (G6), re-suggested from the recorded frame count when the image changes."""
+    axis_dd = QComboBox()
+    for _label, _axis in _AXIS_CHOICES:
+        axis_dd.addItem(_label, _axis)
+    axis_dd.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+    axis_dd.setToolTip(
+        "What the planes of a 3-D stack ARE. Drift, vibration, photobleaching, focus and ghosting mean "
+        "different things — or nothing — depending on it: treated as frames, a z-stack with zero drift reads "
+        "'Drift: bad, 101 px'. Left unspecified, those checks are refused rather than guessed. Ignored for a "
+        "2-D image.")
+
+    def _suggest_axis(_name=None):
+        name = image_dd.currentText()
+        names = [l.name for l in ui_instance.viewer.layers]
+        if name in names:
+            suggestion = _suggested_axis(ui_instance, ui_instance.viewer.layers[name].data)
+            axis_dd.setCurrentIndex(next(i for i, (_l, a) in enumerate(_AXIS_CHOICES) if a == suggestion))
+    image_dd.currentTextChanged.connect(_suggest_axis)
+    _suggest_axis()
+    return axis_dd
+
+
 def _add_data_qc(ui_instance, layout=None, separate_widget=False):
     """Build the Data QC dashboard widget."""
     outer = QVBoxLayout()
@@ -86,12 +143,8 @@ def _add_data_qc(ui_instance, layout=None, separate_widget=False):
     image_dd = ui_instance.create_layer_dropdown(napari.layers.Image)
     form.addRow("Image / stack:", image_dd)
 
-    zstack_cb = QCheckBox("This stack is a z-stack (through-focus)")
-    zstack_cb.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-    zstack_cb.setToolTip(
-        "Tick only for a focus series. Spherical-aberration assessment measures "
-        "the through-focus asymmetry, which is meaningless for a time-series.")
-    form.addRow(zstack_cb)
+    axis_dd = _axis_dropdown(ui_instance, image_dd)
+    form.addRow("Stack axis:", axis_dd)
 
     # --- optics (for Nyquist / chromatic) ---
     opt = QGroupBox("Optics (for Nyquist sampling)")
@@ -99,13 +152,7 @@ def _add_data_qc(ui_instance, layout=None, separate_widget=False):
     px = QDoubleSpinBox(); px.setRange(0.0, 100.0); px.setDecimals(4)
     px.setSingleStep(0.01); px.setSuffix(" µm")
     px.setToolTip("Physical pixel size in the sample plane. 0 = unknown.")
-    # auto-fill from the data repository if a pixel size is known
-    try:
-        stored = ui_instance.central_manager.active_data_class.data_repository.get('microns_per_pixel_sq')
-        if stored:
-            px.setValue(float(stored) ** 0.5)
-    except Exception:
-        pass
+    _prefill_pixel_size(ui_instance, px)
     of.addRow("Pixel size:", px)
     na = QDoubleSpinBox(); na.setRange(0.0, 1.6); na.setDecimals(2); na.setSingleStep(0.05)
     na.setToolTip("Objective numerical aperture. 0 = unknown.")
@@ -182,7 +229,7 @@ def _add_data_qc(ui_instance, layout=None, separate_widget=False):
                 wavelength_nm=(wl.value() or None),
                 frame_interval_s=(dt.value() or None),
                 process_timescale_s=(tau.value() or None),
-                n_channels=nch.value(), is_zstack=zstack_cb.isChecked(),
+                n_channels=nch.value(), axis=axis_dd.currentData(),
                 n_source_frames=_n_source,
                 # ── A correct check that never receives its data never runs ──────
                 #
@@ -275,12 +322,17 @@ def _add_data_qc(ui_instance, layout=None, separate_widget=False):
                 'good_data': r.get('good', ''),
             } for r in results])
             table.to_csv(base + "_metrics.csv", index=False)
+            # The versioned, machine-readable report (schema_version + every result, diag included) — the
+            # form that ships as a supplementary file (G10).
+            from pycat.toolbox.data_qc_tools import results_to_json
+            with open(base + "_metrics.json", "w", encoding="utf-8") as fh:
+                fh.write(results_to_json(results, indent=1))
             fig = _state.get('fig')
             if fig is not None:
                 fig.savefig(base + ".png", dpi=150, bbox_inches='tight')
-                napari_show_info(f"Saved {os.path.basename(base)}.png and _metrics.csv.")
+                napari_show_info(f"Saved {os.path.basename(base)}.png, _metrics.csv and _metrics.json.")
             else:
-                napari_show_info(f"Saved {os.path.basename(base)}_metrics.csv "
+                napari_show_info(f"Saved {os.path.basename(base)}_metrics.csv and .json "
                                  "(figure unavailable — re-run the report).")
         except Exception as e:
             napari_show_warning(f"Save failed: {e}")

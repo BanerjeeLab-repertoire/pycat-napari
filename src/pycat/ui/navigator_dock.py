@@ -267,7 +267,9 @@ def _add_plan_action_buttons(widget, body_layout):
         # Re-check the gate at click time (state can change since render), then hand to the panel lifecycle.
         if widget._plan is None or widget._session.run_blocked_reason() is not None:
             return
-        build_method_panel_via_central_manager(widget._cm, widget._plan, getattr(widget, "_review", None),
+        from pycat.navigator.parameters import flat_reviewed_parameters
+        build_method_panel_via_central_manager(widget._cm, widget._plan,
+                                               flat_reviewed_parameters(getattr(widget, "_review", None)),
                                                intent=getattr(widget._session, "intent", None))
 
     def _run():

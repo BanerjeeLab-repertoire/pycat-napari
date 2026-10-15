@@ -475,10 +475,10 @@ def write_session_outputs(central_manager, layers_by_name, selected_layers,
                 # Nothing about 340 rows of an 800-row results table looks wrong.
                 with atomic_write(save_name + f'_{df_name}.csv') as _tmp:
                     # The user's results, not PyCAT's bookkeeping: the `_pycat_*` identity
-                    # columns are dropped on the way out. Nothing reads them back from a CSV —
-                    # session restore goes through the manifest.
-                    from pycat.utils.entity_ref import without_identity
-                    without_identity(df_value).to_csv(_tmp, index=True)
+                    # columns are dropped on the way out — unless the opt-in keep-identity export
+                    # setting is on, so a reviewer can re-link the table (Completion Spec F7).
+                    from pycat.utils.entity_ref import for_export
+                    for_export(df_value).to_csv(_tmp, index=True)
                 manifest_dfs.append({
                     'key': df_name,
                     'file': os.path.basename(save_name + f'_{df_name}.csv')})

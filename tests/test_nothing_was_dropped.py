@@ -64,6 +64,17 @@ _SHRINK_THRESHOLD = 0.70
 # This list is not an escape hatch — it is **the record of what was removed and why.** A future
 # reader should be able to check every entry.
 _DELIBERATE = {
+    # 1.7.005 — napari >= 0.9.1 is now the floor, where `scale_bar.unit` is a no-op (removed in 0.10). The
+    # selection-changed handler did nothing but set it, so it and its FileIOClass stub and event hookup are gone;
+    # the bar's label comes from Layer.units (_align_layer_scales). Completion Spec D "Watch".
+    'napari_adapter.py::_update_scale_bar_for_active_layer',
+    'file_io.py::__init__',      # lost only that handler's selection-changed hookup (9 lines), nothing else
+    # 1.7.004 — the in-vitro time-series panel's per-frame segmenter (`_seg` and its `_drop_small` helper,
+    # built inside `_segment_frame_fn_factory`) moved VERBATIM into `timeseries_invitro_tools.
+    # make_frame_segmenter`, so batch replay segments with the panel's own code; the factory now calls it.
+    'timeseries_invitro_fluor_ui.py::_seg',
+    'timeseries_invitro_fluor_ui.py::_drop_small',
+    'timeseries_invitro_fluor_ui.py::_segment_frame_fn_factory',
     # 2026-07-22 — redundancy_consolidation axis 3: four byte-identical `class _XWorker(QThread)` background
     # workers (condensate_physics / brightfield / invitro_bf / invitro_fluor) were consolidated into ONE
     # shared class built by `qt_worker.make_task_worker()`. Each local class (and its `run()` emitting
@@ -178,6 +189,9 @@ _DELIBERATE = {
     'timeseries_condensate_tools.py::_add_lazy_preprocess_stack',
     'timeseries_condensate_tools.py::_add_run_timeseries_condensate_analysis',
     'timeseries_condensate_tools.py::_plot_condensate_fraction',
+    # 1.7.005 — the condensate-fraction plot MOVED verbatim from timeseries/ui.py into timeseries/plots.py, to keep
+    # ui.py under its concentration ceiling (Completion Spec F2 stamping grew it). Exists as `plots.py::<name>`.
+    'ui.py::_plot_condensate_fraction',
     # nested widget callbacks / worker-lifecycle closures inside the two big builders:
     'timeseries_condensate_tools.py::_after_bg',
     'timeseries_condensate_tools.py::_after_preproc',
@@ -1027,7 +1041,7 @@ _DELIBERATE = {
     # (`FileIOClass` keeps a 3-line delegating stub for each, so every caller is untouched.)
     'file_io.py::_align_layer_scales',
     'file_io.py::_enable_auto_scale_bar',
-    'file_io.py::_update_scale_bar_for_active_layer',
+    'file_io.py::_update_scale_bar_for_active_layer',   # (1.7.005: removed outright, see top)
     'file_io.py::_fit_view_to_layer',
 
     # 1.6.62 — SHRUNK by extraction, not truncated (god-class decomposition #5). `_open_stack_generic`

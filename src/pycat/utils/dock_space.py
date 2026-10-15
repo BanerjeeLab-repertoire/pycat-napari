@@ -113,6 +113,7 @@ def add_results_dock(window, widget, *, name, settings=None, area='right', alrea
         except Exception:      # broad-ok: optional_probe — no settings available → default (tabify) mode
             settings = None
 
+    _detach_when_destroyed(widget)
     action = plan_results_mount(mode=reflow_mode(settings), has_results_widget=widget is not None,
                                 already_reflowed=already_reflowed)
     if action == 'tabify':
@@ -123,6 +124,41 @@ def add_results_dock(window, widget, *, name, settings=None, area='right', alrea
     dock = window.add_dock_widget(widget, name=name, area=area)     # 'collapse' and 'stack' both mount stacked
     if action == 'collapse':
         _apply_collapse(window, dock)                               # then grow the results dock to shrink method
+    return dock
+
+
+def _detach_when_destroyed(widget):
+    """A results widget that subscribes to the selection bus (a ``BrushableWorkspace``: its views, and a pick
+    handler on ``viewer.mouse_drag_callbacks``) detaches when its dock is destroyed. Nothing called ``detach()``
+    in production, so a closed results dock kept answering selections and every re-mount left another pick
+    handler on the viewer (Completion Spec F6). Idempotent -- ``detach`` is."""
+    detach = getattr(widget, 'detach', None)
+    if not callable(detach):
+        return
+    try:
+        widget.destroyed.connect(lambda *_: detach())
+    except Exception as exc:      # broad-ok: optional_probe — not a QObject (a test double) — the caller still detaches
+        from pycat.utils.general_utils import debug_log
+        debug_log('dock_space: could not tie detach() to the results widget lifetime', exc)
+
+
+def mount_results_workspace(holder, attr, window, workspace, *, name):
+    """Mount ``workspace`` as the results dock held at ``holder.<attr>``, REPLACING the previous one: the old
+    workspace is detached (its selection subscriptions and its viewer pick handler removed) and its dock
+    removed, so re-running an analysis never stacks live-but-orphaned workspaces (Completion Spec F6). Stores
+    ``(dock, workspace)`` back on ``holder`` and returns the dock (None headless)."""
+    from pycat.utils.general_utils import debug_log
+    previous = getattr(holder, attr, None)
+    old_dock, old_ws = previous if isinstance(previous, tuple) else (None, previous)
+    if old_ws is not None and old_ws is not workspace and callable(getattr(old_ws, 'detach', None)):
+        old_ws.detach()
+    if old_dock is not None and window:
+        try:
+            window.remove_dock_widget(old_dock)
+        except Exception as exc:      # broad-ok: ui_cleanup — the user may already have closed the old dock
+            debug_log('dock_space: could not remove the previous results dock', exc)
+    dock = add_results_dock(window, workspace, name=name)
+    setattr(holder, attr, (dock, workspace))
     return dock
 
 

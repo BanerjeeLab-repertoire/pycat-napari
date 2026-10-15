@@ -57,16 +57,20 @@ CONDENSATE_PIPELINE = [
 ]
 
 TIMESERIES_PIPELINE = [
+    # 1.7.004: cells once on the time average, then every frame segmented as the 2D workflow does. The older
+    # keyframe / zarr steps are under the panel's collapsed "Performance & advanced steps" and stay listed [adv].
     ('open_stack',              '1.  Open IMS / image stack'),
-    ('set_frame_range',         '2.  Select reference frame & range'),
-    ('measure_line',            '3.  Measure lines'),
-    ('ts_upscale_stack',        '4.  Upscale stack  [optional]'),
-    ('lazy_preprocess_stack',   '5.  Preprocess stack (zarr-backed)'),
-    ('auto_crop_roi',           '5b. Auto-crop ROI  [batch, opt]'),
-    ('ts_cellpose_keyframe',    '6.  Keyframe Cellpose segmentation'),
-    ('cell_analysis',           '7.  Cell Analyzer'),
-    ('timeseries_condensate_analysis', '8.  Time-Series Condensate Analysis'),
-    ('export_timeseries_video', '9.  Export video  [opt]'),
+    ('measure_line',            '2.  Measure lines'),
+    ('ts_cells_time_average',   '3.  Segment cells on the time average'),
+    ('cell_timeseries',         '4.  Cellular time-series analysis'),
+    ('set_frame_range',         '5.  Reference frame & range  [adv]'),
+    ('ts_upscale_stack',        '6.  Upscale stack  [adv]'),
+    ('lazy_preprocess_stack',   '7.  Preprocess stack (zarr-backed)  [adv]'),
+    ('auto_crop_roi',           '7b. Auto-crop ROI  [batch, adv]'),
+    ('ts_cellpose_keyframe',    '8.  Keyframe Cellpose segmentation  [adv]'),
+    ('cell_analysis',           '9.  Cell Analyzer  [adv]'),
+    ('timeseries_condensate_analysis', '10. Legacy time-series condensate analysis  [adv]'),
+    ('export_timeseries_video', '11. Export video  [opt]'),
 ]
 
 COLOC_PIPELINE = [
@@ -109,12 +113,14 @@ INVITRO_FLUOR_PIPELINE = [
 ]
 
 TIMESERIES_INVITRO_FLUOR_PIPELINE = [
+    # The panel's optional "Preprocess" box is a layer chooser with no operation, so it is not a step (it was
+    # listed with an empty key -- unrecordable, unreplayable -- until 1.7.005).
     ('open_stack',                '1.  Open time-series image'),
-    ('',                          '2.  Preprocess (per frame)  [opt]'),
-    ('tsivf_segment_stack',       '3.  Segment droplets (every frame)'),
-    ('tsivf_link_condensates',    '4.  Link condensates (fusion-aware)'),
-    ('tsivf_object_trajectories', '5.  Per-condensate trajectories'),
-    ('tsivf_field_trajectories',  '6.  Field trajectories (Φ, partition, C_sat)'),
+    ('tsivf_segment_stack',       '2.  Segment droplets (every frame)'),
+    ('tsivf_link_condensates',    '3.  Link condensates (fusion-aware)'),
+    ('tsivf_object_trajectories', '4.  Per-condensate trajectories'),
+    ('tsivf_field_trajectories',  '5.  Field trajectories (Φ, partition, C_sat)'),
+    ('tsivf_kinetics',            '6.  Droplet kinetics (linked results)'),
 ]
 
 INVITRO_BF_PIPELINE = [
@@ -129,19 +135,21 @@ INVITRO_BF_PIPELINE = [
 ]
 
 FIBRIL_PIPELINE = [
-    ('measure_line',            '1.  Measure lines'),
-    ('upscaling',               '2.  Upscale  [opt]'),
-    ('',                        '3.  Bilateral filter  [opt]'),
-    ('preprocessing',           '4.  Pre-process image'),
-    ('background_removal',      '5.  Background removal'),
-    ('',                        '6.  Peak & edge enhancement'),
-    ('',                        '7.  Morphological Gaussian  [opt]'),
-    ('',                        '8.  Random Forest  [opt]'),
-    ('',                        '9.  Local thresholding  [opt]'),
-    ('',                        '10. Label connected components'),
-    ('',                        '11. Measure binary mask'),
-    ('morphological_complexity','12. Morphological Complexity  [opt]'),
-    ('organizational_metrics',  '13. Organizational Metrics  [opt]'),
+    # Every step has a key (1.7.005): the seven image-chain steps were unkeyed, so never recorded or replayed.
+    ('open_image',              '1.  Open image'),
+    ('measure_line',            '2.  Measure lines'),
+    ('upscaling',               '3.  Upscale  [opt]'),
+    ('bilateral_filter',        '4.  Bilateral filter  [opt]'),
+    ('preprocessing',           '5.  Pre-process image'),
+    ('background_removal',      '6.  Background removal'),
+    ('peak_edge_enhancement',   '7.  Peak & edge enhancement'),
+    ('morphological_gaussian',  '8.  Morphological Gaussian  [opt]'),
+    ('cellpose_segmentation',   '9.  Segmentation (Random Forest / Cellpose)  [opt]'),
+    ('local_thresholding',      '10. Local thresholding  [opt]'),
+    ('label_binary_mask',       '11. Label connected components'),
+    ('measure_binary_mask',     '12. Measure binary mask'),
+    ('morphological_complexity','13. Morphological Complexity  [opt]'),
+    ('organizational_metrics',  '14. Organizational Metrics  [opt]'),
 ]
 
 ZSTACK_PIPELINE = [

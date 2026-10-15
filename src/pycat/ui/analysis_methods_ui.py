@@ -377,15 +377,15 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
     """
     Dedicated pipeline dock for time-series condensate analysis.
 
-    Workflow order:
+    Workflow order (1.7.004):
       1. Open Image Stack   — loads (T,H,W) via Open/Save File(s) > Open Image Stack (T/Z / IMS)
-      2. Select Reference Frame — user picks which frame to use for segmentation
-      3. Pre-process Image  — runs on the reference frame
-      4. Enhanced BG Removal
-      5. Cellpose Segmentation — on the reference frame
-      6. Cell Analyzer — produces Labeled Cell Mask
-      7. Time-Series Condensate Analysis — propagates segmentation across all frames
-      8. Save and Clear
+      2. Measure Line       — condensate size (segmentation scale) and cell size (Cellpose)
+      3. Cells, once        — Cellpose on the time average
+      4. Every frame        — segmented as the 2D workflow segments one image, measured on raw counts,
+                              condensates tracked, kinetics per cell, linked results
+      (collapsed) Performance & advanced — frame range / crop, upscaling, the cached preprocessed stack,
+                              keyframe Cellpose for moving cells, the earlier area-only analysis
+      5. Advanced analysis, condensate physics, video export, Save and Clear
     """
 
     def __init__(self, viewer, central_manager):
@@ -421,27 +421,30 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
                 "Load your time-series via "
                 "<i>★ Open/Save File(s) → Open Image Stack (T/Z / IMS)</i>"))
 
-        # ── Step 2: Reference frame selector ─────────────────────────────
-        self._add_reference_frame_selector(self.ts_layout)
-
-        # ── Steps 3-4: measurement lines, upscale, lazy stack preprocessing ─
-        # Order matches the 2D cellular workflow: measure → upscale → preprocess.
-        # Upscaling is optional and produces a lazy zarr-backed stack, so
-        # downstream preprocess/Cellpose/analysis all run on the upscaled data.
+        # ── Step 2: measurement lines (condensate size -> segmentation scale; cell size -> Cellpose) ──
         tfu._add_measure_line(layout=self.ts_layout)
-        tfu._add_ts_upscale_stack(layout=self.ts_layout)
-        tfu._add_lazy_preprocess_stack(layout=self.ts_layout)
 
-        # ── Steps 5-6: Cellpose and cell analysis ─────────────────────────
-        # Keyframe Cellpose: runs Cellpose every N frames and propagates
-        # the nearest mask to all other frames — much faster than running
-        # on every frame while remaining accurate for slow-moving cells.
-        # Cell Analyzer still runs on the frame-0 mask as normal.
-        tfu._add_run_ts_cellpose(layout=self.ts_layout)
-        tfu._add_run_cell_analysis_func(layout=self.ts_layout)
+        # ── Steps 3-5: cells once on the time average, then every frame segmented as 2D segments one
+        # image, measured on raw counts, condensates tracked, kinetics per cell, linked results (1.7.004).
+        tfu._add_cell_timeseries(layout=self.ts_layout)
 
-        # ── Step 7: Time-Series Condensate Analysis ────────────────────────
-        tfu._add_run_timeseries_condensate_analysis(layout=self.ts_layout)
+        # ── Performance & advanced: frame range / rectangle crop, upscaling, the cached preprocessed
+        # stack, keyframe Cellpose for cells that move, and the earlier area-only analysis. They make a
+        # long movie tractable on a modest computer (or handle moving cells); collapsed by default.
+        adv_cb = QCheckBox("Performance && advanced steps (frame range, crop, upscale, cache, moving cells)")
+        self.ts_layout.addWidget(adv_cb)
+        adv_box = QWidget()
+        adv_layout = QVBoxLayout(adv_box)
+        adv_layout.setContentsMargins(12, 0, 0, 0)
+        self._add_reference_frame_selector(adv_layout)
+        tfu._add_ts_upscale_stack(layout=adv_layout)
+        tfu._add_lazy_preprocess_stack(layout=adv_layout)
+        tfu._add_run_ts_cellpose(layout=adv_layout)
+        tfu._add_run_cell_analysis_func(layout=adv_layout)
+        tfu._add_run_timeseries_condensate_analysis(layout=adv_layout)
+        adv_box.setVisible(False)
+        adv_cb.toggled.connect(adv_box.setVisible)
+        self.ts_layout.addWidget(adv_box)
 
         # ── Step 8: Advanced Analysis (dynamic spatial / morphological) ─────
         tfu._add_advanced_analysis(layout=self.ts_layout)

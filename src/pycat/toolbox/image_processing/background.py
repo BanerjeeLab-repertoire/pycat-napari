@@ -769,13 +769,11 @@ def wbns_func(img, psf_px_resolution, noise_lvl):
         img = np.pad(img, ((0,0), (0, 1)), 'edge')
         pad_2 = True
 
-    # Suppress VisibleDeprecationWarning from NumPy, potentially triggered by pywavelets.
-    # This is a temporary measure due to an unresolved issue in the pywavelets package
-    # that does not affect the functionality of our code but produces unwanted warning messages.
-    warnings.filterwarnings("ignore", message=".*Creating an ndarray from ragged nested sequences.*") # pywavelets must have some stupid bug that I cant figure out so Im just going to suppress the annoying warning here
-    
-    # Background and noise extraction
-    Background, Noise, BG_unfiltered = wavelet_bg_and_noise_calculation(img, num_levels, noise_lvl)
+    # Suppress NumPy's ragged-array VisibleDeprecationWarning from pywavelets -- SCOPED (1.7.005): this was a bare
+    # filterwarnings() here, a permanent process-wide filter installed on first call (Completion Spec D "Watch").
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=".*Creating an ndarray from ragged nested sequences.*")
+        Background, Noise, BG_unfiltered = wavelet_bg_and_noise_calculation(img, num_levels, noise_lvl)
 
     # Convert arrays to float32 for processing
     Noise = np.asarray(Noise, dtype='float32')

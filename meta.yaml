@@ -28,34 +28,46 @@ build:
 
 requirements:
   build:
-    - python >=3.12,<3.14
+    - python >=3.12,<3.13
     - setuptools >=42
     - pip
     - wheel
   run:
-    - python >=3.12,<3.14
+    # Mirrors [project].dependencies in pyproject.toml (conda-forge names); tests/test_install_routes_agree.py
+    # fails when a pyproject dependency is missing here.
+    - python >=3.12,<3.13
     # BioIO replaced aicsimageio in 1.6.0 (it is frozen and its pins held numpy<2/zarr<3).
-    - bioio
-    - bioio-ome-tiff
-    - bioio-tifffile
-    - bioio-czi
-    - cellpose
+    - bioio >=3.5,<4
+    - bioio-ome-tiff >=1.4,<2
+    - bioio-tifffile >=1.3,<2
+    - bioio-czi >=3.0,<4
+    - bioio-imageio >=1.3,<2
+    - cellpose <4                  # Cellpose 4 removed the cyto2 CNN
     - matplotlib
-    - napari
+    - napari >=0.9.1,<0.10
     - numpy >=1.22
     - opencv
     - pandas
     - pydantic
-    - pyqt
+    - qtpy >=2.4
+    - pyside6 >=6.12
     - pytorch                      # [not arm64]
     - pytorch ==2.1.2              # [arm64]
     - torchvision                  # [arm64]
     - pywavelets
     - scikit-image
     - scikit-learn
+    - networkx
     - scipy
+    - openpyxl
+    - largestinteriorrectangle
+    - imaris-ims-file-reader
+    - av
+    - hdf5plugin
+    - numba
     - seaborn
     - simpleitk
+    - zarr >=2.12
 
 test:
   imports:

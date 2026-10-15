@@ -575,6 +575,7 @@ class _StubViewer:
         self.layers = _StubLayers(layers)
         self.dims = self._Dims()
         self.camera = self._Cam()
+        self.scene = __import__('types').SimpleNamespace(camera=self.camera)   # napari >= 0.9 path
 
     def _add(self, data, **kwargs):
         layer = _OverlayLayer(data, **kwargs)

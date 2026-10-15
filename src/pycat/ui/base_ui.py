@@ -714,6 +714,13 @@ class BaseUIClass:
         if bp:
             bp.record(step_name, params)
 
+    def _active_layer_name(self):
+        """The selected layer's name, read BEFORE a step runs (the step usually selects its new output layer), so
+        a recorded step names the layer it operated on and batch replays it on the same input."""
+        layer = getattr(getattr(getattr(self, 'viewer', None), 'layers', None), 'selection', None)
+        layer = getattr(layer, 'active', None)
+        return getattr(layer, 'name', None)
+
     def _layer_row(self, layout, label_text, layer_type, name_hint='',
                    optional=False, binding=''):
         """Add a status-circle + label + layer-dropdown row to *layout*, matching

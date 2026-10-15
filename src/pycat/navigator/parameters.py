@@ -237,6 +237,24 @@ class ParamReview:
         return {s.step_name: s.provenance() for s in self.steps}
 
 
+def flat_reviewed_parameters(review) -> dict:
+    """The reviewed values as the flat ``{param: value}`` a generated panel seeds into the data repository.
+
+    The dock holds a :class:`~pycat.navigator.parameters.ParamReview` (``{step: {param: value}}``); the panel
+    seeds ``repo[param] = value``. Handing it the ``ParamReview`` raised ``TypeError: 'ParamReview' object is
+    not iterable`` inside the panel build, which the build's broad handler swallowed -- "Build method panel"
+    silently did nothing (Completion Spec C3). Later steps win a name shared between steps, as the run would
+    apply them in order."""
+    if review is None:
+        return {}
+    if isinstance(review, dict):
+        return dict(review)
+    flat = {}
+    for values in review.params_by_step().values():
+        flat.update(values)
+    return flat
+
+
 def build_param_review(plan, ctx=None) -> ParamReview:
     """Build the reviewable parameter set for ``plan``: one :class:`ReviewedStep` per adapter-covered step that
     will actually run (``run`` / ``caveat`` in :func:`execution_order`) and declares material params, seeded by

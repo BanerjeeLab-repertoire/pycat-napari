@@ -122,8 +122,11 @@ class _FilteringWidgetsMixin:
         filter_size_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         bilateral_layout.addWidget(filter_size_input) # Add the text input to the layout
         bilateral_button = QPushButton("Apply Filter") # Create a button widget
-        bilateral_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_apply_bilateral_filter, None, filter_size_input, self.viewer))
+        def _on_bilateral():
+            src = self._active_layer_name()
+            self.on_general_button_clicked(run_apply_bilateral_filter, None, filter_size_input, self.viewer)
+            self._record('bilateral_filter', {'layer': src, 'radius': float(filter_size_input.text() or 2)})
+        bilateral_button.clicked.connect(_on_bilateral)
         bilateral_layout.addWidget(bilateral_button) # Add the button to the layout
         bilateral_widget = QWidget()
         bilateral_widget.setLayout(bilateral_layout)
@@ -228,8 +231,14 @@ class _FilteringWidgetsMixin:
         self.add_text_label(enhancement_layout, 'Peak and Edge Enhancement', bold=True) # Add widget title label
         enhancement_button = QPushButton("Run Edge Enhancement") # Create a button widget
         enhancement_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        enhancement_button.clicked.connect(lambda: self.on_general_button_clicked( 
-            run_peak_and_edge_enhancement, None, self.central_manager.active_data_class, self.viewer))
+        def _on_enhance():
+            src = self._active_layer_name()
+            self.on_general_button_clicked(
+                run_peak_and_edge_enhancement, None, self.central_manager.active_data_class, self.viewer)
+            self._record('peak_edge_enhancement', {
+                'layer': src,
+                'ball_radius': self.central_manager.active_data_class.data_repository.get('ball_radius')})
+        enhancement_button.clicked.connect(_on_enhance)
         enhancement_layout.addWidget(enhancement_button) # Add the button to the layout
         enhancement_widget = QWidget() 
         enhancement_widget.setLayout(enhancement_layout)
@@ -245,8 +254,11 @@ class _FilteringWidgetsMixin:
         filter_size_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         gauss_filter_layout.addWidget(filter_size_input) # Add the text input to the layout
         gauss_filter_button = QPushButton("Apply Filter") # Create a button widget
-        gauss_filter_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_morphological_gaussian_filter, None, filter_size_input, self.viewer))
+        def _on_morph_gauss():
+            src = self._active_layer_name()
+            self.on_general_button_clicked(run_morphological_gaussian_filter, None, filter_size_input, self.viewer)
+            self._record('morphological_gaussian', {'layer': src, 'filter_size': int(filter_size_input.text() or 2)})
+        gauss_filter_button.clicked.connect(_on_morph_gauss)
         gauss_filter_layout.addWidget(gauss_filter_button) # Add the button to the layout
         gauss_filter_widget = QWidget()
         gauss_filter_widget.setLayout(gauss_filter_layout)

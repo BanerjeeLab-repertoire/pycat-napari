@@ -185,14 +185,27 @@ def test_partition_field_recovers_Kp_across_low_dilute_intensities(bulk, true_kp
 
 
 @pytest.mark.base
-def test_partition_field_mean_fallback_is_bounded_not_an_explosion():
-    """CHARACTERISATION: on a degenerate right-skewed background (30% near-zero pixels) the 10th-percentile
-    collapses to ~0 and the documented mean-fallback engages. It biases Kp (the mean sits below the true dilute),
-    but the point of the floor is that the result stays BOUNDED — not the ~1e8 a divide-by-~0 would give. This
-    pins the deliberate trade so a future change does not silently reintroduce the explosion."""
+def test_partition_field_is_exact_on_a_degenerate_right_skewed_background():
+    """On a background with 30% near-zero pixels the old 10th-percentile estimate collapsed to ~0 and a mean
+    fallback engaged; that was pinned only as BOUNDED (``0 < kp < 100`` for a true Kp of 6) -- the clipping pinned
+    as acceptable with no accuracy requirement (Completion Spec A2b). The dilute phase is now the background
+    MEDIAN, which this background's majority still sits at: Kp is exact."""
     from pycat.toolbox.invitro.partition import partition_coefficient_field
     img, lbl = _ivf_field(bulk=0.1, dense=0.6, skew_zeros=0.3)
     res = partition_coefficient_field(img, lbl)
-    kp = res['partition_coeff']
-    assert np.isfinite(kp) and 0 < kp < 100        # bounded — NOT the 1e8 the raw percentile-0 would produce
-    assert res['c_sat_proxy'] > 0                  # the floor kept the denominator off zero
+    assert res['partition_coeff'] == pytest.approx(6.0, rel=1e-6)
+    assert res['dilute_denominator'] == pytest.approx(0.1) and not res['dilute_fallback_used']
+
+
+@pytest.mark.base
+@pytest.mark.parametrize("noise_cv", [0.0, 0.05, 0.2, 0.4])
+@pytest.mark.parametrize("bulk,true_kp", [(0.1, 6.0), (0.003, 200.0)])
+def test_partition_field_recovers_Kp_under_dilute_noise(noise_cv, bulk, true_kp):
+    """The golden master above is noise-free: there ``percentile == mean`` by construction and the biased branch
+    could not engage (spec A2b). The same fields with relative noise on the dilute phase: still exact."""
+    from pycat.toolbox.invitro.partition import partition_coefficient_field
+    img, lbl = _ivf_field(bulk=bulk, dense=0.6)
+    rng = np.random.default_rng(3)
+    bg = lbl == 0
+    img[bg] = img[bg] * (1.0 + noise_cv * rng.standard_normal(int(bg.sum())))
+    assert partition_coefficient_field(img, lbl)['partition_coeff'] == pytest.approx(true_kp, rel=0.02)

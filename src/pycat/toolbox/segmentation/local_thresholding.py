@@ -88,6 +88,12 @@ def local_thresholding_func(image, window_size, k_val=-0.5, mode='AND'):
 
     return thresh_mask
 
+def local_threshold_k(slider_value):
+    """The Niblack/Sauvola k for a k-slider position (0..100 -> -0.5..0.5). One definition for the run, the panel
+    label and the recorded step, which disagreed until 1.7.005."""
+    return (int(slider_value) * 0.01) - 0.5
+
+
 def run_local_thresholding(k_slider, window_slider, mode_dropdown, viewer):
     """
     Applies local thresholding to an active image layer in a Napari viewer based on user inputs from sliders and a dropdown menu.
@@ -116,7 +122,7 @@ def run_local_thresholding(k_slider, window_slider, mode_dropdown, viewer):
     """
 
     # Convert slider value to k-value and retrieve window size
-    k_value = (k_slider.value() * 0.01) - 0.5  # Adjust slider value to k-value range
+    k_value = local_threshold_k(k_slider.value())
     window_size = window_slider.value()  # Directly use slider value for window size
 
     # Identify the currently active layer

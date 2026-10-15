@@ -248,11 +248,9 @@ def _enable_auto_scale_bar(viewer, central_manager, image_layer=None):
       transform that never touches ``layer.data`` or any calculation).
     - No metadata               → pixel bar (scale left at 1).
 
-    ``scale_bar.unit`` is set for older napari, but newer napari (>=0.8) deprecated it into a
-    no-op — the displayed label there comes from ``Layer.units`` instead (set via
-    ``_align_layer_scales``, on this function's behalf, for every non-lazy layer). ``Layer.units``
-    is never set on a LAZY 3-D stack — that was the confirmed cause of the black canvas on
-    napari 0.7.1 — so a lazy stack still falls back to napari's old ``scale_bar.unit`` path only.
+    The bar's label comes from ``Layer.units`` (set via ``_align_layer_scales`` for every non-lazy layer).
+    ``scale_bar.unit`` -- a no-op since napari 0.8, removed in 0.10 -- is no longer set: PyCAT requires
+    napari >= 0.9.1 (1.7.005), so the old fallback could not run anywhere.
     """
     try:
         import napari.layers as _nl
@@ -264,7 +262,7 @@ def _enable_auto_scale_bar(viewer, central_manager, image_layer=None):
             if not imgs:
                 return
             image_layer = imgs[-1]
-        sb = viewer.scale_bar
+        sb = viewer.canvas.overlays.scale_bar
         sb.visible = True
         # Show a µm bar whenever a real pixel size is known — from metadata
         # OR entered by the user (e.g. via the pixel-size gate). Only fall
@@ -287,64 +285,12 @@ def _enable_auto_scale_bar(viewer, central_manager, image_layer=None):
             label = 'um'
         else:
             label = 'px'
-        try:
-            import warnings as _w
-            with _w.catch_warnings():
-                _w.simplefilter('ignore', FutureWarning)
-                sb.unit = label
-        except Exception:
-            pass
         # Now that the reference image carries a µm scale, bring any layers
         # that were added earlier (e.g. the diameter overlays) into alignment.
         if label == 'um':
             _align_layer_scales(viewer, central_manager)
     except Exception as e:
         print(f"[PyCAT] auto scale bar skipped: {e}")
-
-def _update_scale_bar_for_active_layer(viewer, central_manager):
-    """Update the napari scale bar to reflect the physical pixel size of
-    whichever Image layer is currently active (top of the selection).
-
-    This fires on viewer.layers.selection.events.changed so switching to
-    an upscaled layer (scale = source_scale / 2) shows the correct bar.
-
-    Scale bar logic:
-      • layer.scale[-1] is the physical size of one pixel in µm.
-      • The bar length in world units is unchanged — what changes is the
-        label. If the upscaled layer has scale 0.085 µm/px and the bar
-        spans 588 pixels, it correctly shows ~50 µm, the same FOV as the
-        original 294-px image at 0.17 µm/px. So the bar length is right;
-        we just need to make sure the unit is 'um' when any valid µm scale
-        is set on the active layer.
-    """
-    try:
-        import napari.layers as _nl
-        import numpy as _np
-        import warnings as _w
-        # Find the topmost selected Image layer
-        sel = [l for l in viewer.layers.selection
-               if isinstance(l, _nl.Image)]
-        if not sel:
-            return
-        # napari puts the most-recently-selected layer last in the set
-        active = sel[-1]
-        sc = [float(v) for v in active.scale]
-        if not sc:
-            return
-        px = sc[-1]   # µm per pixel on the active layer
-        sb = viewer.scale_bar
-        if _np.isfinite(px) and px > 0 and _is_calibrated(central_manager, px):
-            # Valid µm scale — show µm bar
-            with _w.catch_warnings():
-                _w.simplefilter('ignore', FutureWarning)
-                sb.unit = 'um'
-        else:
-            # Unit or pixel scale — show px bar
-            with _w.catch_warnings():
-                _w.simplefilter('ignore', FutureWarning)
-                sb.unit = 'px'
-    except Exception:
-        pass
 
 def _fit_view_to_layer(viewer, central_manager, layer=None, margin=0.9, attempt=0):
     """Fit the napari camera to an image layer, mirroring the (working)
@@ -397,20 +343,20 @@ def _fit_view_to_layer(viewer, central_manager, layer=None, margin=0.9, attempt=
         sizes = [float(maxs[d] - mins[d]) for d in dims]
 
         center = (mins + maxs) / 2.0
-        viewer.camera.center = tuple(float(center[d]) for d in dims)
+        viewer.scene.camera.center = tuple(float(center[d]) for d in dims)
 
         if nd == 2 and cw and ch and all(s > 0 for s in sizes):
             # displayed dims are [y, x]; canvas is (width=x, height=y).
             _z = min(ch / sizes[0], cw / sizes[1]) * margin
-            _z_before = float(viewer.camera.zoom)
-            viewer.camera.zoom = _z
+            _z_before = float(viewer.scene.camera.zoom)
+            viewer.scene.camera.zoom = _z
             if os.environ.get('PYCAT_DEBUG'):
                 print(f"[PyCAT fit] layer='{layer.name}' extent_world_size(yx)={sizes} "
                       f"canvas(w,h)=({cw},{ch}) zoom {_z_before:.4f} -> {_z:.4f} "
                       f"(attempt {attempt})")
                 from qtpy.QtCore import QTimer as _QTd
                 _QTd.singleShot(600, lambda: print(
-                    f"[PyCAT fit] zoom 600ms later = {float(viewer.camera.zoom):.4f} "
+                    f"[PyCAT fit] zoom 600ms later = {float(viewer.scene.camera.zoom):.4f} "
                     f"(if changed, something reset it)"))
         else:
             viewer.reset_view()

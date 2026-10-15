@@ -1,24 +1,31 @@
-# BioIO replaced aicsimageio in 1.6.0. aicsimageio is FROZEN in maintenance mode and its
-# pins (zarr<2.16, tifffile<2023.3, fsspec<2023.9, lxml<5) are what held numpy<2 and
-# zarr<3 in place. Removing it FREES the pins. BioIO's readers are separate packages --
-# bioio-czi is NOT optional (Zeiss market share).
-bioio
-bioio-ome-tiff
-bioio-tifffile
-bioio-czi
-cellpose
+# GENERATED from pyproject.toml by tools/sync_requirements.py -- do not edit by hand.
+# pyproject.toml is the single source of truth; the comments explaining each pin live there.
+bioio>=3.5,<4
+bioio-ome-tiff>=1.4,<2
+bioio-tifffile>=1.3,<2
+bioio-czi>=3.0,<4
+bioio-imageio>=1.3,<2
+cellpose<4
 matplotlib
-napari
-numpy
+napari>=0.9.1,<0.10
+numpy>=1.22
 opencv-python-headless
 pandas
 pydantic
-qtpy
-PySide6-Essentials
+qtpy>=2.4
+PySide6-Essentials>=6.12
 torch
 pywavelets
 scikit-image
 scikit-learn
+networkx
 scipy
+openpyxl
+largestinteriorrectangle
+imaris-ims-file-reader
+av
+hdf5plugin
+numba
 seaborn
 simpleitk
+zarr>=2.12

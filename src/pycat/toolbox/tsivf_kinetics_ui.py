@@ -11,6 +11,8 @@ from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (QComboBox, QFormLayout, QGroupBox, QLabel, QListWidget, QListWidgetItem, QPushButton,
                             QSizePolicy, QSpinBox)
 
+from pycat.toolbox.invitro.timeseries_kinetics import short_channel_name  # noqa: F401  (re-exported; headless home)
+
 #: Layer names that are transmitted light — measured only if the user ticks them (they carry no fluorescence).
 _TRANSMITTED_HINT = ('brightfield', 'transmitted', 'dic', 'phase')
 
@@ -41,14 +43,6 @@ def channel_checklist(ui):
     ui.viewer.layers.events.removed.connect(_refresh)
     _refresh()
     return lst
-
-
-def short_channel_name(layer_name):
-    """'sub-HHrz-Trial-4 C0-488 Stack' -> 'C0-488': the channel part of a PyCAT stack layer name, so result
-    columns read ``net_C0_488`` instead of ``net_sub_HHrz_Trial_4_C0_488_Stack``. The full name if none."""
-    import re
-    m = re.search(r'(?:^|\s)(C\d+-[^\s\[\]]+)', str(layer_name))
-    return m.group(1) if m else str(layer_name)
 
 
 def checked_channels(ui, lst, shape):
@@ -119,12 +113,38 @@ def add_kinetics_step(ui, layout):
         _show(f"TSIVF Kinetics — {ch}", [("Heterogeneity summary", pd.DataFrame([summary])),
                                           ("Per-droplet kinetics", kin), ("Heterogeneity over time", curve)])
         _plot_kinetics(ui, linked, kin, curve, ch, dt)
+        _linked_results(ui, linked, kin, ch, dt)
         napari_show_info(f"{summary.get('n_responded', 0)} of {summary['n_tracks']} droplets responded; "
                          f"half-time median {summary.get('t_half_s_median', np.nan) / 60:.1f} min "
                          f"(IQR {summary.get('t_half_s_iqr', np.nan) / 60:.1f} min).")
 
     run.clicked.connect(_on_run)
     layout.addWidget(grp)
+
+
+def _linked_results(ui, linked, kin, channel, dt):
+    """The kinetics as linked results (1.7.004): droplet traces, kinetics vs size and the droplet table, all on
+    the application selection, with the tracked-droplet layer as a click target -- the panel's other workflows'
+    brushing, plus the time axis (click a trace: select the droplet and jump to that frame)."""
+    from pycat.toolbox.invitro.timeseries_kinetics import brush_ready_kinetics
+    from pycat.toolbox.timeseries.results_view import build_invitro_workspace
+    from pycat.utils.dock_space import add_results_dock
+    service = getattr(ui.central_manager, 'selection', None)
+    if service is None:
+        return
+    source = ui._dr().get('file_path')
+    tables = brush_ready_kinetics(linked, kin, channel, dt, ui._mpx(), source)
+    ui._dr()['tsivf_kinetics_df'] = tables['droplets']
+    ui._dr()['tsivf_droplet_frames_df'] = tables['droplet_frames']
+    if not len(tables['droplets']):
+        return
+    track_layer = next((lyr for lyr in ui.viewer.layers if lyr.name == "TSIVF Tracked Droplets"), None)
+    old = getattr(ui, '_tsivf_workspace', None)
+    if old is not None:
+        old.detach()
+    ui._tsivf_workspace = build_invitro_workspace(tables, service, viewer=ui.viewer, track_layer=track_layer,
+                                                  source_path=source)
+    add_results_dock(ui.viewer.window, ui._tsivf_workspace, name=f"TSIVF kinetics — linked ({channel})")
 
 
 def _plot_kinetics(ui, linked, kin, curve, channel, dt):
