@@ -20,6 +20,7 @@ from pycat.utils.general_utils import debug_log
 from pycat.utils.notify import show_warning as napari_show_warning
 from pycat.utils.notify import show_info as napari_show_info
 from pycat.utils.fit_quality import assess_fit
+from pycat.toolbox.condensate_physics import lag_budget as _lb
 
 
 # ── How long must a track be before its MSD means anything? ──────────────────
@@ -239,6 +240,10 @@ def compute_msd(
     frames = sorted(tracks_df['frame'].unique())
     if max_lag is None:
         max_lag = max(1, len(frames) // _MAX_LAG_FRACTION)
+    # What lag window this movie supports. A movie shorter than the minimum track length could never meet it:
+    # apply the rule the minimum comes from (track >= 4x the longest lag) to the movie that exists, and say so.
+    budget = _lb.msd_lag_budget(len(frames), frame_interval_s, min_track_length, max_lag)
+    min_track_length = budget['effective_min_track_length']
 
     # Say what the length filter rejected, and whether those look like beads the
     # LINKER lost rather than beads that were absent. Reported before the work
@@ -350,7 +355,11 @@ def compute_msd(
             'n_tracks':   n_tracks,
             'n_pairs':    pair_counts[lag],
         })
-    return pd.DataFrame(rows)
+    out = pd.DataFrame(rows, columns=['lag_frames', 'lag_s', 'msd_um2', 'msd_std', 'msd_sem', 'n_tracks',
+                                      'n_pairs'])     # columns even when empty: the fit reports, never KeyErrors
+    out.attrs['lag_budget'] = budget = _lb.observed(budget, out)      # restated from the lags actually computed
+    _lb.warn_if_lag_limited(budget)
+    return out
 
 
 def _confined_msd(t, L2, D, off):
@@ -691,12 +700,16 @@ def fit_anomalous_diffusion(
         fit_window_s    : (lag_lo, lag_hi) the defensible window used
         fit_window_warning : str or None — set when data can't cover the window
     """
+    budget = getattr(msd_df, 'attrs', {}).get('lag_budget')
+    if msd_df is None or len(msd_df) == 0 or 'n_pairs' not in msd_df.columns:
+        return _with_lag_budget(_insufficient_result(None, None, 'No MSD lags to fit: no track met the minimum '
+                                                     'track length.'), budget)   # caveat appends the why
     df, lag_lo, lag_hi, window_warning = _lag_window_gate(
         msd_df, max_lag_fit, frame_interval_s, upper_lag_rule, upper_lag_fraction,
         upper_lag_fixed_s, min_independent_pairs, confine_to_defensible_bounds)
 
     if len(df) < 3:
-        return _insufficient_result(lag_lo, lag_hi, window_warning)
+        return _with_lag_budget(_insufficient_result(lag_lo, lag_hi, window_warning), budget)
 
     tau = df['lag_s'].values.astype(float)
     msd = df['msd_um2'].values.astype(float)
@@ -719,9 +732,21 @@ def fit_anomalous_diffusion(
     r2, msd_fit, tau_fit, motion_type, fit_quality, confinement = _classify_msd_motion(
         D, alpha, sigma_loc_um, tau, msd)
 
-    return _package_msd_result(
+    return _with_lag_budget(_package_msd_result(
         D, alpha, motion_type, r2, fit_quality, confinement, sigma_loc_um, tau_fit, msd_fit,
-        a_ll, log_intercept, lag_lo, lag_hi, window_warning, identifiability)
+        a_ll, log_intercept, lag_lo, lag_hi, window_warning, identifiability), budget)
+
+
+def _with_lag_budget(result: dict, budget) -> dict:
+    """A fit states the lag window it came from; a short window's caveat joins ``fit_window_warning``."""
+    if not budget:
+        return result
+    out = {**result, **_lb.fit_fields(budget)}
+    note = _lb.caveat(budget)
+    if note:
+        prior = out.get('fit_window_warning')
+        out['fit_window_warning'] = f'{prior} {note}' if prior else note
+    return out
 
 
 def _classify_msd_motion(D, alpha, sigma_loc_um, tau, msd):
@@ -868,6 +893,7 @@ def msd_per_track(
         track_id, n_frames, D_um2_per_s, alpha, motion_type, r_squared
     """
     rows = []
+    min_track_length = _lb.effective_min_track_length(tracks_df['frame'].nunique(), min_track_length)
     for tid, grp in tracks_df.groupby('track_id'):
         if tid < 0 or len(grp) < min_track_length:
             continue
@@ -904,4 +930,4 @@ def msd_per_track(
             'motion_type': fit['motion_type'],
             'r_squared':   fit['r_squared'],
         })
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=['track_id', 'n_frames', 'D_um2_per_s', 'alpha', 'motion_type', 'r_squared'])

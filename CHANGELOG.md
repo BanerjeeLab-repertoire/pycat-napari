@@ -19,6 +19,18 @@ corpus is unchanged, and the route-equivalence tests still pin each kernel to th
   `image_processing/filter_panels.py` (the filters' viewer panels, from filters.py), `batch/step_operations.py`
   (`_STEP_OPERATIONS`, from batch_step_registry.py). Old import paths still work. Ceilings lowered to match.
 
+### Fixed
+- **MSD on a movie shorter than the minimum track length: a stated lag window, not a crash.** The Dynamics panels
+  (brightfield, in-vitro brightfield, in-vitro fluorescence) use the 200-frame default; on a shorter movie no track
+  could meet it, the MSD came back with no columns and the fit raised `KeyError: 'n_pairs'` (found by the refactor
+  verification on the 40-frame VPT movie). Now the rule the 200 comes from -- a track spans >= 4x the longest lag
+  -- is applied to the movie that exists (`condensate_physics/lag_budget.py`): tracks spanning the movie are used,
+  and the MSD and every fit state their own lag window (frames, interval, duration, tau range, lag count) and warn
+  when it is short of the ~30 lags where the CI on D is honest. Below 3 lags there is no slope: tracks are rejected
+  as before and the result says the movie is too short. A movie at least as long as the requested minimum computes
+  exactly what it did; fits gain `lag_window_*` / `lag_limited` fields and, when short of the honest regime, a
+  caveat in `fit_window_warning`.
+
 ### Added
 - `tests/test_kernel_contract.py`: every kernel is a catalog/measure op and wraps that op's catalog function; no
   launcher (batch replay, panel function, UI module) calls a kernel's function directly; a step's declared

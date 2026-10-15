@@ -44,6 +44,8 @@ def per_track_msd_curves(
     frames = sorted(tracks_df['frame'].unique())
     if max_lag is None:
         max_lag = max(1, len(frames) // 4)
+    from pycat.toolbox.condensate_physics.lag_budget import effective_min_track_length
+    min_track_length = effective_min_track_length(len(frames), min_track_length)
     # Log-spaced unique integer lags in [1, max_lag].
     if max_lag <= n_lags:
         lags = np.arange(1, max_lag + 1)
@@ -77,7 +79,7 @@ def per_track_msd_curves(
                 rows.append({'track_id': int(tid), 'lag_frames': int(lag),
                              'lag_s': lag * frame_interval_s,
                              'msd_um2': float(np.mean(sq[valid]))})
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=['track_id', 'lag_frames', 'lag_s', 'msd_um2'])
 
 
 _KB = 1.380649e-23  # Boltzmann constant, J/K

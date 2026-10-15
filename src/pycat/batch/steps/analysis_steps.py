@@ -564,7 +564,8 @@ def replay_msd_analysis(state: dict, image_path: Path, params: dict, output_dir:
         'frame_interval_s': dt_s, 'min_track_length': min_track_length,
         'max_lag': (int(max_lag) if max_lag is not None else None)}).measurements
     if msd is None or len(msd) == 0:
-        print(f"[PyCAT Batch]   MSD analysis: no track met the {min_track_length}-frame minimum length.")
+        _min = (getattr(msd, 'attrs', {}).get('lag_budget') or {}).get('effective_min_track_length', min_track_length)
+        print(f"[PyCAT Batch]   MSD analysis: no track met the {_min}-frame minimum length.")
         return
     fit = fit_anomalous_diffusion(msd, frame_interval_s=dt_s)
 
