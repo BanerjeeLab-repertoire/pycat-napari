@@ -306,7 +306,10 @@ def run_binary_morph_operation(roi_mask_layer, iter_input, elem_size_input, elem
         raise ValueError('The binary mask and ROI mask must have the same shape.')
 
     # Perform the binary morphological operation
-    processed_mask = binary_morph_operation(binary_mask, iterations=iter_val, element_size=elem_size_val, element_shape=elem_shape_dropdown, mode=mode_dropdown, roi_mask=roi_mask)
+    from pycat.kernel import OperationService
+    processed_mask = OperationService.produce('binary_morph', {'mask': binary_mask}, {
+        'iterations': iter_val, 'element_size': elem_size_val, 'element_shape': elem_shape_dropdown,
+        'mode': mode_dropdown, 'roi_mask': roi_mask})
 
     if labeled_mask_flag:
         processed_mask = sk.measure.label(processed_mask)

@@ -16,9 +16,9 @@ pytestmark = pytest.mark.base
 
 def test_execute_returns_a_typed_AnalysisResult_for_a_migrated_op():
     raw = np.random.default_rng(0).uniform(0, 1000, (48, 48)).astype(np.float64)
-    result = OperationService.execute("rolling_ball", {"image": raw}, {"ball_radius": 25})
+    result = OperationService.execute("bg_removal_enhanced", {"image": raw}, {"ball_radius": 25})
     assert isinstance(result, AnalysisResult)
-    assert result.operation_id == "rolling_ball" and result.entity_type == "image"
+    assert result.operation_id == "bg_removal_enhanced" and result.entity_type == "image"
     # an enhance op: no measurement table, the produced image is the artifact
     assert result.measurements is None
     assert len(result.artifacts) == 1 and np.asarray(result.artifacts[0]).shape == raw.shape
@@ -29,10 +29,14 @@ def test_execute_runs_the_same_science_as_the_toolbox_call():
     direct call, bit for bit. (Route-equivalence proves the batch/session routes agree too.)"""
     from pycat.toolbox.image_processing_tools import rb_gaussian_bg_removal_with_edge_enhancement
     raw = np.random.default_rng(1).uniform(0, 1000, (40, 40)).astype(np.float64)
-    kernel_out = np.asarray(OperationService.execute("rolling_ball", {"image": raw},
+    kernel_out = np.asarray(OperationService.execute("bg_removal_enhanced", {"image": raw},
                                                      {"ball_radius": 20}).artifacts[0])
     direct = np.asarray(rb_gaussian_bg_removal_with_edge_enhancement(raw, 20))
     np.testing.assert_array_equal(kernel_out, direct)
+    # 'rolling_ball' is the catalog's PLAIN removal (it once ran the edge-enhanced one under the same id)
+    from pycat.toolbox.image_processing.background import rb_gaussian_background_removal
+    np.testing.assert_array_equal(OperationService.produce("rolling_ball", {"image": raw}, {"ball_radius": 20}),
+                                  rb_gaussian_background_removal(raw, 20))
 
 
 def test_an_unmigrated_op_raises_a_clear_error_never_silently_reroutes():
@@ -65,7 +69,7 @@ def test_a_measure_op_returns_its_table_in_measurements_not_artifacts():
 def test_migrated_ops_reports_the_kernel_coverage():
     migrated = OperationService.migrated_ops()
     # families 1–6 + increment B filters
-    assert {"rolling_ball", "condensate_physics.compute_msd", "clean", "cellpose", "client_enrichment",
+    assert {"rolling_ball", "bg_removal_enhanced", "morph_gaussian", "condensate_physics.compute_msd", "clean", "cellpose", "client_enrichment",
             "coloc.manders_m1", "coloc.manders_m2", "colocalization",
             "gaussian", "dog", "bilateral", "log", "bandpass", "local_threshold",
             "invert", "rescale", "gabor", "felzenszwalb", "upscale",

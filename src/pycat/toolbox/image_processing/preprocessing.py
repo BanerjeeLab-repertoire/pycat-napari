@@ -19,7 +19,8 @@ import scipy.ndimage as ndi
 from pycat.utils.tag_registry import tags_layer
 from pycat.utils.general_utils import dtype_conversion_func
 from pycat.toolbox.image_processing._base import _safe_equalize_adapthist, _add_image, _napari, apply_rescale_intensity
-from pycat.toolbox.image_processing.background import soft_foreground_suppression, wbns_func
+from pycat.toolbox.image_processing.background import soft_foreground_suppression
+from pycat.toolbox.image_processing.wavelet import wbns_func
 from pycat.toolbox.image_processing.filters import apply_laplace_of_gauss_enhancement
 
 

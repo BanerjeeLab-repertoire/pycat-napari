@@ -375,8 +375,9 @@ def run_fz_segmentation_and_merging(scale_input, sigma_input, min_size_input, me
     merge_tol = float(merge_tol_input.text()) if merge_tol_input.text() else 0.05
 
     # Apply the segmentation and merging process to the selected image layer
-    segmented_img = felzenszwalb_segmentation_and_merging(image, scale=scale, sigma=sigma, min_size=min_size,
-                                                          merge_tol=merge_tol)
+    from pycat.kernel import OperationService
+    segmented_img = OperationService.produce('felzenszwalb', {'image': image}, {
+        'scale': scale, 'sigma': sigma, 'min_size': min_size, 'merge_tol': merge_tol})
 
     # Display the segmented image in the viewer
     from pycat.ui.ui_utils import add_image_with_default_colormap

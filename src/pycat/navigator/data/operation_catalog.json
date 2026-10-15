@@ -1,5 +1,5 @@
 {
-  "count": 94,
+  "count": 95,
   "operations": [
     {
       "aliases": [],
@@ -164,6 +164,23 @@
       "source": "src/pycat/toolbox/brightfield_tools.py",
       "summary": "Brightfield condensate segmentation (DARK objects)",
       "target": "condensate"
+    },
+    {
+      "aliases": [],
+      "function": "rb_gaussian_bg_removal_with_edge_enhancement",
+      "inputs": [
+        "image"
+      ],
+      "kind": "toolbox",
+      "module": "background",
+      "op": "bg_removal_enhanced",
+      "produces": "image",
+      "requirements": [],
+      "role": "image",
+      "role_declared": "image",
+      "source": "src/pycat/toolbox/image_processing/background.py",
+      "summary": "Rolling-ball + Gaussian background removal with Gabor edge enhancement (Background Removal)",
+      "target": null
     },
     {
       "aliases": [],
@@ -1520,13 +1537,13 @@
         "image"
       ],
       "kind": "toolbox",
-      "module": "background",
+      "module": "wavelet",
       "op": "wbns",
       "produces": "image",
       "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
-      "source": "src/pycat/toolbox/image_processing/background.py",
+      "source": "src/pycat/toolbox/image_processing/wavelet.py",
       "summary": "Wavelet-based background and noise subtraction",
       "target": null
     }

@@ -1060,7 +1060,8 @@ def run_puncta_analysis_func(puncta_mask_layer, image_layer, data_instance, view
     # this restores the original behaviour.)
     cell_mask = (labeled_cells > 0).astype(bool)
     green_channel = dtype_conversion_func(image, output_bit_depth='uint16')
-    green_channel = apply_rescale_intensity(green_channel)
+    from pycat.kernel import OperationService
+    green_channel = OperationService.produce('rescale', {'image': green_channel})
     sbs_overlay = create_overlay_image(green_channel, puncta_masks * cell_mask, alpha=0.65)
     # Add as an explicit RGB image (uint8, rgb=True). The array is (H, 2W, 3):
     # a side-by-side of the plain image and the red-overlaid image. Its pixels

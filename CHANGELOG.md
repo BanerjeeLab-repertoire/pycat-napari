@@ -1,3 +1,35 @@
+## [Unreleased]
+**OperationService adopted: one task, one place.** No numbers change: every batch golden master on the real-data
+corpus is unchanged, and the route-equivalence tests still pin each kernel to the direct call bit for bit.
+
+### Changed
+- **Batch replays and panels run their science through `OperationService`.** 39 launcher call sites that reached the
+  toolbox directly (14 batch replays, 25 panel / UI functions) now call `OperationService.execute` / `.produce` with
+  the operation's catalog id: background removal, Cellpose, bilateral, peak & edge, morphological Gaussian, local
+  thresholding, Felzenszwalb, LoG, bandpass, tone map, rescale, invert, upscale, binary morphology, clean
+  detection, client enrichment, pixel colocalization and MSD (condensate physics, VPT, both in-vitro panels,
+  brightfield). A panel and the batch replay of the same task can no longer compute it differently.
+- **Kernels pass parameters straight through** to the toolbox function they declare (`wraps='module:function'`),
+  adding no defaults of their own. The Cellpose kernel had defaulted `postprocess=False` while the function
+  defaults `True`.
+- **`rolling_ball` meant two computations.** The kernel ran the edge-enhanced removal (the Background Removal
+  button) while the operation catalog's `rolling_ball` is the plain removal. The edge-enhanced removal is now its
+  own catalog op, `bg_removal_enhanced` (catalog 94 -> 95 ops).
+- Split out (no logic change): `image_processing/wavelet.py` (WBNS, from background.py),
+  `image_processing/filter_panels.py` (the filters' viewer panels, from filters.py), `batch/step_operations.py`
+  (`_STEP_OPERATIONS`, from batch_step_registry.py). Old import paths still work. Ceilings lowered to match.
+
+### Added
+- `tests/test_kernel_contract.py`: every kernel is a catalog/measure op and wraps that op's catalog function; no
+  launcher (batch replay, panel function, UI module) calls a kernel's function directly; a step's declared
+  operations include every op its replay sends to the kernel (`_STEP_OPERATIONS` is now checked, not just
+  declared; 9 -> 17 steps declared).
+
+### Removed
+- The real-data validation harness (corpus registry, golden masters, route matrix, weekly workflow) left the
+  public repo: it is internal validation toward the paper, kept privately. The fixes it found stay, with their
+  synthetic-data tests. The sdist no longer picks up nested README files.
+
 ## [1.7.005] - 2026-10-14
 Works through `docs/audits/PyCAT_Completion_Spec.md`. **Published numbers change** in SpIDA, the field partition
 coefficient, Kp(t), texture entropy / LBP and size-distribution fits — each listed below with the bias it removes.

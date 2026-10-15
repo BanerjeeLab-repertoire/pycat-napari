@@ -296,8 +296,9 @@ def run_clean_detection(threshold_input, damping_input, sigma_input,
     if mname != 'None' and mname in [l.name for l in viewer.layers]:
         mask = np.asarray(viewer.layers[mname].data) > 0
 
-    df = clean_detect(data, max_threshold=thresh, damping=damping,
-                      psf_sigma=sigma, mask=mask)
+    from pycat.kernel import OperationService
+    df = OperationService.execute('clean', {'image': data}, {'max_threshold': thresh, 'damping': damping,
+                                                              'psf_sigma': sigma, 'mask': mask}).measurements
     if len(df) == 0:
         napari_show_warning(
             "CLEAN found no spots above threshold. Lower the threshold or the "

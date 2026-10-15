@@ -400,8 +400,8 @@ def replay_pixel_coloc(state: dict, image_path: Path, params: dict, output_dir: 
     segmentation ROI the planner chained upstream. NOT whole-frame: whole-frame Pearson measures the cell shape
     both channels share (r≈0.99 even for independent channels), not colocalisation — the ROI (the union of the
     segmented objects, excluding background) is the fix. The raw threshold-free measures from `coloc/metrics`."""
-    from pycat.toolbox.coloc.metrics import (
-        pearsons_correlation, manders_overlap, manders_k1_calculation, manders_k2_calculation)
+    from pycat.toolbox.coloc.metrics import manders_overlap, manders_k1_calculation, manders_k2_calculation
+    from pycat.kernel import OperationService
     import pandas as pd
     # The first segmentation that actually HAS pixels: an image whose condensate step found no puncta still holds
     # an (empty) puncta_mask, and an empty ROI crashed Pearson ("x and y must have length at least 2") instead of
@@ -419,7 +419,8 @@ def replay_pixel_coloc(state: dict, image_path: Path, params: dict, output_dir: 
         print(f"[PyCAT Batch]   Colocalization skipped for {image_path.name}: no second channel in state.")
         return
     ch2 = np.asarray(ch2, dtype=np.float64)
-    pcc, pval = pearsons_correlation(ch1, ch2, roi)
+    pearson = OperationService.execute('colocalization', {'ch1': ch1, 'ch2': ch2, 'roi': roi}).measurements.iloc[0]
+    pcc, pval = pearson['value'], pearson['p_value']
     moc, _ = manders_overlap(ch1, ch2, roi)
     k1, _ = manders_k1_calculation(ch1, ch2, roi)
     k2, _ = manders_k2_calculation(ch1, ch2, roi)
@@ -534,7 +535,8 @@ def replay_msd_analysis(state: dict, image_path: Path, params: dict, output_dir:
     scale discipline as VPT microrheology: a diffusion coefficient is a physical rate (um^2/s), so the handler
     REFUSES (a validity flag, no number) when the pixel size is a 1.0 placeholder or the frame interval is
     missing — it never emits a pixel^2/frame "D". Replaces the msd_analysis skip-stub."""
-    from pycat.toolbox.condensate_physics_tools import compute_msd, fit_anomalous_diffusion
+    from pycat.toolbox.condensate_physics_tools import fit_anomalous_diffusion
+    from pycat.kernel import OperationService
     from pycat.utils.pixel_size import has_real_pixel_size
     from pycat.utils.frame_interval import frame_interval_s
     import pandas as pd
@@ -558,8 +560,9 @@ def replay_msd_analysis(state: dict, image_path: Path, params: dict, output_dir:
 
     min_track_length = int(params.get('min_track_length', 200))
     max_lag = params.get('max_lag')
-    msd = compute_msd(tracks, frame_interval_s=dt_s, min_track_length=min_track_length,
-                      max_lag=(int(max_lag) if max_lag is not None else None))
+    msd = OperationService.execute('condensate_physics.compute_msd', {'tracks': tracks}, {
+        'frame_interval_s': dt_s, 'min_track_length': min_track_length,
+        'max_lag': (int(max_lag) if max_lag is not None else None)}).measurements
     if msd is None or len(msd) == 0:
         print(f"[PyCAT Batch]   MSD analysis: no track met the {min_track_length}-frame minimum length.")
         return

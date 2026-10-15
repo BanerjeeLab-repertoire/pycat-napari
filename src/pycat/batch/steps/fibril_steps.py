@@ -14,6 +14,7 @@ from pathlib import Path
 import numpy as np
 
 from pycat.batch.steps._common import _get_data, _resolve_image_layer, _save_array
+from pycat.kernel import OperationService
 
 
 def _derived(state):
@@ -39,38 +40,37 @@ def _store(state, name, arr, output_dir: Path, image_path: Path, suffix: str):
 
 
 def replay_bilateral_filter(state: dict, image_path: Path, params: dict, output_dir: Path):
-    from pycat.toolbox.image_processing.filters import apply_bilateral_filter
     src = params.get('layer')
-    out = apply_bilateral_filter(np.asarray(_layer(state, src)), float(params.get('radius', 2) or 2))
+    out = OperationService.produce('bilateral', {'image': np.asarray(_layer(state, src))},
+                                   {'radius': float(params.get('radius', 2) or 2)})
     _store(state, f'Bilateral Filtered {src}', out, output_dir, image_path, 'bilateral')
     print('[PyCAT Batch]   Bilateral filter done.')
 
 
 def replay_peak_edge_enhancement(state: dict, image_path: Path, params: dict, output_dir: Path):
     import math
-
-    from pycat.toolbox.image_processing.filters import peak_and_edge_enhancement_func
     src = params.get('layer')
     radius = params.get('ball_radius') or _get_data(state['data_instance'], 'ball_radius', 5)
-    out = peak_and_edge_enhancement_func(np.asarray(_layer(state, src)), math.ceil(float(radius)))
+    out = OperationService.produce('peak_edge', {'image': np.asarray(_layer(state, src))},
+                                   {'ball_radius': math.ceil(float(radius))})
     _store(state, f'Peak & Edge Enhanced {src}', out, output_dir, image_path, 'peak_edge')
     print('[PyCAT Batch]   Peak & edge enhancement done.')
 
 
 def replay_morphological_gaussian(state: dict, image_path: Path, params: dict, output_dir: Path):
-    from pycat.toolbox.image_processing.filters import morphological_gaussian_filter
     src = params.get('layer')
-    out = morphological_gaussian_filter(np.asarray(_layer(state, src)), int(params.get('filter_size', 2) or 2))
+    out = OperationService.produce('morph_gaussian', {'image': np.asarray(_layer(state, src))},
+                                   {'filter_size': int(params.get('filter_size', 2) or 2)})
     _store(state, f'Filtered {src}', out, output_dir, image_path, 'morph_gaussian')
     print('[PyCAT Batch]   Morphological Gaussian done.')
 
 
 def replay_local_thresholding(state: dict, image_path: Path, params: dict, output_dir: Path):
-    from pycat.toolbox.segmentation.local_thresholding import local_thresholding_func
     src = params.get('layer')
-    mask = local_thresholding_func(np.asarray(_layer(state, src)), int(params.get('window_size', 15)),
-                                   k_val=float(params.get('k_value', 0.0)),
-                                   mode=params.get('method', 'AND')).astype(np.int32)
+    mask = np.asarray(OperationService.produce(
+        'local_threshold', {'image': np.asarray(_layer(state, src))},
+        {'window_size': int(params.get('window_size', 15)), 'k_val': float(params.get('k_value', 0.0)),
+         'mode': params.get('method', 'AND')})).astype(np.int32)
     _derived(state)[f'Locally Thresholded {src}'] = mask
     state['fibril_mask'] = mask
     _save_array(mask.astype(np.uint8), output_dir / f'{image_path.stem}_local_threshold_mask.tiff')

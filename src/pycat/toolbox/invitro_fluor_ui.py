@@ -313,8 +313,8 @@ def _ivf_preprocessing(ui, layout):
         def _task():
             arr = np.asarray(img).astype(np.float32)
             if idx == 0:   # Gaussian blur
-                from pycat.toolbox.image_processing_tools import gaussian_smooth_2d
-                return gaussian_smooth_2d(arr, sigma=sigma)
+                from pycat.kernel import OperationService
+                return OperationService.produce('gaussian', {'image': arr}, {'sigma': sigma})
             if idx == 1:   # LoG enhancement
                 from pycat.toolbox.image_processing_tools import apply_laplace_of_gauss_enhancement
                 return np.asarray(apply_laplace_of_gauss_enhancement(arr, sigma=sigma)).astype(np.float32)
@@ -1041,7 +1041,7 @@ def _ivf_dynamics(ui, layout):
             extract_frame_properties, link_trajectories_bayesian,
             trajectory_metrics, detect_merge_fission)
         from pycat.toolbox.condensate_physics_tools import (
-            compute_msd, fit_anomalous_diffusion, msd_per_track,
+            fit_anomalous_diffusion, msd_per_track,
             fit_coarsening, kaplan_meier_lifetimes)
         from pycat.toolbox.invitro_tools import (
             coarsening_statistics, detect_sedimentation,
@@ -1095,7 +1095,9 @@ def _ivf_dynamics(ui, layout):
                     # in COMPLETE SILENCE. See utils.general_utils.report_guarantee_failure.
                     from pycat.utils.general_utils import report_guarantee_failure
                     report_guarantee_failure('invitro_fluor_ui: warn_if_assumed_axis', _exc)
-                msd_df = compute_msd(tracks, frame_interval_s=dt)
+                from pycat.kernel import OperationService
+                msd_df = OperationService.execute('condensate_physics.compute_msd', {'tracks': tracks},
+                                                  {'frame_interval_s': dt}).measurements
                 res['msd']    = msd_df
                 res['msd_fit']= fit_anomalous_diffusion(msd_df)
                 res['msd_pt'] = msd_per_track(tracks, dt)

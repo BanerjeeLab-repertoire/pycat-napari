@@ -102,7 +102,8 @@ def _run_msd_analysis(ui_instance, w):
     (stack_dd_msd, dt_spin, lag_spin, min_len, per_track_cb, prog_msd, run_msd) = (
         w.stack_dd_msd, w.dt_spin, w.lag_spin, w.min_len, w.per_track_cb, w.prog_msd, w.run_msd)
     from pycat.toolbox.condensate_physics_tools import (
-        compute_msd, fit_anomalous_diffusion, msd_per_track)
+        fit_anomalous_diffusion, msd_per_track)
+    from pycat.kernel import OperationService
     from pycat.toolbox.dynamic_spatial_tools import (
         extract_frame_properties, link_trajectories_bayesian)
     try:
@@ -130,9 +131,9 @@ def _run_msd_analysis(ui_instance, w):
             # in COMPLETE SILENCE. See utils.general_utils.report_guarantee_failure.
             from pycat.utils.general_utils import report_guarantee_failure
             report_guarantee_failure('condensate_physics_ui: warn_if_assumed_axis', _exc)
-        msd_df = compute_msd(tracks, max_lag=max_l,
-                              frame_interval_s=dt_spin.value(),
-                              min_track_length=min_len.value())
+        msd_df = OperationService.execute('condensate_physics.compute_msd', {'tracks': tracks}, {
+            'max_lag': max_l, 'frame_interval_s': dt_spin.value(),
+            'min_track_length': min_len.value()}).measurements
         fit    = fit_anomalous_diffusion(msd_df)
         res    = {'msd': msd_df, 'fit': fit}
         from pycat.toolbox.condensate_physics_tools import per_track_msd_curves

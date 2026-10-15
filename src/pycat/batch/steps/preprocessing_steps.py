@@ -198,7 +198,7 @@ def _selected_upscale_roles(state: dict, selected_names) -> set:
 def _upscale_named_channels(state, image, roles, upscale_all, upscale_factor) -> bool:
     """Upscale the selected ``channels_by_name`` / ``channels_processed_by_name`` entries in place (replay_upscaling).
     True if any was upscaled."""
-    from pycat.toolbox.image_processing_tools import upscale_image_interp
+    from pycat.kernel import OperationService
 
     did_upscale = False
     # Update channels_by_name (raw) and channels_processed_by_name (if a named
@@ -231,7 +231,7 @@ def _upscale_named_channels(state, image, roles, upscale_all, upscale_factor) ->
             cr, cc = arr.shape[-2], arr.shape[-1]
             if cr >= 2048 or cc >= 2048:
                 continue
-            arr_up = upscale_image_interp(arr, cr, cc, upscale_factor=upscale_factor)
+            arr_up = OperationService.produce('upscale', {'image': arr}, {'upscale_factor': upscale_factor})
             arr_up = np.clip(arr_up, 0, None).astype(np.float32)
             channel_dict[name] = arr_up
             if state.get(fluor_slot) is arr:
@@ -293,7 +293,7 @@ def replay_upscaling(state: dict, image_path: Path, params: dict, output_dir: Pa
     no-op for any non-saturated real image, a plain floor-at-zero already
     matches the GUI's real-world numbers.
     """
-    from pycat.toolbox.image_processing_tools import upscale_image_interp
+    from pycat.kernel import OperationService
 
     data_instance = state['data_instance']
     image = state['image']
@@ -313,7 +313,7 @@ def replay_upscaling(state: dict, image_path: Path, params: dict, output_dir: Pa
             print(f"[PyCAT Batch]   Segmentation channel upscaling skipped — "
                   f"already at/above 2048px ({image.shape}).")
         else:
-            upscaled = upscale_image_interp(image, num_row, num_col, upscale_factor=upscale_factor)
+            upscaled = OperationService.produce('upscale', {'image': image}, {'upscale_factor': upscale_factor})
             upscaled = np.clip(upscaled, 0, None).astype(np.float32)
             state['image'] = upscaled
             state['preprocessed'] = upscaled.copy()
@@ -338,7 +338,7 @@ def replay_upscaling(state: dict, image_path: Path, params: dict, output_dir: Pa
             and (upscale_all or 'fluorescence' in roles)):
         fr, fc = fluor.shape[-2], fluor.shape[-1]
         if fr < 2048 and fc < 2048:
-            fluor_up = upscale_image_interp(fluor, fr, fc, upscale_factor=upscale_factor)
+            fluor_up = OperationService.produce('upscale', {'image': fluor}, {'upscale_factor': upscale_factor})
             state['fluorescence_image'] = np.clip(fluor_up, 0, None).astype(np.float32)
             did_upscale = True
 

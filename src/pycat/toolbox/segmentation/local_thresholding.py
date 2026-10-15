@@ -139,7 +139,9 @@ def run_local_thresholding(k_slider, window_slider, mode_dropdown, viewer):
         return
 
     # Apply local thresholding to the image and convert result to integer for display
-    thresh_mask = local_thresholding_func(image, window_size, k_val=k_value, mode=mode_dropdown).astype(int)
+    from pycat.kernel import OperationService
+    thresh_mask = np.asarray(OperationService.produce('local_threshold', {'image': image}, {
+        'window_size': window_size, 'k_val': k_value, 'mode': mode_dropdown})).astype(int)
 
     # Update or add the processed layer to the viewer
     layer_name = f'Locally Thresholded {current_active_layer_name}'  # Name for the new or updated layer

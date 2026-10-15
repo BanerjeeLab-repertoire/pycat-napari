@@ -39,7 +39,9 @@ from pycat.navigator.op_catalog import _measure_ops, load_operation_catalog
 # rare 'spot' fallback. The other four are either untagged skimage calls or a different function
 # entirely, so no single unconditional tuple can honestly describe this step. Per this module's own
 # principle ("a guessed mapping is worse than none"), removing a proven-wrong entry is not a regression.
-_MIN_STEPS_DECLARED = 9
+# Raised 9 -> 17 (OperationService adoption): eight steps that now run through the kernel declare their ops,
+# and tests/test_kernel_contract.py checks each declaration against the replay's own kernel calls.
+_MIN_STEPS_DECLARED = 17
 
 
 def _operation_vocabulary():

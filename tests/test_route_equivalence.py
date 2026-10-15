@@ -136,7 +136,7 @@ def _rolling_ball_workflow():
         # The Spec-6 execution kernel: OperationService.execute runs the SAME science as the routes above, so a
         # migrated family closes its route-equivalence row. Background removal is the first migrated family.
         from pycat.kernel.operation_service import OperationService
-        result = OperationService.execute('rolling_ball', {'image': raw}, {'ball_radius': _BALL_RADIUS})
+        result = OperationService.execute('bg_removal_enhanced', {'image': raw}, {'ball_radius': _BALL_RADIUS})
         return np.asarray(result.artifacts[0]).astype(np.float32)
 
     return Workflow(
@@ -254,7 +254,7 @@ def _cellpose_workflow():
         # cellpose_segmentation science as the routes above — so this row closes ≈ kernel too.
         from pycat.kernel.operation_service import OperationService
         result = OperationService.execute('cellpose', {'image': _normalize_to_float(raw)},
-                                          {'cell_diameter': _CELL_DIAMETER, 'postprocess': False})
+                                          {'object_diameter': _CELL_DIAMETER, 'postprocess': False})
         return np.asarray(result.artifacts[0]).astype(np.float32)
 
     return Workflow(

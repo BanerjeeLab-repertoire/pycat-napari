@@ -127,10 +127,10 @@ def _add_contrast_cascade(ui_instance, layout=None, separate_widget=False):
         name = img_dd.currentText()
         if name not in [l.name for l in viewer.layers]:
             napari_show_warning("Select an image."); return
-        from pycat.toolbox.contrast_cascade_tools import tone_map
+        from pycat.kernel import OperationService
         data = np.asarray(viewer.layers[name].data)
         img2d = data.max(axis=0) if data.ndim == 3 else data
-        viewer.add_image(tone_map(img2d, method='log'),
+        viewer.add_image(OperationService.produce('tone_map', {'image': img2d}, {'method': 'log'}),
                          name="Tone-mapped (log)", colormap='viridis')
         napari_show_info("Added a log tone-mapped view — full dynamic range at once.")
 

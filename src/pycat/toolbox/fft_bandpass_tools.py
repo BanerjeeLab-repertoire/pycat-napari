@@ -166,7 +166,8 @@ def run_fft_bandpass(low_input, high_input, viewer):
     except ValueError:
         napari_show_warning("Cutoffs must be numbers (pixels in frequency space).")
         return
-    result = fft_bandpass(active.data, low, high)
+    from pycat.kernel import OperationService
+    result = OperationService.produce('bandpass', {'image': active.data}, {'low_cutoff': low, 'high_cutoff': high})
     viewer.add_image(result, name=f"{active.name} FFT bandpass [{low:g}-{high:g}]")
     napari_show_info(f"FFT bandpass applied ({low:g}-{high:g} px).")
 

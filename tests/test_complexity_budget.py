@@ -302,8 +302,8 @@ _FILE_LINE_CEILINGS = {
     # (step 6, 1.6.253: preprocessing + upscaling). image_processing_tools.py is now a PURE re-export shim
     # (no defs); ceiling locked at the shim size. The family modules get their own concentration ceilings.
     "toolbox/image_processing_tools.py": 221,
-    "toolbox/image_processing/filters.py": 561,
-    "toolbox/image_processing/background.py": 897,   # 1.7.005: refreshed to actual (918 was stale; Completion Spec C2)
+    "toolbox/image_processing/filters.py": 351,   # viewer panels -> filter_panels.py (OperationService adoption)
+    "toolbox/image_processing/background.py": 662,   # WBNS wavelet family -> wavelet.py (OperationService adoption)
     # 2828 -> 2600 (frame-access + correlation) -> 1952 (analysis) -> 1410 (worker plumbing) -> 180 (step 4,
     # 1.6.247: preprocessing science + Qt UI builders). timeseries_condensate_tools.py is now a PURE re-export
     # shim (no defs); ceiling locked at the shim size. The analysis / execution / ui modules get their own
@@ -362,7 +362,7 @@ _FILE_LINE_CEILINGS = {
     # 1663 -> 432 (-74%): the replay handlers + shared helpers moved to the pycat.batch.steps package
     # (decomposition, 1.6.150); _STEP_MAP, the registry wiring, and replay_background_removal (pinned by
     # a source-level test) stay. Ratchet moves down only.
-    "batch_step_registry.py": 350,   # 1.7.005: refreshed to actual (432 was stale; Completion Spec C2)
+    "batch_step_registry.py": 302,   # step -> op composition -> batch/step_operations.py (OperationService adoption)
     # 2051 -> 1623 -> 799 -> 605 -> 88: the full invitro decomposition (1.6.213-1.6.216) moved every domain
     # to toolbox/invitro/{size_distribution,partition,field_summary,analysis}.py. invitro_tools.py is now a
     # pure re-export shim (-96%). The ceiling is locked at the shim size.

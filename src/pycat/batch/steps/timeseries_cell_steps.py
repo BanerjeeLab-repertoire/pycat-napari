@@ -46,7 +46,7 @@ def _frame_interval(state, params):
 def replay_ts_cells_time_average(state: dict, image_path: Path, params: dict, output_dir: Path):
     """Cellpose on the movie's time average at the recorded cell diameter (the GUI's 'Segment cells on the
     time average')."""
-    from pycat.toolbox.segmentation.cellpose import cellpose_segmentation
+    from pycat.kernel import OperationService
     from pycat.toolbox.timeseries.cell_pipeline import time_average
     stack = _stack(state)
     if stack is None:
@@ -56,7 +56,8 @@ def replay_ts_cells_time_average(state: dict, image_path: Path, params: dict, ou
     lo, hi = np.percentile(avg, (0.5, 99.9))
     norm = np.clip((avg - lo) / max(hi - lo, 1e-6), 0, 1).astype(np.float32)
     diameter = float(params.get('cell_diameter') or _get_data(state['data_instance'], 'cell_diameter', 100))
-    cells = np.asarray(cellpose_segmentation(norm, int(round(diameter)))).astype(np.int32)
+    cells = np.asarray(OperationService.produce('cellpose', {'image': norm},
+                                                {'object_diameter': int(round(diameter))})).astype(np.int32)
     state['ts_time_average'] = avg
     state['labeled_cells'] = cells
     state['no_cells'] = int(cells.max()) == 0

@@ -762,7 +762,7 @@ def _add_bf_dynamics(ui, layout):
             trajectory_metrics, detect_merge_fission, cluster_lifetime_analysis,
         )
         from pycat.toolbox.condensate_physics_tools import (
-            compute_msd, fit_anomalous_diffusion, msd_per_track,
+            fit_anomalous_diffusion, msd_per_track,
             fit_coarsening, kaplan_meier_lifetimes,
         )
         try:
@@ -800,7 +800,9 @@ def _add_bf_dynamics(ui, layout):
                     # in COMPLETE SILENCE. See utils.general_utils.report_guarantee_failure.
                     from pycat.utils.general_utils import report_guarantee_failure
                     report_guarantee_failure('brightfield_ui: warn_if_assumed_axis', _exc)
-                msd_df = compute_msd(tracks, frame_interval_s=dt)
+                from pycat.kernel import OperationService
+                msd_df = OperationService.execute('condensate_physics.compute_msd', {'tracks': tracks},
+                                                  {'frame_interval_s': dt}).measurements
                 res['msd']     = msd_df
                 res['msd_fit'] = fit_anomalous_diffusion(msd_df)
                 res['msd_pt']  = msd_per_track(tracks, dt)

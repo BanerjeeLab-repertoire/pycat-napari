@@ -30,8 +30,8 @@ def replay_ivf_preprocess(state: dict, image_path: Path, params: dict, output_di
     recorded with 'gaussian' or 'log' replayed as a visibly different image
     than the one the interactive session actually produced, silently.
     """
-    from pycat.toolbox.image_processing_tools import (
-        gaussian_smooth_2d, apply_laplace_of_gauss_enhancement, pre_process_image)
+    from pycat.toolbox.image_processing_tools import apply_laplace_of_gauss_enhancement, pre_process_image
+    from pycat.kernel import OperationService
 
     # RAW counts: pre_process_image's rolling ball is NOT scale-invariant.
     # `_normalize_to_float` subtracts the pedestal; the GUI does not. See _proc, above.
@@ -41,7 +41,7 @@ def replay_ivf_preprocess(state: dict, image_path: Path, params: dict, output_di
     ball   = params.get('ball_radius', 15)
 
     if method == 'gaussian':
-        proc = gaussian_smooth_2d(image, sigma=sigma)
+        proc = OperationService.produce('gaussian', {'image': image}, {'sigma': sigma})
     elif method == 'log':
         proc = apply_laplace_of_gauss_enhancement(image, sigma=sigma)
     else:  # 'rolling-ball' (legacy default)
@@ -239,10 +239,10 @@ def replay_ivf_segmentation(state: dict, image_path: Path, params: dict, output_
         labeled = _postfilter(pre > cut)
 
     elif method == 'sauvola':
-        from pycat.toolbox.segmentation_tools import local_thresholding_func
-        binary = local_thresholding_func(
-            pre, window_size=int(params.get('sauvola_window', 35)),
-            k_val=params.get('sauvola_k', 0.0), mode='Sauvola')
+        from pycat.kernel import OperationService
+        binary = OperationService.produce('local_threshold', {'image': pre}, {
+            'window_size': int(params.get('sauvola_window', 35)), 'k_val': params.get('sauvola_k', 0.0),
+            'mode': 'Sauvola'})
         labeled = _postfilter(np.asarray(binary) > 0)
 
     elif method == 'rf':
@@ -400,14 +400,14 @@ def replay_client_enrichment(state: dict, image_path: Path, params: dict, output
         print('[PyCAT Batch]   client_enrichment skipped (no droplet mask/image in state — segment first).')
         return
 
-    from pycat.toolbox.partition_enrichment_tools import client_enrichment
+    from pycat.kernel import OperationService
     di = state.get('data_instance')
     image_metadata = dict(di.data_repository) if di is not None and hasattr(di, 'data_repository') else {}
     temperature_K = params.get('temperature_K')
 
-    result = client_enrichment(np.asarray(img, dtype=float), np.asarray(mask) > 0,
-                               calibration_curve=curve, image_metadata=image_metadata,
-                               temperature_K=temperature_K)
+    result = OperationService.produce(
+        'client_enrichment', {'image': np.asarray(img, dtype=float), 'dense_mask': np.asarray(mask) > 0},
+        {'calibration_curve': curve, 'image_metadata': image_metadata, 'temperature_K': temperature_K})
 
     state['_calibration_validity'] = result.get('calibration_validity')
     pd.DataFrame([_flatten_enrichment(result)]).to_csv(

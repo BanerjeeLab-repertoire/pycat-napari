@@ -301,9 +301,9 @@ def run_cellpose_segmentation(image_layer, data_instance, viewer):
     refine = bool(data_instance.data_repository.get('cellpose_refine', False))
 
     # Perform cell segmentation using Cellpose.
-    cell_masks = cellpose_segmentation(image, object_diameter,
-                                       model_name=model_name,
-                                       postprocess=refine)
+    from pycat.kernel import OperationService
+    cell_masks = OperationService.produce('cellpose', {'image': image}, {
+        'object_diameter': object_diameter, 'model_name': model_name, 'postprocess': refine})
     
     # Add the segmentation results as a new label layer to the viewer.
     _cell_layer = viewer.add_labels(cell_masks, name=f"Cellpose Segmentation on {image_layer.name}")

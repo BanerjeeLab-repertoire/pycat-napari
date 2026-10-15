@@ -179,12 +179,12 @@ def _on_segment_cells(ui, ns):
     frames = _frame_range(ui, layer.data.shape[0])
 
     def _work(progress):
-        from pycat.toolbox.segmentation.cellpose import cellpose_segmentation
+        from pycat.kernel import OperationService
         from pycat.toolbox.timeseries.cell_pipeline import time_average
         avg = time_average(layer.data, frames)
         lo, hi = np.percentile(avg, (0.5, 99.9))
         norm = np.clip((avg - lo) / max(hi - lo, 1e-6), 0, 1).astype(np.float32)
-        return avg, cellpose_segmentation(norm, int(round(diameter)))
+        return avg, OperationService.produce('cellpose', {'image': norm}, {'object_diameter': int(round(diameter))})
 
     try:
         avg, cells = run_with_progress(_work, title='Cells', text='Time average + Cellpose…',

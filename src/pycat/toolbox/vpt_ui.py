@@ -914,7 +914,8 @@ class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin,
 
     def _on_rheology(self):
         from pycat.toolbox.condensate_physics_tools import (
-            compute_msd, fit_anomalous_diffusion)
+            fit_anomalous_diffusion)
+        from pycat.kernel import OperationService
         from pycat.toolbox.vpt_tools import viscosity_from_diffusion
         # VPT treats frames as TIME (MSD, viscosity) — if the stack's axis was
         # assumed at load (undeclared multipage TIFF), warn once.
@@ -936,10 +937,9 @@ class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin,
         tracks = self._tracks_for_msd(tracks)        # drift subtracted for the MSD only, when ticked
 
         try:
-            msd_df = compute_msd(
-                tracks,
-                frame_interval_s=self._frame_dt.value(),
-                min_track_length=self._min_track.value())
+            msd_df = OperationService.execute('condensate_physics.compute_msd', {'tracks': tracks}, {
+                'frame_interval_s': self._frame_dt.value(),
+                'min_track_length': self._min_track.value()}).measurements
             fit = fit_anomalous_diffusion(
                 msd_df,
                 frame_interval_s=self._frame_dt.value(),

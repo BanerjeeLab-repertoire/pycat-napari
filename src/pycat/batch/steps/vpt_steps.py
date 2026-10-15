@@ -26,7 +26,8 @@ def replay_vpt_microrheology(state: dict, image_path: Path, params: dict, output
     """
     from pycat.toolbox.vpt.detection import detect_beads_stack
     from pycat.toolbox.dynamic_spatial_tools import link_trajectories
-    from pycat.toolbox.condensate_physics_tools import compute_msd, fit_anomalous_diffusion
+    from pycat.toolbox.condensate_physics_tools import fit_anomalous_diffusion
+    from pycat.kernel import OperationService
     from pycat.toolbox.vpt_tools import viscosity_from_diffusion
     from pycat.toolbox.vpt.measured_drift import measure_and_apply_if_real
     from pycat.utils.pixel_size import pixel_size_um, has_real_pixel_size
@@ -68,7 +69,8 @@ def replay_vpt_microrheology(state: dict, image_path: Path, params: dict, output
     tracks, msd_tracks, drift = measure_and_apply_if_real(tracks, mpx)
     if params.get('drift_mode') == 'none':
         msd_tracks = tracks
-    msd = compute_msd(msd_tracks, frame_interval_s=dt_s, min_track_length=min_track_length)
+    msd = OperationService.execute('condensate_physics.compute_msd', {'tracks': msd_tracks}, {
+        'frame_interval_s': dt_s, 'min_track_length': min_track_length}).measurements
     fit = fit_anomalous_diffusion(msd, frame_interval_s=dt_s)
     eta = viscosity_from_diffusion(fit['D_um2_per_s'], bead_radius_um, temperature_C)
 

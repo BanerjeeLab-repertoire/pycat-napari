@@ -11,7 +11,8 @@ from __future__ import annotations
 import numpy as np
 from pycat.utils.notify import show_info as napari_show_info
 from pycat.utils.notify import show_warning as napari_show_warning
-from pycat.toolbox.image_processing._base import _add_image, _napari, apply_rescale_intensity, upscale_image_interp, invert_image
+from pycat.kernel import OperationService
+from pycat.toolbox.image_processing._base import _add_image, _napari
 
 
 def run_apply_rescale_intensity(out_min_input, out_max_input, viewer):
@@ -67,7 +68,7 @@ def run_apply_rescale_intensity(out_min_input, out_max_input, viewer):
     out_max = float(out_max_input.text()) if out_max_input.text() else None
     
     # Apply the rescale intensity function to the image
-    rescaled_image = apply_rescale_intensity(image, out_min, out_max)
+    rescaled_image = OperationService.produce('rescale', {'image': image}, {'out_min': out_min, 'out_max': out_max})
 
     # Add the rescaled image to the viewer
     _add_image(rescaled_image, viewer, name=f"Intensity Rescaled {active_layer.name}", operation='rescale_intensity')
@@ -102,7 +103,7 @@ def run_invert_image(viewer):
         raise ValueError("No active image layer selected.")
     
     # Apply the invert image function to the rescaled LoG filtered image
-    inverted_image = invert_image(image)
+    inverted_image = OperationService.produce('invert', {'image': image})
 
     # Add the inverted image to the viewer
     _add_image(inverted_image, viewer, name=f"Inverted {active_layer.name}", operation='rescale_intensity')
@@ -196,7 +197,7 @@ def run_upscaling_func(data_checkbox, data_instance, viewer):
             upscale_factor = 2
 
         # Apply the upscaling function to the image
-        upscaled_img = upscale_image_interp(image, num_row_initial, num_col_initial, upscale_factor=upscale_factor)
+        upscaled_img = OperationService.produce('upscale', {'image': image}, {'upscale_factor': upscale_factor})
 
         # Prepare the upscaled image data for safe use in the viewer
         data = upscaled_img.copy()
@@ -207,7 +208,8 @@ def run_upscaling_func(data_checkbox, data_instance, viewer):
                 if np.min(data) < (0 - (0.05 * 2**16)) or np.max(data) > (2**16 + (0.05 * 2**16)):
                     data = np.clip(data, 0, 2**16 - 1).astype(np.uint16)
                 else:
-                    data = apply_rescale_intensity(data, out_min=0, out_max=2**16 - 1).astype(np.uint16)
+                    data = OperationService.produce('rescale', {'image': data},
+                                                    {'out_min': 0, 'out_max': 2**16 - 1}).astype(np.uint16)
         # Ensure floating-point data types are within a valid range, correcting them if necessary
         elif np.issubdtype(data.dtype, np.floating):
             if np.min(data) < 0 or np.max(data) > 1.0: 
@@ -215,9 +217,10 @@ def run_upscaling_func(data_checkbox, data_instance, viewer):
                 if np.min(data) < (0 - (0.05)) or np.max(data) > (1.0 + (0.05)):
                     data = np.clip(data, 0.0, 1.0).astype(np.float32)
                 else:
-                    data = apply_rescale_intensity(data, out_min=0.0, out_max=1.0).astype(np.float32)
+                    data = OperationService.produce('rescale', {'image': data},
+                                                    {'out_min': 0.0, 'out_max': 1.0}).astype(np.float32)
         else: 
-            data = apply_rescale_intensity(data, out_min=0.0, out_max=1.0).astype(np.float32)
+            data = OperationService.produce('rescale', {'image': data}, {'out_min': 0.0, 'out_max': 1.0}).astype(np.float32)
 
         upscaled_img = data.copy()
 
