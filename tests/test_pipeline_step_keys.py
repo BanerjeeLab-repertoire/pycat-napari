@@ -15,7 +15,7 @@ pytestmark = pytest.mark.base
 
 
 def test_no_checklist_step_has_an_empty_key():
-    from pycat.ui.workflow_checklist import PIPELINE_DEFS
+    from pycat.ui.pipeline_steps import PIPELINE_DEFS
     empty = [(p, label) for p, steps in PIPELINE_DEFS.items() for key, label in steps if not key]
     assert not empty, f'unrecordable checklist steps (empty key): {empty}'
 

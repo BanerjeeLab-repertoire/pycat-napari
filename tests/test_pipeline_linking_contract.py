@@ -31,7 +31,7 @@ def _declarations():
 
 def _pipeline_keys():
     import ast
-    tree = ast.parse((_SRC / 'ui' / 'workflow_checklist.py').read_text(encoding='utf-8'))
+    tree = ast.parse((_SRC / 'ui' / 'pipeline_steps.py').read_text(encoding='utf-8'))
     node = next(n for n in tree.body if isinstance(n, ast.Assign)
                 and getattr(n.targets[0], 'id', None) == 'PIPELINE_DEFS')
     return {k.value for k in node.value.keys}

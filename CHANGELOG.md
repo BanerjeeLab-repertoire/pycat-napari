@@ -61,6 +61,18 @@ corpus is unchanged, and the route-equivalence tests still pin each kernel to th
   as before and the result says the movie is too short. A movie at least as long as the requested minimum computes
   exactly what it did; fits gain `lag_window_*` / `lag_limited` fields and, when short of the honest regime, a
   caveat in `fit_window_warning`.
+- **CI green again: the headless lanes no longer reach Qt.** The `core or base` suite (source and installed
+  wheel) had 9 failures, red since before 1.7.005. Each was a headless test reaching a module that needs a GUI or
+  an optional package. Fixed at the source where the code was science or data:
+  - the pipeline step tables moved out of the Qt checklist bar into `pycat/ui/pipeline_steps.py`; the bar
+    re-exports them;
+  - `make_console_output_safe` moved out of the Qt batch window into `pycat/batch/console.py`; the window
+    re-exports it;
+  - the in-vitro time series, colocalization and image tools import the stack helpers from `stack_access`
+    rather than the Qt file-I/O module, which only re-exported the same functions.
+
+  Three tests now skip when their package is absent: h5py (force traces), bioio (opening an image in batch)
+  and napari (the VPT display layers).
 
 ### Added
 - `tests/test_kernel_contract.py`: every kernel is a catalog/measure op and wraps that op's catalog function; no

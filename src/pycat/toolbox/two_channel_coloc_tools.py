@@ -208,7 +208,7 @@ def condensate_coloc_time_trace(
       per_cell=False → frame, time_s, n_cells, mean_<metric> …
     Inputs may be lazy stacks; frames are streamed one at a time.
     """
-    from pycat.file_io.file_io import iter_frames, layer_is_stack, extract_2d_plane
+    from pycat.file_io.stack_access import iter_frames, layer_is_stack, extract_2d_plane
 
     shp = getattr(stack_ch1, 'shape', None)
     n_t = int(shp[0]) if (shp is not None and len(shp) == 3) else 1
@@ -507,7 +507,7 @@ def _add_run_two_channel_coloc(ui_instance, layout=None, separate_widget=False):
         # that, and use the CURRENT VIEWER FRAME instead — warning the user which
         # frame was used. (Sequential per-frame colocalization over time is a
         # planned follow-on; for now this measures the frame you're looking at.)
-        from pycat.file_io.file_io import layer_is_stack, extract_2d_plane
+        from pycat.file_io.stack_access import layer_is_stack, extract_2d_plane
         any_stack = any(layer_is_stack(l.data) for l in
                         (ch1_raw_layer, ch1_proc_layer, ch2_raw_layer,
                          ch2_proc_layer, cell_mask_layer))
@@ -643,7 +643,7 @@ def _add_run_two_channel_coloc(ui_instance, layout=None, separate_widget=False):
         except KeyError as e:
             napari_show_warning(f"Coloc over time: layer not found — {e}"); return
 
-        from pycat.file_io.file_io import layer_is_stack
+        from pycat.file_io.stack_access import layer_is_stack
         if not (layer_is_stack(l_ch1_raw.data) or layer_is_stack(l_ch2_raw.data)):
             napari_show_warning(
                 "Coloc over time needs a stack (time-series) — the selected "

@@ -131,7 +131,7 @@ def test_bluelake_tiff_metadata_gives_frame_interval_and_pixel_size(tmp_path):
 
 
 def test_force_traces_load_without_pylake(tmp_path):
-    import h5py
+    h5py = pytest.importorskip('h5py')
     from pycat.file_io.frap_io import _load_lumicks_fusion_h5py
     p = tmp_path / 'fusion.h5'
     with h5py.File(p, 'w') as f:

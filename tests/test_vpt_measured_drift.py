@@ -115,6 +115,7 @@ def test_centroid_offsets_detect_markers_off_the_beads():
 def test_every_display_layer_draws_the_centroid_even_from_the_analysis_copy():
     """Hand the display code the drift-CORRECTED analysis copy: the Bead Picker and the trajectory layer
     must still draw the detected centroids."""
+    pytest.importorskip('napari')                     # a napari ViewerModel and the VPT panel
     from napari.components import ViewerModel
     from pycat.toolbox.vpt_ui import VideoParticleTrackingUI
     tr = _beads(drift_px_per_frame=(0.05, 0.05), n_tracks=5, n_frames=40)

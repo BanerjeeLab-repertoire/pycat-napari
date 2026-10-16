@@ -45,6 +45,6 @@ def test_every_recorded_step_key_is_registered():
 
 def test_every_checklist_step_key_is_registered():
     from pycat.batch_step_registry import _STEP_MAP
-    from pycat.ui.workflow_checklist import PIPELINE_DEFS
+    from pycat.ui.pipeline_steps import PIPELINE_DEFS
     missing = sorted({k for steps in PIPELINE_DEFS.values() for k, _ in steps if k and k not in _STEP_MAP})
     assert not missing, f'checklist steps batch does not know: {missing}'

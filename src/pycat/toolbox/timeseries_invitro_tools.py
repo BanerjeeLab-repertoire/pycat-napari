@@ -133,7 +133,7 @@ def segment_stack_per_frame(
     -------
     (T, H, W) int32 labelled stack (labels are per-frame, not yet linked).
     """
-    from pycat.file_io.file_io import iter_frames
+    from pycat.file_io.stack_access import iter_frames
 
     shp = getattr(stack_like, 'shape', None)
     if n_frames is None:
@@ -177,7 +177,7 @@ def _segment_stack_threaded(stack_like, segment_frame_fn, n_frames, n_workers, p
     """``segment_stack_per_frame`` with a bounded window of frames segmented concurrently (see ``n_workers``)."""
     from collections import deque
     from concurrent.futures import ThreadPoolExecutor
-    from pycat.file_io.file_io import iter_frames
+    from pycat.file_io.stack_access import iter_frames
 
     out, done, pending = None, 0, deque()
 
@@ -225,7 +225,7 @@ def stack_frame_properties(
     ``object_id`` is the per-frame region label (not a track id yet).
     """
     from skimage import measure
-    from pycat.file_io.file_io import iter_frames
+    from pycat.file_io.stack_access import iter_frames
 
     mpp = float(microns_per_pixel) if microns_per_pixel else 1.0
     px_area = mpp * mpp
@@ -548,7 +548,7 @@ def field_trajectories(
     """
     from pycat.toolbox.invitro_tools import field_summary
     from pycat.toolbox.invitro.partition import partition_coefficient_local
-    from pycat.file_io.file_io import iter_frames
+    from pycat.file_io.stack_access import iter_frames
 
     mpp = float(microns_per_pixel) if microns_per_pixel else 1.0
     dt = float(frame_interval_s) if frame_interval_s else 1.0

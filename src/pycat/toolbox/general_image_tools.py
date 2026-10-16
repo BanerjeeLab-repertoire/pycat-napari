@@ -51,7 +51,7 @@ def _refresh_dropdown(viewer, dd):
 def _current_2d(viewer, layer):
     """Take a 2-D plane from a layer that might be a stack, using the frame the
     user is actually looking at (never silently frame 0)."""
-    from pycat.file_io.file_io import layer_is_stack, extract_2d_plane
+    from pycat.file_io.stack_access import layer_is_stack, extract_2d_plane
     fi = 0
     if layer_is_stack(layer.data):
         try:
@@ -63,7 +63,7 @@ def _current_2d(viewer, layer):
 
 def _as_stack(layer):
     """Materialise a layer as a (T, H, W) float32 stack (2-D → 1-frame stack)."""
-    from pycat.file_io.file_io import materialize_stack
+    from pycat.file_io.stack_access import materialize_stack
     arr = materialize_stack(layer.data)
     arr = np.asarray(arr, dtype=np.float32)
     if arr.ndim == 2:
@@ -934,7 +934,7 @@ def _add_partial_volume_measure(ui_instance, layout=None, separate_widget=False)
         except KeyError as e:
             napari_show_warning(f"PV measure: layer not found — {e}"); return
 
-        from pycat.file_io.file_io import layer_is_stack, extract_2d_plane
+        from pycat.file_io.stack_access import layer_is_stack, extract_2d_plane
         fi = 0
         if layer_is_stack(limg.data):
             try:

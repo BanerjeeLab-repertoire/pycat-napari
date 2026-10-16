@@ -44,7 +44,7 @@ def coloc_time_trace(stack1, stack2, selected_methods, roi_stack=None,
     scalar metric (the coefficient for that frame). Empty if no scalar metric was
     selected.
     """
-    from pycat.file_io.file_io import iter_frames, layer_is_stack
+    from pycat.file_io.stack_access import iter_frames, layer_is_stack
 
     # The scalar-per-frame metrics (coefficient we can trend over time). Matrix /
     # histogram / Costes / thresholding methods don't reduce to one number per

@@ -27,13 +27,13 @@ def test_the_failure_is_real_without_the_guard():
 
 
 def test_batch_output_survives_a_cp1252_pipe():
-    r = _run('from pycat.batch_processor import make_console_output_safe\nmake_console_output_safe()\n')
+    r = _run('from pycat.batch.console import make_console_output_safe\nmake_console_output_safe()\n')
     assert r.returncode == 0, r.stderr.decode(errors='replace')
     assert b'still running' in r.stdout and b'\\u2192' in r.stdout
 
 
 def test_batch_output_survives_having_no_console(monkeypatch):
-    from pycat.batch_processor import make_console_output_safe
+    from pycat.batch.console import make_console_output_safe
     monkeypatch.setattr(sys, 'stdout', None)
     make_console_output_safe()
     print('\u2192 no console, no crash')
@@ -41,6 +41,12 @@ def test_batch_output_survives_having_no_console(monkeypatch):
 
 
 def test_every_batch_run_starts_with_the_guard():
-    import inspect
-    from pycat.batch_processor import BatchWorker
-    assert 'make_console_output_safe()' in inspect.getsource(BatchWorker.run).split('\n', 3)[1]
+    # Read from the source, not imported: batch_processor is the Qt worker, and this lane has no Qt.
+    import ast
+    import pathlib
+    path = pathlib.Path(__file__).resolve().parents[1] / 'src' / 'pycat' / 'batch_processor.py'
+    worker = next(n for n in ast.parse(path.read_text(encoding='utf-8')).body
+                  if isinstance(n, ast.ClassDef) and n.name == 'BatchWorker')
+    run = next(n for n in worker.body if isinstance(n, ast.FunctionDef) and n.name == 'run')
+    body = [n for n in run.body if not (isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant))]
+    assert ast.unparse(body[0]) == 'make_console_output_safe()'

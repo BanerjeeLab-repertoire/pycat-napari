@@ -826,7 +826,7 @@ def run_pwcca(image_layer1, image_layer2, roi_mask_layer, data_instance, viewer)
     # if an input is a lazy time-series / z-stack, np.asarray(...data) would
     # silently grab frame 0 (the _TiffPageStack trap), so pull the CURRENT VIEWER
     # FRAME explicitly instead (per-frame-over-time is a planned follow-on).
-    from pycat.file_io.file_io import layer_is_stack, extract_2d_plane
+    from pycat.file_io.stack_access import layer_is_stack, extract_2d_plane
     _any_stack = (layer_is_stack(image_layer1.data)
                   or layer_is_stack(image_layer2.data)
                   or (roi_mask_layer is not None and layer_is_stack(roi_mask_layer.data)))

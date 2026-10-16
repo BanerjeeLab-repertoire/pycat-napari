@@ -130,7 +130,7 @@ def run_manders_coloc(image_layer1, mask_layer2, roi_mask_layer, data_instance):
     # take frame 0 (the _TiffPageStack trap); extract frame 0 explicitly and warn
     # (this path has no viewer to read the current frame — per-frame-over-time is
     # a planned follow-on).
-    from pycat.file_io.file_io import layer_is_stack, extract_2d_plane
+    from pycat.file_io.stack_access import layer_is_stack, extract_2d_plane
     if (layer_is_stack(image1) or layer_is_stack(mask2)
             or (roi_mask is not None and layer_is_stack(roi_mask))):
         try:
@@ -985,7 +985,7 @@ def run_obca(mask_layer1, mask_layer2, roi_mask_layer, data_instance):
     mask2 = mask_layer2.data
     roi_mask = roi_mask_layer.data if roi_mask_layer is not None else None
     # Colocalization is 2D — guard against the lazy-stack frame-0 trap.
-    from pycat.file_io.file_io import layer_is_stack, extract_2d_plane
+    from pycat.file_io.stack_access import layer_is_stack, extract_2d_plane
     if (layer_is_stack(mask1) or layer_is_stack(mask2)
             or (roi_mask is not None and layer_is_stack(roi_mask))):
         try:

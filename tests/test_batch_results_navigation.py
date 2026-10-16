@@ -129,6 +129,7 @@ def test_each_condensate_carries_its_own_and_its_cells_total_intensity(tmp_path)
 
 @pytest.mark.base
 def test_batch_stamps_each_image_path_so_ids_are_unique_per_image(tmp_path):
+    pytest.importorskip('bioio')                                    # open_image reads through bioio
     import tifffile
     from pycat.batch.steps.io_steps import replay_open_image
     paths = []
