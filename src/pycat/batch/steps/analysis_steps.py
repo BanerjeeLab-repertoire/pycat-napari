@@ -19,8 +19,6 @@ def replay_condensate_analysis(state: dict, image_path: Path, params: dict, outp
     Run puncta_analysis_func directly (inner logic of run_puncta_analysis_func,
     no viewer or Qt dialog calls).
     """
-    from pycat.toolbox.feature_analysis_tools import puncta_analysis_func
-
     if state.get('no_cells'):
         print(f"[PyCAT Batch]   Condensate analysis skipped for "
               f"{image_path.name}: no cells were segmented upstream.")
@@ -44,10 +42,11 @@ def replay_condensate_analysis(state: dict, image_path: Path, params: dict, outp
         labeled_cells = np.ones_like(image).astype(int)
         labeled_cells[0:2, 0:2] = 0
 
-    cell_labeled_puncta = puncta_analysis_func(
-        puncta_mask, image, labeled_cells, data_instance,
-        filter_irregular=params.get('filter_irregular', True),
-    )
+    cell_labeled_puncta = OperationService.produce(
+        'feature_analysis.condensate_analysis',
+        {'puncta_masks': puncta_mask, 'image': image, 'labeled_cells': labeled_cells,
+         'data_instance': data_instance},
+        {'filter_irregular': params.get('filter_irregular', True)})
 
     # Retrieve the DataFrames written into data_instance by puncta_analysis_func
     cell_df = data_instance.data_repository.get('cell_df')
@@ -128,8 +127,6 @@ def replay_measure_line(state: dict, image_path: Path, params: dict, output_dir:
 
 def replay_cell_analysis(state: dict, image_path: Path, params: dict, output_dir: Path):
     """Run cell_analysis_func on the Cellpose mask to get labeled cells + cell_df."""
-    from pycat.toolbox.feature_analysis_tools import cell_analysis_func
-
     # Measure cell features on the layer the GUI recorded (params['image_layer']),
     # e.g. "Upscaled Segmentation Image", rather than assuming the fluorescence
     # channel.
@@ -167,9 +164,9 @@ def replay_cell_analysis(state: dict, image_path: Path, params: dict, output_dir
               f"reconstructed in batch mode -- proceeding WITHOUT it. Cells "
               f"the interactive session excluded may be included here.")
 
-    labeled_cell_masks, cell_df = cell_analysis_func(
-        image, cell_masks, omission_mask=None, data_instance=data_instance
-    )
+    labeled_cell_masks, cell_df = OperationService.produce(
+        'feature_analysis.cell_analysis', {'image': image, 'cell_masks': cell_masks},
+        {'omission_mask': None, 'data_instance': data_instance})
 
     # Store in state and data_instance (condensate steps depend on both)
     state['labeled_cells'] = labeled_cell_masks
@@ -192,8 +189,7 @@ def replay_sacf_analysis(state: dict, image_path: Path, params: dict, output_dir
     `params['mode']` at all, so even a fixed import would have silently run
     LIR-style logic for 'drawn_rectangle'/'whole_image' recordings.
     """
-    from pycat.toolbox.spatial_acf_tools import (
-        sacf_lir_mode, sacf_whole_image_mode, MODE_LIR, MODE_RECT, MODE_WHOLE)
+    from pycat.toolbox.spatial_acf_tools import MODE_LIR, MODE_RECT, MODE_WHOLE
     import numpy as np
 
     data_instance = state['data_instance']
@@ -212,9 +208,12 @@ def replay_sacf_analysis(state: dict, image_path: Path, params: dict, output_dir
         if labeled_cells is None:
             print("[PyCAT Batch]   SACF (LIR mode) skipped: no labeled cell mask in state.")
             return
-        results_df = sacf_lir_mode(stack, labeled_cells, microns_per_pixel)
+        results_df = OperationService.produce(
+            'spatial_acf.per_cell',
+            {'stack': stack, 'labeled_cell_mask': labeled_cells, 'microns_per_pixel': microns_per_pixel})
     elif mode == MODE_WHOLE:
-        results_df = sacf_whole_image_mode(stack, microns_per_pixel)
+        results_df = OperationService.produce(
+            'spatial_acf.whole_image', {'stack': stack, 'microns_per_pixel': microns_per_pixel})
     elif mode == MODE_RECT:
         # A drawn-rectangle Shapes layer is created interactively (the user
         # draws rectangles on the canvas) -- there is no file or recorded
@@ -397,7 +396,6 @@ def replay_pixel_coloc(state: dict, image_path: Path, params: dict, output_dir: 
     segmentation ROI the planner chained upstream. NOT whole-frame: whole-frame Pearson measures the cell shape
     both channels share (r≈0.99 even for independent channels), not colocalisation — the ROI (the union of the
     segmented objects, excluding background) is the fix. The raw threshold-free measures from `coloc/metrics`."""
-    from pycat.toolbox.coloc.metrics import manders_overlap, manders_k1_calculation, manders_k2_calculation
     import pandas as pd
     # The first segmentation that actually HAS pixels: an image whose condensate step found no puncta still holds
     # an (empty) puncta_mask, and an empty ROI crashed Pearson ("x and y must have length at least 2") instead of
@@ -417,9 +415,9 @@ def replay_pixel_coloc(state: dict, image_path: Path, params: dict, output_dir: 
     ch2 = np.asarray(ch2, dtype=np.float64)
     pearson = OperationService.execute('colocalization', {'ch1': ch1, 'ch2': ch2, 'roi': roi}).measurements.iloc[0]
     pcc, pval = pearson['value'], pearson['p_value']
-    moc, _ = manders_overlap(ch1, ch2, roi)
-    k1, _ = manders_k1_calculation(ch1, ch2, roi)
-    k2, _ = manders_k2_calculation(ch1, ch2, roi)
+    moc, _ = OperationService.produce('coloc.manders_overlap', {'image1': ch1, 'image2': ch2, 'roi_mask': roi})
+    k1, _ = OperationService.produce('coloc.manders_k1', {'image1': ch1, 'image2': ch2, 'roi_mask': roi})
+    k2, _ = OperationService.produce('coloc.manders_k2', {'image1': ch1, 'image2': ch2, 'roi_mask': roi})
     df = pd.DataFrame([{'pearson_r': pcc, 'pearson_p': pval, 'manders_overlap': moc,
                         'manders_k1': k1, 'manders_k2': k2}])
     state['coloc_df'] = df
@@ -433,7 +431,6 @@ def replay_spatial_metrology(state: dict, image_path: Path, params: dict, output
     (`run_all_spatial_metrics`) on the puncta centroids WITHIN each cell. Replaces the `spatial_metrology`
     skip-stub (spec N2b-2); the cellular analogue of `replay_ivf_spatial_metrology`, which treats the whole field
     as one 'cell'."""
-    from pycat.toolbox.spatial_metrology_tools import get_puncta_centroids, run_all_spatial_metrics
     import pandas as pd
 
     puncta = state.get('puncta_mask')
@@ -454,14 +451,16 @@ def replay_spatial_metrology(state: dict, image_path: Path, params: dict, output
         elif np.isscalar(obj):
             out[prefix] = obj
 
-    coords_df = get_puncta_centroids(puncta, cells, mpx)
+    coords_df = OperationService.produce(
+        'spatial_metrology.centroids', {'puncta_mask': puncta, 'labeled_cells': cells, 'microns_per_pixel': mpx})
     rows = []
     for cl in [c for c in coords_df['cell_label'].unique() if c != 0]:
         sub = coords_df[coords_df['cell_label'] == cl]
         coords = sub[['y_um', 'x_um']].values
         if len(coords) < 2:                       # Ripley/NN need at least two points in the cell
             continue
-        res = run_all_spatial_metrics(coords, (cells == cl), mpx)
+        res = OperationService.produce(
+            'spatial_metrology.ripley', {'coords': coords, 'cell_mask': cells == cl, 'microns_per_pixel': mpx})
         row = {'cell_label': int(cl)}
         _flatten('', res, row)
         rows.append(row)
@@ -483,7 +482,6 @@ def replay_dynamic_spatial(state: dict, image_path: Path, params: dict, output_d
     never fabricates a per-frame segmentation. Both the motion op (`dynamic_spatial.link_trajectories`) and the
     fusion op (`dynamic_spatial.detect_merge_fission`) resolve here, so the `_dynamic_spatial_done` guard keeps a
     plan that contains both from tracking twice."""
-    from pycat.toolbox.dynamic_spatial_tools import extract_frame_properties
     import pandas as pd
 
     if state.get('_dynamic_spatial_done'):
@@ -506,7 +504,8 @@ def replay_dynamic_spatial(state: dict, image_path: Path, params: dict, output_d
     max_gap = int(params.get('max_gap_frames', 1))
     proximity = float(params.get('proximity_um', 1.0))
 
-    props = extract_frame_properties(stack, mpx)
+    props = OperationService.produce(
+        'dynamic_spatial.frame_properties', {'mask_stack': stack, 'microns_per_pixel': mpx})
     tracks = OperationService.produce('dynamic_spatial.link_trajectories', {'props_df': props},
         {'max_displacement_um': max_disp, 'max_gap_frames': max_gap})
     events = OperationService.produce('dynamic_spatial.detect_merge_fission', {'mask_stack': stack},

@@ -41,10 +41,12 @@ def _worker_class():
 
         def run(self):
             import traceback
-            from pycat.toolbox.timeseries.cell_pipeline import analyze_cell_timeseries
+            kw = dict(self.kwargs)
+            inputs = {role: kw.pop(role) for role in ('stack', 'cell_labels')}
             try:
-                res = analyze_cell_timeseries(progress=lambda d, n: self.progress.emit(int(d), int(n)),
-                                              cancel=lambda: self._cancel, **self.kwargs)
+                res = OperationService.produce('cell_timeseries.analyze', inputs, {
+                    **kw, 'progress': lambda d, n: self.progress.emit(int(d), int(n)),
+                    'cancel': lambda: self._cancel})
                 self.finished_ok.emit(res)
             except InterruptedError:
                 self.failed.emit('Cancelled.')
@@ -180,11 +182,12 @@ def _on_segment_cells(ui, ns):
     frames = _frame_range(ui, layer.data.shape[0])
 
     def _work(progress):
-        from pycat.toolbox.timeseries.cell_pipeline import time_average
-        avg = time_average(layer.data, frames)
+        avg = OperationService.produce('cell_timeseries.time_average', {'stack': layer.data, 'frames': frames})
         lo, hi = np.percentile(avg, (0.5, 99.9))
         norm = np.clip((avg - lo) / max(hi - lo, 1e-6), 0, 1).astype(np.float32)
-        return avg, OperationService.produce('cellpose', {'image': norm}, {'object_diameter': int(round(diameter))})
+        return avg, OperationService.produce(
+            'cellpose', {'image': norm},
+            {'object_diameter': int(round(diameter))})
 
     try:
         avg, cells = run_with_progress(_work, title='Cells', text='Time average + Cellpose…',

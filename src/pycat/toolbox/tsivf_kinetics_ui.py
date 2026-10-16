@@ -12,6 +12,7 @@ from qtpy.QtWidgets import (QComboBox, QFormLayout, QGroupBox, QLabel, QListWidg
                             QSizePolicy, QSpinBox)
 
 from pycat.toolbox.invitro.timeseries_kinetics import short_channel_name  # noqa: F401  (re-exported; headless home)
+from pycat.kernel import OperationService
 
 #: Layer names that are transmitted light — measured only if the user ticks them (they carry no fluorescence).
 _TRANSMITTED_HINT = ('brightfield', 'transmitted', 'dic', 'phase')
@@ -90,20 +91,21 @@ def add_kinetics_step(ui, layout):
             ch_dd.setCurrentText(cur)
 
     def _on_run():
-        from pycat.toolbox.invitro.timeseries_kinetics import (droplet_kinetics, kinetics_heterogeneity,
-                                                                heterogeneity_over_time)
         _refresh_channels()
         linked = ui._dr().get('tsivf_linked')
         if linked is None or 'track_id' not in getattr(linked, 'columns', []) or not ch_dd.count():
             napari_show_warning("Run Step 4 (measure + link) first.")
             return
         ch, dt = ch_dd.currentText(), ui._frame_interval_s()
-        kin = droplet_kinetics(linked, ch, dt, smooth_frames=smooth.value(), min_frames=min_len.value())
+        kin = OperationService.produce(
+            'invitro_timeseries.kinetics', {'per_object_df': linked, 'channel': ch, 'frame_interval_s': dt},
+            {'smooth_frames': smooth.value(), 'min_frames': min_len.value()})
         if not len(kin):
             napari_show_warning(f"No droplet was tracked for {min_len.value()}+ frames in '{ch}'.")
             return
-        summary = kinetics_heterogeneity(kin)
-        curve = heterogeneity_over_time(linked, kin, ch)
+        summary = OperationService.produce('invitro_timeseries.kinetics_heterogeneity', {'kin_df': kin})
+        curve = OperationService.produce(
+            'invitro_timeseries.heterogeneity_over_time', {'per_object_df': linked, 'kin_df': kin, 'channel': ch})
         ui._dr()['tsivf_kinetics'] = kin
         ui._dr()['tsivf_heterogeneity'] = curve
         ui._record('tsivf_kinetics', {'channel': ch, 'min_frames': min_len.value(),

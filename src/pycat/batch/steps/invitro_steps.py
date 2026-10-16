@@ -149,7 +149,6 @@ def replay_ivf_size_distribution(state: dict, image_path: Path, params: dict, ou
 
 def replay_ivf_spatial_metrology(state: dict, image_path: Path, params: dict, output_dir: Path):
     """Replay in vitro spatial metrology (whole field as one 'cell') from the droplet mask."""
-    from pycat.toolbox.spatial_metrology_tools import get_puncta_centroids, run_all_spatial_metrics
     import numpy as np
     import pandas as pd
 
@@ -168,14 +167,16 @@ def replay_ivf_spatial_metrology(state: dict, image_path: Path, params: dict, ou
     mpx = _mpx(state)
     H, W = mask.shape[:2]
     field_lbl = np.ones((H, W), dtype=np.int32); field_lbl[:2, :2] = 0
-    coords_df = get_puncta_centroids(mask, field_lbl, mpx)
+    coords_df = OperationService.produce(
+        'spatial_metrology.centroids', {'puncta_mask': mask, 'labeled_cells': field_lbl, 'microns_per_pixel': mpx})
     rows = []
     for cl in [c for c in coords_df['cell_label'].unique() if c != 0]:
         sub = coords_df[coords_df['cell_label'] == cl]
         coords = sub[['y_um', 'x_um']].values
         if len(coords) < 2:
             continue
-        res = run_all_spatial_metrics(coords, (field_lbl == cl), mpx)
+        res = OperationService.produce(
+            'spatial_metrology.ripley', {'coords': coords, 'cell_mask': field_lbl == cl, 'microns_per_pixel': mpx})
         row = {'field_label': int(cl)}
         _flatten_scalars('', res, row)
         rows.append(row)

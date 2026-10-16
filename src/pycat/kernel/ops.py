@@ -83,7 +83,7 @@ def _manders(op_id: str, function: str, first_role: str, second_role: str):
     def run(inputs: dict, params: dict):
         value = resolve(f'{_COLOC}:{function}')(inputs[first_role], inputs[second_role], inputs['roi'])
         return _result(op_id, 'coloc', {'value': float(value)})
-    register_kernel(op_id, run, wraps=f'{_COLOC}:{function}', entity='coloc')
+    register_kernel(op_id, run, wraps=f'{_COLOC}:{function}', entity='coloc', part_of='obj_based_coloc.manders')
 
 
 register_kernel('colocalization', _pearson, wraps=_PEARSON, entity='coloc')
@@ -135,3 +135,61 @@ named('void_detect', 'pycat.toolbox.topology_tools:detect_chromatin_voids', enti
 named('bg_subtract_3d', f'{_ZS}:bg_removal_3d')
 named('cellpose_3d', f'{_ZS}:cellpose_segmentation_3d', entity='cell')
 named('subcellular_segment_3d', f'{_ZS}:segment_subcellular_objects_3d', entity='mask')
+
+# ── Measurement and analysis steps (shared by a panel and its batch replay) ──────────────────────────────────
+# Plannable ops have their own curated entry in ``navigator.op_catalog._measure_ops``; a ``part_of`` op is a stage
+# or variant of the catalog op it names, planned as that op.
+_FEAT = 'pycat.toolbox.feature_analysis_tools'
+_BFP = 'pycat.toolbox.brightfield_pipeline'
+_KIN = 'pycat.toolbox.invitro.timeseries_kinetics'
+_SPM = 'pycat.toolbox.spatial_metrology_tools'
+_SACF = 'pycat.toolbox.spatial_acf_tools'
+_CELLTS = 'pycat.toolbox.timeseries.cell_pipeline'
+_CM = 'pycat.toolbox.coloc.metrics'
+named('feature_analysis.cell_analysis', f'{_FEAT}:cell_analysis_func', entity='cell')
+# The Navigator plans condensate measurement as feature_analysis.cell_analysis on a condensate target (the
+# executor dispatches on the target), so the puncta analysis is that op's condensate variant.
+named('feature_analysis.condensate_analysis', f'{_FEAT}:puncta_analysis_func', entity='condensate',
+      part_of='feature_analysis.cell_analysis')
+named('masks.measure_binary_mask', 'pycat.toolbox.masks.measurement:binary_mask_properties', entity='mask')
+named('spatial_metrology.ripley', f'{_SPM}:run_all_spatial_metrics', entity='condensate')
+named('spatial_metrology.centroids', f'{_SPM}:get_puncta_centroids', entity='condensate',
+      part_of='spatial_metrology.ripley')
+named('spatial_metrology.whole_field', f'{_BFP}:whole_field_spatial_metrics', entity='condensate',
+      part_of='spatial_metrology.ripley')
+named('spatial_acf.per_cell', f'{_SACF}:sacf_lir_mode', entity='cell')
+named('spatial_acf.whole_image', f'{_SACF}:sacf_whole_image_mode')
+named('coloc.manders_k1', f'{_CM}:manders_k1_calculation', entity='coloc', part_of='pixel_wise_corr.pearson_manders')
+named('coloc.manders_k2', f'{_CM}:manders_k2_calculation', entity='coloc', part_of='pixel_wise_corr.pearson_manders')
+named('coloc.manders_overlap', f'{_CM}:manders_overlap', entity='coloc', part_of='pixel_wise_corr.pearson_manders')
+named('dynamic_spatial.frame_properties', f'{_DYN}:extract_frame_properties', entity='condensate',
+      part_of='dynamic_spatial.link_trajectories')
+named('auto_crop.cell_bboxes', 'pycat.toolbox.batch_roi_tools:cell_bboxes_from_mask', part_of='cropped')
+named('auto_crop.foreground_bbox', 'pycat.toolbox.batch_roi_tools:multi_otsu_foreground_bbox', part_of='cropped')
+named('cellpose.keyframe', 'pycat.toolbox.ts_cellpose_tools:run_keyframe_cellpose', entity='cell',
+      part_of='cellpose')
+named('vpt.measured_drift', 'pycat.toolbox.vpt.measured_drift:measure_and_apply_if_real', entity='bead',
+      part_of='vpt.microrheology')
+
+# brightfield
+named('bf_preprocess.stages', f'{_BF}:preprocess_brightfield', part_of='bf_preprocess')
+named('brightfield.condensate_metrics', f'{_BF}:bf_condensate_metrics', entity='condensate')
+named('brightfield.od_metrics', f'{_BFP}:bf_od_metrics', entity='condensate')
+named('brightfield.per_cell', f'{_BFP}:bf_per_cell', entity='cell', part_of='brightfield.od_metrics')
+named('brightfield.invitro_field_summary', f'{_BFP}:ivbf_field_summary', entity='condensate')
+named('brightfield.invitro_size_distribution', f'{_BFP}:ivbf_size_and_contact', entity='condensate')
+
+# time series: cellular, and in-vitro droplets
+named('cell_timeseries.analyze', f'{_CELLTS}:analyze_cell_timeseries', entity='cell')
+# the image the cellular time series segments its cells on
+named('cell_timeseries.time_average', f'{_CELLTS}:time_average', part_of='cell_timeseries.analyze')
+named('invitro_timeseries.link_droplets', f'{_TSIVF}:link_condensates', entity='track')
+named('invitro_timeseries.measure_droplets', f'{_KIN}:measure_droplets_multichannel', entity='condensate',
+      part_of='invitro_timeseries.link_droplets')
+named('invitro_timeseries.object_trajectories', f'{_TSIVF}:build_object_records', entity='track')
+named('invitro_timeseries.field_trajectories', f'{_TSIVF}:field_trajectories')
+named('invitro_timeseries.kinetics', f'{_KIN}:droplet_kinetics', entity='condensate')
+named('invitro_timeseries.kinetics_heterogeneity', f'{_KIN}:kinetics_heterogeneity', entity='condensate',
+      part_of='invitro_timeseries.kinetics')
+named('invitro_timeseries.heterogeneity_over_time', f'{_KIN}:heterogeneity_over_time', entity='condensate',
+      part_of='invitro_timeseries.kinetics')

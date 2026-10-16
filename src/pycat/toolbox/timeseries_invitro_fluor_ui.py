@@ -410,8 +410,6 @@ def _tsivf_linking(ui, layout):
     prog, run = _run_row(form, "▶  Link Condensates")
 
     def _on_run():
-        from pycat.toolbox.timeseries_invitro_tools import link_condensates
-        from pycat.toolbox.invitro.timeseries_kinetics import measure_droplets_multichannel
         label_stack = ui._dr().get('tsivf_label_stack')
         if label_stack is None:
             napari_show_warning("Run Step 3 (Segment Stack) first.")
@@ -433,13 +431,15 @@ def _tsivf_linking(ui, layout):
         run.setEnabled(False)
 
         def _task(progress):
-            props, dilute = measure_droplets_multichannel(label_stack, channels, mpx)
+            props, dilute = OperationService.produce(
+                'invitro_timeseries.measure_droplets',
+                {'label_stack': label_stack, 'channels': channels, 'microns_per_pixel': mpx})
             ui._dr()['tsivf_dilute'] = dilute
             ui._dr()['tsivf_measured_channels'] = list(channels)
-            linked, fusions = link_condensates(
-                props, search_radius_scale=rscale, max_gap_frames=gap,
-                area_weight=aw, detect_fusion=do_fusion,
-                progress_callback=progress)
+            linked, fusions = OperationService.produce(
+                'invitro_timeseries.link_droplets', {'props_df': props},
+                {'search_radius_scale': rscale, 'max_gap_frames': gap, 'area_weight': aw,
+                 'detect_fusion': do_fusion, 'progress_callback': progress})
             # Drop short tracks.
             if minlen > 1 and 'track_id' in linked.columns:
                 counts = linked.groupby('track_id')['frame'].transform('size')
@@ -523,15 +523,16 @@ def _tsivf_object_trajectories(ui, layout):
     form.addRow(run)
 
     def _on_run():
-        from pycat.toolbox.timeseries_invitro_tools import (
-            build_object_records, object_records_to_df)
+        from pycat.toolbox.timeseries_invitro_tools import object_records_to_df
         linked = ui._dr().get('tsivf_linked')
         if linked is None or 'track_id' not in getattr(linked, 'columns', []):
             napari_show_warning("Run Step 4 (Link Condensates) first.")
             return
         dt = ui._frame_interval_s()
         fusions = ui._dr().get('tsivf_fusions')
-        records = build_object_records(linked, frame_interval_s=dt, fusion_df=fusions)
+        records = OperationService.produce(
+            'invitro_timeseries.object_trajectories', {'linked_df': linked},
+            {'frame_interval_s': dt, 'fusion_df': fusions})
         ui._dr()['tsivf_object_records'] = records
         summary = object_records_to_df(records)
         ui._dr()['tsivf_object_summary'] = summary
@@ -561,7 +562,6 @@ def _tsivf_field_trajectories(ui, layout):
     prog, run = _run_row(form, "▶  Compute Field Trajectories")
 
     def _on_run():
-        from pycat.toolbox.timeseries_invitro_tools import field_trajectories
         label_stack = ui._dr().get('tsivf_label_stack')
         if label_stack is None:
             napari_show_warning("Run Step 3 (Segment Stack) first.")
@@ -590,9 +590,10 @@ def _tsivf_field_trajectories(ui, layout):
                 # in COMPLETE SILENCE. See utils.general_utils.report_guarantee_failure.
                 from pycat.utils.general_utils import report_guarantee_failure
                 report_guarantee_failure('timeseries_invitro_fluor_ui: warn_if_assumed_axis', _exc)
-            return field_trajectories(
-                label_stack, intensity, microns_per_pixel=mpx,
-                frame_interval_s=dt, progress_callback=progress)
+            return OperationService.produce(
+                'invitro_timeseries.field_trajectories',
+                {'label_stack': label_stack, 'intensity_stack_like': intensity},
+                {'microns_per_pixel': mpx, 'frame_interval_s': dt, 'progress_callback': progress})
 
         def _prog(d, t):
             if t > 0:

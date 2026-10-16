@@ -47,12 +47,11 @@ def _frame_interval(state, params):
 def replay_ts_cells_time_average(state: dict, image_path: Path, params: dict, output_dir: Path):
     """Cellpose on the movie's time average at the recorded cell diameter (the GUI's 'Segment cells on the
     time average')."""
-    from pycat.toolbox.timeseries.cell_pipeline import time_average
     stack = _stack(state)
     if stack is None:
         print(f'[PyCAT Batch]   Cells on the time average skipped for {image_path.name}: not a (T, H, W) stack.')
         return
-    avg = time_average(stack)
+    avg = OperationService.produce('cell_timeseries.time_average', {'stack': stack})
     lo, hi = np.percentile(avg, (0.5, 99.9))
     norm = np.clip((avg - lo) / max(hi - lo, 1e-6), 0, 1).astype(np.float32)
     diameter = float(params.get('cell_diameter') or _get_data(state['data_instance'], 'cell_diameter', 100))
@@ -66,7 +65,6 @@ def replay_ts_cells_time_average(state: dict, image_path: Path, params: dict, ou
 
 def replay_cell_timeseries(state: dict, image_path: Path, params: dict, output_dir: Path):
     """The cellular time-series analysis of one movie, with the recorded settings."""
-    from pycat.toolbox.timeseries.cell_pipeline import analyze_cell_timeseries
     from pycat.utils.pixel_size import pixel_size_um_or_default
     stack = _stack(state)
     cells = state.get('ts_cell_mask_stack')
@@ -80,16 +78,19 @@ def replay_cell_timeseries(state: dict, image_path: Path, params: dict, output_d
     # Frame range and a Step 2 rectangle were already applied to the stack by set_frame_range; only the
     # automatic cells' region is re-derived per movie.
     roi = 'cells' if params.get('roi') == 'cells' else None
-    result = analyze_cell_timeseries(
-        stack, cells, int(params.get('ball_radius') or _get_data(di, 'ball_radius', 5)),
-        int(params.get('window_size') or int(_get_data(di, 'cell_diameter', 100)) // 2),
-        frame_interval_s=_frame_interval(state, params),
-        microns_per_pixel=pixel_size_um_or_default(di.data_repository, context='batch cellular time series'),
-        frame_step=int(params.get('frame_step', 1) or 1), roi=roi,
-        contrast_floor=params.get('contrast_floor'), contrast_floor_on=bool(params.get('contrast_floor_on', True)),
-        min_track_frames=int(params.get('min_track_frames', 1) or 1), n_workers=params.get('n_workers'),
-        suppress_foreground=params.get('suppress_foreground', True),
-        suppression_params=params.get('suppression_params'))
+    result = OperationService.produce(
+        'cell_timeseries.analyze',
+        {'stack': stack, 'cell_labels': cells,
+         'ball_radius': int(params.get('ball_radius') or _get_data(di, 'ball_radius', 5)),
+         'window_size': int(params.get('window_size') or int(_get_data(di, 'cell_diameter', 100)) // 2)},
+        {'frame_interval_s': _frame_interval(state, params),
+         'microns_per_pixel': pixel_size_um_or_default(di.data_repository, context='batch cellular time series'),
+         'frame_step': int(params.get('frame_step', 1) or 1), 'roi': roi,
+         'contrast_floor': params.get('contrast_floor'),
+         'contrast_floor_on': bool(params.get('contrast_floor_on', True)),
+         'min_track_frames': int(params.get('min_track_frames', 1) or 1), 'n_workers': params.get('n_workers'),
+         'suppress_foreground': params.get('suppress_foreground', True),
+         'suppression_params': params.get('suppression_params')})
     write_outputs(result, cells, state.get('ts_time_average'), stack, image_path, output_dir,
                   source=di.data_repository.get('file_path') or str(image_path))
     s = result.summary

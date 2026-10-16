@@ -143,6 +143,13 @@ def test_both_invitro_field_summaries_wire_the_mode_annotation():
                    (getattr(c.func, 'id', None) or getattr(c.func, 'attr', None)) == name
                    for c in ast.walk(ast.parse(src)))
 
+    def runs_op(fname, op_id):
+        src = (root / fname).read_text(encoding='utf-8')
+        return any(isinstance(c, ast.Call) and getattr(c.func, 'attr', None) in ('execute', 'produce')
+                   and c.args and isinstance(c.args[0], ast.Constant) and c.args[0].value == op_id
+                   for c in ast.walk(ast.parse(src)))
+
     assert calls('invitro_fluor_ui.py', 'annotate_summary_table'),         "invitro_fluor_ui.py no longer annotates its field-summary table with the condensate mode"
-    # The brightfield panel computes through the function batch also replays (1.7.005), which annotates.
-    assert calls('invitro_bf_ui.py', 'ivbf_field_summary') and         calls('brightfield_pipeline.py', 'annotate_summary_table'),         "invitro_bf_ui.py no longer annotates its field-summary table with the condensate mode"
+    # The brightfield panel computes through the operation batch also replays (1.7.005), whose function
+    # (brightfield_pipeline.ivbf_field_summary) annotates.
+    assert runs_op('invitro_bf_ui.py', 'brightfield.invitro_field_summary') and         calls('brightfield_pipeline.py', 'annotate_summary_table'),         "invitro_bf_ui.py no longer annotates its field-summary table with the condensate mode"

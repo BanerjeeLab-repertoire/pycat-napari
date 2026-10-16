@@ -23,10 +23,6 @@ pytestmark = pytest.mark.base
 
 SRC = pathlib.Path(__file__).resolve().parents[1] / 'src' / 'pycat'
 
-#: Kernel ops that are deliberately not plannable Navigator operations: sub-coefficients of the object
-#: colocalization workflow, which the Navigator plans as one op.
-_NOT_PLANNABLE = {'coloc.manders_m1', 'coloc.manders_m2'}
-
 #: (file relative to src/pycat, launcher qualname, wrapped function) -> why it has not moved yet.
 _NOT_YET_MIGRATED: dict = {}
 
@@ -42,9 +38,17 @@ def _vocabulary():
 
 
 def test_every_kernel_is_an_op_the_navigator_knows():
+    """Every kernel is a catalog op, or a declared component (``part_of``) of one: a stage or variant the
+    Navigator plans as that op (the Manders sub-coefficients, the per-frame properties trajectory linking reads)."""
     catalog, measure = _vocabulary()
-    unknown = sorted(op for op in _specs() if op not in catalog and op not in measure and op not in _NOT_PLANNABLE)
-    assert not unknown, f'kernels with no operation-catalog entry: {unknown}'
+    known = set(catalog) | set(measure)
+    unknown = sorted(op for op, spec in _specs().items() if op not in known and spec.part_of is None)
+    assert not unknown, f'kernels with no operation-catalog entry (and no part_of): {unknown}'
+    orphans = sorted(f'{op} -> {spec.part_of}' for op, spec in _specs().items()
+                     if spec.part_of is not None and spec.part_of not in known)
+    assert not orphans, f'part_of names an op that is not in the catalog: {orphans}'
+    both = sorted(op for op, spec in _specs().items() if spec.part_of is not None and op in known)
+    assert not both, f'a component is planned as its parent, so it must not also be a catalog op: {both}'
 
 
 def test_every_kernel_wraps_the_catalogs_function_for_its_op():
@@ -134,11 +138,14 @@ def test_a_steps_declared_operations_include_every_op_its_replay_runs():
     """``_STEP_OPERATIONS`` was declared by hand and could not be checked; a replay that goes through the kernel
     names its ops in the call, so the declaration is now verified against the code."""
     from pycat.batch_step_registry import _STEP_MAP, step_operations
+    specs = _specs()
     undeclared = []
     for step, fn in _STEP_MAP.items():
         if step in _METHOD_DISPATCH:
             continue
-        missing = _kernel_ops_called(fn) - set(step_operations(step))
+        # a component op is declared as the catalog op it is part of -- the vocabulary a step declares in
+        called = {specs[op].part_of or op if op in specs else op for op in _kernel_ops_called(fn)}
+        missing = called - set(step_operations(step))
         if missing:
             undeclared.append(f'{step}: runs {sorted(missing)} but declares {step_operations(step)}')
     assert not undeclared, '\n'.join(undeclared)
@@ -185,3 +192,196 @@ def test_every_catalog_op_a_launcher_calls_has_a_kernel():
                         missing.add((rel, qualname, name))
     assert not missing, ('launchers call catalog operations that have no kernel -- register one in '
                          'pycat/kernel/ops.py and call it through OperationService:\n' + '\n'.join(map(str, sorted(missing))))
+
+
+# ── Everything in the catalog ───────────────────────────────────────────────────────────────────────────────
+
+def _is_science_module(module: str) -> bool:
+    rel = module.split('pycat.', 1)[-1].replace('.', '/')
+    return module.startswith('pycat.toolbox.') and not _is_ui_module(rel + '.py')
+
+
+def science_calls():
+    """{(file, launcher, 'module:function')} for every launcher call of a public toolbox function (resolved
+    through the module's imports, or defined in the same module) that is not itself a launcher."""
+    trees = {}
+    for path in SRC.rglob('*.py'):
+        rel = path.relative_to(SRC).as_posix()
+        module = 'pycat.' + rel[:-3].replace('/', '.').removesuffix('.__init__')
+        trees[module] = (ast.parse(path.read_text(encoding='utf-8')), rel)
+
+    def definition(module, name):
+        tree = trees.get(module, (None,))[0]
+        return next((n for n in getattr(tree, 'body', ()) if isinstance(n, ast.FunctionDef) and n.name == name), None)
+
+    found = set()
+    for module, (tree, rel) in trees.items():
+        if rel.startswith('kernel/'):
+            continue
+        imported = {a.asname or a.name: (n.module, a.name) for n in ast.walk(tree)
+                    if isinstance(n, ast.ImportFrom) and n.module for a in n.names}
+        for qualname, fn in _launchers(tree, rel):
+            for call in ast.walk(fn):
+                name = getattr(getattr(call, 'func', None), 'id', None) if isinstance(call, ast.Call) else None
+                if not name:
+                    continue
+                target = imported.get(name) or ((module, name) if definition(module, name) else None)
+                if target is None or not _is_science_module(target[0]) or target[1].startswith('_'):
+                    continue
+                d = definition(*target)
+                if d is None or 'viewer' in {a.arg for a in d.args.args + d.args.kwonlyargs}:
+                    continue
+                found.add((rel, qualname, f'{target[0]}:{target[1]}'))
+    return found
+
+
+#: Toolbox functions a launcher calls that are NOT operations: they draw, format, read files or probe the
+#: environment -- no measurement depends on them. 'module:function' -> why.
+_NOT_OPERATIONS: dict = {
+    'pycat.toolbox.analysis_plots:plot_coarsening': 'draws a figure from results already computed',
+    'pycat.toolbox.analysis_plots:plot_frap_recovery': 'draws a figure from results already computed',
+    'pycat.toolbox.analysis_plots:plot_fusion_relaxation': 'draws a figure from results already computed',
+    'pycat.toolbox.analysis_plots:plot_km_survival': 'draws a figure from results already computed',
+    'pycat.toolbox.analysis_plots:plot_msd_trajectories': 'draws a figure from results already computed',
+    'pycat.toolbox.analysis_plots:plot_phase_diagram': 'draws a figure from results already computed',
+    'pycat.toolbox.analysis_plots:plot_spatial_metrology': 'draws a figure from results already computed',
+    'pycat.toolbox.analysis_plots:plot_vpt_panel': 'draws a figure from results already computed',
+    'pycat.toolbox.coloc.analysis:cytofluorogram_plot': 'draws a figure from results already computed',
+    'pycat.toolbox.coloc.analysis:li_ica_plot': 'draws a figure from results already computed',
+    'pycat.toolbox.condensate_modes:annotate_summary_table': 'adds explanatory notes to a computed table',
+    'pycat.toolbox.control_validation:control_report_figure': 'draws a figure from results already computed',
+    'pycat.toolbox.fd_curve_tools:cycles_to_dataframe': 'formats cycles the FD-curve analysis computed',
+    'pycat.toolbox.frap_tools:circular_mask': 'builds a mask from a drawn circle (geometry the user drew)',
+    'pycat.toolbox.frap_tools:masks_from_shapes': 'converts drawn shapes to masks (geometry the user drew, not a measurement)',
+    'pycat.toolbox.frap_tools:masks_from_shapes_multi': 'converts drawn shapes to masks (geometry the user drew, not a measurement)',
+    'pycat.toolbox.gpu_utils:gpu_available': 'probes the environment',
+    'pycat.toolbox.invitro.partition:brush_ready_droplet_table': 'lays out computed tables for brushing; computes nothing new',
+    'pycat.toolbox.invitro.timeseries_kinetics:brush_ready_kinetics': 'lays out computed tables for brushing; computes nothing new',
+    'pycat.toolbox.invitro.timeseries_kinetics:channel_column': 'a column-name helper',
+    'pycat.toolbox.invitro.timeseries_kinetics:short_channel_name': 'a column-name helper',
+    'pycat.toolbox.qc_gallery:build_gallery': 'builds a QC image gallery for viewing',
+    'pycat.toolbox.spatial_acf_tools:plot_sigma_vs_slice': 'draws a figure from results already computed',
+    'pycat.toolbox.temperature_tools:elapsed_to_seconds': 'a unit conversion of timestamps',
+    'pycat.toolbox.temperature_tools:locate_temperature_csv': 'finds a file',
+    'pycat.toolbox.temperature_tools:parse_batch_filenames': 'parses file names',
+    'pycat.toolbox.temperature_tools:plot_turbidity_transitions': 'draws a figure from results already computed',
+    'pycat.toolbox.temperature_tools:read_micromanager_times': 'reads acquisition metadata',
+    'pycat.toolbox.temperature_tools:render_annotated_mp4': 'renders a movie for viewing',
+    'pycat.toolbox.timeseries.cell_pipeline:result_tables': 'formats the cellular time-series result',
+    'pycat.toolbox.timeseries_invitro_tools:make_frame_segmenter': 'builds the per-frame callable the ts_droplet_segment op runs; computes nothing itself',
+    'pycat.toolbox.timeseries_invitro_tools:object_records_to_df': 'formats records the object_trajectories op computed',
+    'pycat.toolbox.trackmate_bridge:trackmate_bridge_available': 'probes the environment',
+    'pycat.toolbox.unmixing_tools:clip_for_display': 'display scaling only; the measured arrays are untouched',
+}
+
+#: The ratchet for "everything in the catalog": science a launcher still calls directly. Shrinks only.
+#: Each is called by one panel (no batch replay or second launcher shares it yet), so no two routes can
+#: disagree today -- but the Navigator cannot plan them and a second launcher would duplicate them.
+_NOT_YET_IN_CATALOG: set = {
+    'pycat.toolbox.brightfield_tools:bf_analyse_frame_quality',
+    'pycat.toolbox.brightfield_tools:bf_texture_features',
+    'pycat.toolbox.brightfield_tools:select_best_slice',
+    'pycat.toolbox.coloc.analysis:li_ica_histogram',
+    'pycat.toolbox.coloc.analysis:process_pwcca_methods',
+    'pycat.toolbox.coloc.nulls:spatial_null_test',
+    'pycat.toolbox.coloc.thresholding:manders_threshold_sensitivity',
+    'pycat.toolbox.contrast_cascade_tools:contrast_cascade_bands',
+    'pycat.toolbox.contrast_cascade_tools:focus_vs_growth_diagnostic',
+    'pycat.toolbox.control_validation:recommend_parameters',
+    'pycat.toolbox.control_validation:validate_against_controls',
+    'pycat.toolbox.dynamic_spatial_tools:cluster_lifetime_analysis',
+    'pycat.toolbox.dynamic_spatial_tools:growth_shrinkage_kinetics',
+    'pycat.toolbox.dynamic_spatial_tools:link_trajectories_bayesian',
+    'pycat.toolbox.dynamic_spatial_tools:neighbourhood_persistence',
+    'pycat.toolbox.dynamic_spatial_tools:trajectory_metrics',
+    'pycat.toolbox.fd_curve_tools:segment_fd_cycles',
+    'pycat.toolbox.fd_curve_tools:smooth_force',
+    'pycat.toolbox.fd_curve_tools:summarise_cycles',
+    'pycat.toolbox.fd_curve_tools:wlc_extensible',
+    'pycat.toolbox.fft_bandpass_tools:im2bw',
+    'pycat.toolbox.fibril_tools:detect_beads_on_fibrils',
+    'pycat.toolbox.fibril_tools:fibril_graph_analysis',
+    'pycat.toolbox.fibril_tools:fibril_morphometry',
+    'pycat.toolbox.fibril_tools:register_images',
+    'pycat.toolbox.frap_tools:run_frap_analysis',
+    'pycat.toolbox.frap_tools:run_frap_analysis_multi',
+    'pycat.toolbox.fusion_tools:aspect_ratio_signal',
+    'pycat.toolbox.fusion_tools:build_fusion_signal_from_forces',
+    'pycat.toolbox.fusion_tools:droplet_radii_um',
+    'pycat.toolbox.fusion_tools:fit_fusion_relaxation',
+    'pycat.toolbox.fusion_tools:suggest_fit_window',
+    'pycat.toolbox.morphological_complexity_tools:fractal_dimension_per_cell',
+    'pycat.toolbox.morphological_complexity_tools:lacunarity',
+    'pycat.toolbox.morphological_complexity_tools:orientation_order_parameter',
+    'pycat.toolbox.morphological_complexity_tools:tortuosity_per_object',
+    'pycat.toolbox.nb_tools:number_and_brightness',
+    'pycat.toolbox.organizational_metrics_tools:cluster_size_distribution',
+    'pycat.toolbox.organizational_metrics_tools:distance_to_boundary',
+    'pycat.toolbox.organizational_metrics_tools:inter_condensate_spacing',
+    'pycat.toolbox.organizational_metrics_tools:per_cell_occupancy',
+    'pycat.toolbox.organizational_metrics_tools:spatial_entropy',
+    'pycat.toolbox.pipeline_diagnostic_tools:bg_removal_steps_current',
+    'pycat.toolbox.pipeline_diagnostic_tools:bg_removal_steps_v100',
+    'pycat.toolbox.pipeline_diagnostic_tools:preprocess_steps_current',
+    'pycat.toolbox.pipeline_diagnostic_tools:preprocess_steps_v100',
+    'pycat.toolbox.segmentation.cellpose:train_and_apply_rf_classifier',
+    'pycat.toolbox.segmentation.contrast_floor:apply_floor',
+    'pycat.toolbox.segmentation.contrast_floor:floor_counts',
+    'pycat.toolbox.segmentation.contrast_floor:measure_for_floor',
+    'pycat.toolbox.segmentation.local_thresholding:local_threshold_k',
+    'pycat.toolbox.segmentation.subcellular:segment_condensates_in_cells',
+    'pycat.toolbox.segmentation_scale_advisor:advise_upscaling',
+    'pycat.toolbox.segmentation_scale_advisor:measure_object_diameter_px',
+    'pycat.toolbox.spatial_acf_tools:sacf_drawn_rect_mode',
+    'pycat.toolbox.spatial_metrology_tools:convex_hull_metrics',
+    'pycat.toolbox.spatial_metrology_tools:delaunay_metrics',
+    'pycat.toolbox.spatial_metrology_tools:distance_to_roi',
+    'pycat.toolbox.spatial_metrology_tools:local_object_density',
+    'pycat.toolbox.spatial_metrology_tools:minimum_spanning_tree',
+    'pycat.toolbox.spatial_metrology_tools:nearest_neighbour_distance',
+    'pycat.toolbox.spatial_metrology_tools:pair_correlation_function',
+    'pycat.toolbox.spatial_metrology_tools:radial_localization_profile',
+    'pycat.toolbox.spatial_metrology_tools:spatial_null_envelope',
+    'pycat.toolbox.spatial_metrology_tools:voronoi_metrics',
+    'pycat.toolbox.spida_tools:build_intensity_histogram',
+    'pycat.toolbox.spida_tools:check_assumptions',
+    'pycat.toolbox.spida_tools:check_modality',
+    'pycat.toolbox.spida_tools:fit_spida_histogram',
+    'pycat.toolbox.temperature_tools:apply_static_pattern_correction',
+    'pycat.toolbox.temperature_tools:build_temperature_labels',
+    'pycat.toolbox.temperature_tools:detect_transitions',
+    'pycat.toolbox.temperature_tools:entropy_turbidity_curve',
+    'pycat.toolbox.temperature_tools:guess_clear_frame',
+    'pycat.toolbox.temperature_tools:reference_subtraction',
+    'pycat.toolbox.temperature_tools:run_temperature_batch',
+    'pycat.toolbox.temperature_tools:sync_temperatures',
+    'pycat.toolbox.temporal_enhancement_tools:compete_methods',
+    'pycat.toolbox.timeseries.results_view:droplet_trace_metrics',
+    'pycat.toolbox.topology_tools:estimate_image_noise',
+    'pycat.toolbox.topology_tools:normalize_within_mask',
+    'pycat.toolbox.topology_tools:topology_metrics',
+    'pycat.toolbox.trackmate_bridge:run_trackmate_lap_tracking',
+    'pycat.toolbox.unmixing_tools:estimate_mixing_matrix',
+    'pycat.toolbox.unmixing_tools:mixing_matrix_warnings',
+    'pycat.toolbox.unmixing_tools:negative_fraction',
+    'pycat.toolbox.unmixing_tools:unmix',
+    'pycat.toolbox.zstack_segmentation_tools:condensate_metrics_3d',
+}
+
+
+def test_every_science_function_a_launcher_calls_is_in_the_catalog():
+    """One task, one place, for ALL science: a panel, a batch replay and the Navigator reach an operation only
+    through its catalog id. A launcher that calls a toolbox function directly must find a kernel for it."""
+    kernels = {spec.wraps for spec in _specs().values()}
+    direct = {fn for _, _, fn in science_calls()}
+    missing = sorted(direct - kernels - set(_NOT_OPERATIONS) - _NOT_YET_IN_CATALOG)
+    assert not missing, ('launchers call toolbox science that has no operation id -- give it a catalog entry and a '
+                         'kernel (pycat/kernel/ops.py), or, if it computes nothing a result depends on, list it in '
+                         '_NOT_OPERATIONS with the reason:\n' + '\n'.join(missing))
+
+
+def test_the_not_yet_in_catalog_list_only_shrinks():
+    kernels = {spec.wraps for spec in _specs().values()}
+    direct = {fn for _, _, fn in science_calls()}
+    stale = sorted(_NOT_YET_IN_CATALOG - (direct - kernels))
+    assert not stale, f'in the catalog now (or no longer called) -- delete from _NOT_YET_IN_CATALOG: {stale}'

@@ -86,6 +86,7 @@ from pycat.utils.notify import show_info as napari_show_info
 
 # Local application imports
 from pycat.toolbox.correlation_func_analysis_tools import calculate_autocorrelation
+from pycat.kernel import OperationService
 
 
 # ---------------------------------------------------------------------------
@@ -586,7 +587,9 @@ def run_sacf_analysis(image_layer, mode, data_instance, viewer,
             )
             return
         napari_show_info("Running per-cell SACF (LIR crop) …")
-        results_df = sacf_lir_mode(stack, labeled_mask, microns_per_pixel)
+        results_df = OperationService.produce(
+            'spatial_acf.per_cell',
+            {'stack': stack, 'labeled_cell_mask': labeled_mask, 'microns_per_pixel': microns_per_pixel})
 
     # ── Drawn-rectangle mode ───────────────────────────────────────────────
     elif mode == MODE_RECT:
@@ -603,7 +606,8 @@ def run_sacf_analysis(image_layer, mode, data_instance, viewer,
     # ── Whole-image mode ───────────────────────────────────────────────────
     elif mode == MODE_WHOLE:
         napari_show_info("Running whole-image SACF …")
-        results_df = sacf_whole_image_mode(stack, microns_per_pixel)
+        results_df = OperationService.produce(
+            'spatial_acf.whole_image', {'stack': stack, 'microns_per_pixel': microns_per_pixel})
 
     else:
         napari_show_warning(f"SACF: Unknown mode '{mode}'.")

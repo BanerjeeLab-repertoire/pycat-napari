@@ -70,8 +70,6 @@ def replay_ts_cellpose_keyframe(state: dict, image_path: Path, params: dict, out
     Run keyframe Cellpose on the preprocessed stack and propagate masks.
     Uses the same interval and diameter recorded from the GUI session.
     """
-    from pycat.toolbox.ts_cellpose_tools import run_keyframe_cellpose
-
     preprocessed = state.get('preprocessed')
     if preprocessed is None:
         raise RuntimeError("ts_cellpose_keyframe requires preprocessing to run first.")
@@ -84,9 +82,9 @@ def replay_ts_cellpose_keyframe(state: dict, image_path: Path, params: dict, out
     cell_diameter = params.get('cell_diameter',
                                _get_data(state['data_instance'], 'cell_diameter', 100))
 
-    mask_stack, kf_indices = run_keyframe_cellpose(
-        preprocessed.astype(np.float32), cell_diameter, interval
-    )
+    mask_stack, kf_indices = OperationService.produce(
+        'cellpose.keyframe',
+        {'stack': preprocessed.astype(np.float32), 'cell_diameter': cell_diameter, 'keyframe_interval': interval})
 
     state['labeled_cells']          = mask_stack[0]   # frame-0 mask for cell analysis
     state['ts_cell_mask_stack']     = mask_stack

@@ -78,18 +78,19 @@ def _channels(state, params, shape):
 
 
 def replay_tsivf_link_condensates(state: dict, image_path: Path, params: dict, output_dir: Path):
-    from pycat.toolbox.invitro.timeseries_kinetics import measure_droplets_multichannel
-    from pycat.toolbox.timeseries_invitro_tools import link_condensates
     labels = state.get('tsivf_label_stack')
     if labels is None:
         print(f'[PyCAT Batch]   TSIVF linking skipped for {image_path.name}: no segmentation.')
         return
     channels = _channels(state, params, labels.shape)
-    props, dilute = measure_droplets_multichannel(labels, channels, _mpx(state))
-    linked, fusions = link_condensates(props, search_radius_scale=params.get('search_radius_scale', 2.0),
-                                       max_gap_frames=params.get('max_frame_gap', 2),
-                                       area_weight=params.get('area_weight', 0.6),
-                                       detect_fusion=params.get('detect_fusion', True))
+    props, dilute = OperationService.produce(
+        'invitro_timeseries.measure_droplets',
+        {'label_stack': labels, 'channels': channels, 'microns_per_pixel': _mpx(state)})
+    linked, fusions = OperationService.produce(
+        'invitro_timeseries.link_droplets', {'props_df': props},
+        {'search_radius_scale': params.get('search_radius_scale', 2.0),
+         'max_gap_frames': params.get('max_frame_gap', 2), 'area_weight': params.get('area_weight', 0.6),
+         'detect_fusion': params.get('detect_fusion', True)})
     minlen = int(params.get('min_track_length', 3) or 1)
     if minlen > 1 and 'track_id' in linked.columns:
         linked = linked[linked.groupby('track_id')['frame'].transform('size') >= minlen].reset_index(drop=True)
@@ -102,29 +103,30 @@ def replay_tsivf_link_condensates(state: dict, image_path: Path, params: dict, o
 
 
 def replay_tsivf_object_trajectories(state: dict, image_path: Path, params: dict, output_dir: Path):
-    from pycat.toolbox.timeseries_invitro_tools import build_object_records, object_records_to_df
+    from pycat.toolbox.timeseries_invitro_tools import object_records_to_df
     linked = state.get('tsivf_linked')
     if linked is None or 'track_id' not in linked:
         return
-    records = build_object_records(linked, frame_interval_s=_dt(state, params), fusion_df=state.get('tsivf_fusions'))
+    records = OperationService.produce(
+        'invitro_timeseries.object_trajectories', {'linked_df': linked},
+        {'frame_interval_s': _dt(state, params), 'fusion_df': state.get('tsivf_fusions')})
     object_records_to_df(records).to_csv(output_dir / f'{image_path.stem}_tsivf_object_summary.csv', index=False)
 
 
 def replay_tsivf_field_trajectories(state: dict, image_path: Path, params: dict, output_dir: Path):
-    from pycat.toolbox.timeseries_invitro_tools import field_trajectories
     labels = state.get('tsivf_label_stack')
     intensity = _stack(state, params.get('intensity_layer'))
     if labels is None or intensity is None:
         return
-    field_trajectories(labels, intensity, microns_per_pixel=_mpx(state), frame_interval_s=_dt(state, params)) \
+    OperationService.produce(
+        'invitro_timeseries.field_trajectories', {'label_stack': labels, 'intensity_stack_like': intensity},
+        {'microns_per_pixel': _mpx(state), 'frame_interval_s': _dt(state, params)}) \
         .to_csv(output_dir / f'{image_path.stem}_tsivf_field_trajectories.csv', index=False)
 
 
 def replay_tsivf_kinetics(state: dict, image_path: Path, params: dict, output_dir: Path):
     import pandas as pd
-    from pycat.toolbox.invitro.timeseries_kinetics import (brush_ready_kinetics, droplet_kinetics,
-                                                            heterogeneity_over_time, kinetics_heterogeneity)
-    from pycat.toolbox.timeseries.cell_pipeline import time_average
+    from pycat.toolbox.invitro.timeseries_kinetics import brush_ready_kinetics
     linked = state.get('tsivf_linked')
     measured = state.get('tsivf_measured_channels') or []
     if linked is None or not measured:
@@ -132,22 +134,27 @@ def replay_tsivf_kinetics(state: dict, image_path: Path, params: dict, output_di
         return
     ch = params.get('channel') if params.get('channel') in measured else measured[0]
     dt = _dt(state, params)
-    kin = droplet_kinetics(linked, ch, dt, smooth_frames=int(params.get('smooth_frames', 5)),
-                           min_frames=int(params.get('min_frames', 10)))
+    kin = OperationService.produce(
+        'invitro_timeseries.kinetics', {'per_object_df': linked, 'channel': ch, 'frame_interval_s': dt},
+        {'smooth_frames': int(params.get('smooth_frames', 5)), 'min_frames': int(params.get('min_frames', 10))})
     stem = image_path.stem
     source = state['data_instance'].data_repository.get('file_path') or str(image_path)
     tables = brush_ready_kinetics(linked, kin, ch, dt, _mpx(state), source)
     tables['droplets'].to_csv(output_dir / f'{stem}_tsivf_kinetics_df.csv', index=False)
     tables['droplet_frames'].to_csv(output_dir / f'{stem}_tsivf_droplet_frames.csv', index=False)
-    heterogeneity_over_time(linked, kin, ch).to_csv(output_dir / f'{stem}_tsivf_heterogeneity.csv', index=False)
-    pd.DataFrame([{'channel': ch, **kinetics_heterogeneity(kin)}]).to_csv(
+    OperationService.produce(
+        'invitro_timeseries.heterogeneity_over_time', {'per_object_df': linked, 'kin_df': kin, 'channel': ch}
+    ).to_csv(output_dir / f'{stem}_tsivf_heterogeneity.csv', index=False)
+    pd.DataFrame([{'channel': ch, **OperationService.produce(
+        'invitro_timeseries.kinetics_heterogeneity', {'kin_df': kin})}]).to_csv(
         output_dir / f'{stem}_tsivf_kinetics_summary.csv', index=False)
     labels = state.get('tsivf_label_stack')
     stack = state.get('tsivf_stack')
     if labels is not None and stack is not None:
         tracked = OperationService.produce('ts_track_relabel', {'label_stack': labels, 'linked_df': linked})
         footprint = np.asarray(tracked).max(axis=0).astype(np.uint32)       # track_id + 1 (0 = none)
-        _save_array(time_average(stack), output_dir / f'{stem}_measured_image.tiff')
+        _save_array(OperationService.produce(
+            'cell_timeseries.time_average', {'stack': stack}), output_dir / f'{stem}_measured_image.tiff')
         _save_array(footprint, output_dir / f'{stem}_droplet_labels.tiff')
     print(f'[PyCAT Batch]   TSIVF kinetics ({ch}): {int(kin["responded"].sum()) if len(kin) else 0} of '
           f'{len(kin)} droplets responded.')

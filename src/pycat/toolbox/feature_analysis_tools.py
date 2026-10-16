@@ -640,8 +640,11 @@ def run_cell_analysis_func(mask_layer, omit_mask_layer, image_layer, data_instan
     from pycat.utils.qt_worker import run_with_progress
     _parent = getattr(getattr(viewer, 'window', None), '_qt_window', None)
     labeled_cell_masks, cell_df = run_with_progress(
-        lambda progress: cell_analysis_func(_image_for_analysis, cell_masks, omission_mask,
-                                            data_instance, progress_callback=progress),
+        lambda progress: OperationService.produce(
+            'feature_analysis.cell_analysis',
+            {'image': _image_for_analysis, 'cell_masks': cell_masks, 'omission_mask': omission_mask,
+             'data_instance': data_instance},
+            {'progress_callback': progress}),
         title='Cell Analysis', text='Analysing cells…', parent=_parent)
 
     # Add the labeled cell masks to the viewer for visualization
@@ -1018,9 +1021,11 @@ def run_puncta_analysis_func(puncta_mask_layer, image_layer, data_instance, view
     from pycat.utils.qt_worker import run_with_progress
     _parent = getattr(getattr(viewer, 'window', None), '_qt_window', None)
     cell_labeled_puncta = run_with_progress(
-        lambda progress: puncta_analysis_func(puncta_masks, image, labeled_cells, data_instance,
-                                              progress_callback=progress,
-                                              filter_irregular=filter_irregular),
+        lambda progress: OperationService.produce(
+            'feature_analysis.condensate_analysis',
+            {'puncta_masks': puncta_masks, 'image': image, 'labeled_cells': labeled_cells,
+             'data_instance': data_instance},
+            {'progress_callback': progress, 'filter_irregular': filter_irregular}),
         title='Condensate Analysis', text='Analysing condensates…', parent=_parent)
 
     # Update the viewer with new layers showing the results of the puncta analysis

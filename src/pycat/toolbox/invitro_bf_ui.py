@@ -177,15 +177,14 @@ def _ivbf_preprocessing(ui, layout):
     prog, run = _run_btn(form, "▶  Preprocess")
 
     def _on_run():
-        from pycat.toolbox.brightfield_tools import preprocess_brightfield
         try: img = ui._img(img_dd)
         except KeyError as e: napari_show_warning(str(e)); return
         ref = ui._img(ref_dd) if ref_cb.isChecked() else None
         prog.setRange(0,0); prog.setVisible(True); run.setEnabled(False)
         def _task():
-            return preprocess_brightfield(img, bg_kernel=bg_sp.value(),
-                                           halo_weight=halo_sp.value(),
-                                           background_image=ref)
+            return OperationService.produce(
+                'bf_preprocess.stages', {'image': img},
+                {'bg_kernel': bg_sp.value(), 'halo_weight': halo_sp.value(), 'background_image': ref})
         worker = _IVBFWorker(_task)
         ui._ivbf_pre_worker = worker
         def _done(res):
@@ -348,10 +347,11 @@ def _ivbf_od_field(ui, layout):
             mask = np.asarray(ui.viewer.layers[mask_dd.currentText()].data)
         except KeyError as e: napari_show_warning(str(e)); return
         # OD = -log10(I / I0) on raw counts (see above); the computation is shared with batch replay.
-        from pycat.toolbox.brightfield_pipeline import ivbf_field_summary
         from pycat.utils.entity_ref import source_path_of
-        summ, summ_df, per_drop = ivbf_field_summary(raw, mask, ui._mpx(), source_path_of(
-            getattr(getattr(ui, 'central_manager', None), 'active_data_class', None)))
+        summ, summ_df, per_drop = OperationService.produce(
+            'brightfield.invitro_field_summary',
+            {'raw': raw, 'droplet_mask': mask, 'microns_per_pixel': ui._mpx(),
+             'source_path': source_path_of(getattr(getattr(ui, 'central_manager', None), 'active_data_class', None))})
         ui._dr()['ivbf_field_summary'] = summ
         ui._dr()['ivbf_droplet_df']    = per_drop
         ui._record('ivbf_field_summary', {
@@ -395,13 +395,14 @@ def _ivbf_size_contact(ui, layout):
     form.addRow(_bwc(run))
 
     def _on_run():
-        from pycat.toolbox.brightfield_pipeline import ivbf_size_and_contact
         try:
             mask = np.asarray(ui.viewer.layers[mask_dd.currentText()].data)
         except KeyError as e: napari_show_warning(str(e)); return
-        size_res, size_df, ca_df = ivbf_size_and_contact(
-            mask, ui._dr().get('ivbf_source'), ui._mpx(), bins_sp.value(),
-            ui._dr().get('ivbf_min_area_px'), single_lbl_sp.value())
+        size_res, size_df, ca_df = OperationService.produce(
+            'brightfield.invitro_size_distribution',
+            {'droplet_mask': mask, 'raw_source': ui._dr().get('ivbf_source'), 'microns_per_pixel': ui._mpx(),
+             'n_bins': bins_sp.value(), 'min_area_px': ui._dr().get('ivbf_min_area_px'),
+             'contact_label': single_lbl_sp.value()})
         if size_res is None:
             napari_show_warning("No droplets in mask."); return
         ui._dr()['ivbf_size_dist'] = size_res
@@ -435,8 +436,6 @@ def _ivbf_spatial(ui, layout):
     form.addRow(_bwc(run, optional=True))
 
     def _on_run():
-        from pycat.toolbox.spatial_metrology_tools import (
-            get_puncta_centroids, run_all_spatial_metrics)
         from pycat.toolbox.spatial_metrology_ui import _results_to_dataframes
         try:
             mask = np.asarray(ui.viewer.layers[mask_dd.currentText()].data)
@@ -446,7 +445,9 @@ def _ivbf_spatial(ui, layout):
         mpx = ui._mpx()
 
         def _task():
-            coords_df = get_puncta_centroids(mask, field_lbl, mpx)
+            coords_df = OperationService.produce(
+                'spatial_metrology.centroids',
+                {'puncta_mask': mask, 'labeled_cells': field_lbl, 'microns_per_pixel': mpx})
             if coords_df.empty:
                 return {}
             results = {}
@@ -456,7 +457,8 @@ def _ivbf_spatial(ui, layout):
                 if len(coords) < 2:
                     continue
                 cmask  = (field_lbl == cell_lbl)
-                results[cell_lbl] = run_all_spatial_metrics(coords, cmask, mpx)
+                results[cell_lbl] = OperationService.produce(
+                    'spatial_metrology.ripley', {'coords': coords, 'cell_mask': cmask, 'microns_per_pixel': mpx})
             return results
 
         worker = _IVBFWorker(_task)
@@ -507,8 +509,7 @@ def _ivbf_dynamics(ui, layout):
     prog, run = _run_btn(form, "▶  Run Dynamics")
 
     def _on_run():
-        from pycat.toolbox.dynamic_spatial_tools import (
-            extract_frame_properties, link_trajectories_bayesian)
+        from pycat.toolbox.dynamic_spatial_tools import link_trajectories_bayesian
         from pycat.toolbox.condensate_physics_tools import msd_per_track
         from pycat.toolbox.invitro_tools import (
             coarsening_statistics, detect_sedimentation, detect_and_fit_fusions)
@@ -526,14 +527,16 @@ def _ivbf_dynamics(ui, layout):
         prog.setRange(0,0); prog.setVisible(True); run.setEnabled(False)
 
         def _task():
-            props  = extract_frame_properties(stack, mpx)
+            props  = OperationService.produce(
+                'dynamic_spatial.frame_properties', {'mask_stack': stack, 'microns_per_pixel': mpx})
             tracks = link_trajectories_bayesian(props, max_displacement_um=disp_sp.value())
             res = {'tracks': tracks}
             cs = coarsening_statistics(stack, mpx, dt)
             res['coarsening_stats'] = cs
             if do['c']:
                 r = cs['mean_radius_um'].values; t = cs['time_s'].values
-                res['coarsening_fit'] = OperationService.produce('coarsening_fit', {'time_s': t, 'mean_radius_um': r})
+                res['coarsening_fit'] = OperationService.produce(
+                    'coarsening_fit', {'time_s': t, 'mean_radius_um': r})
             if do['s']:
                 res['sedimentation'] = detect_sedimentation(cs)
             if do['m']:
@@ -550,7 +553,8 @@ def _ivbf_dynamics(ui, layout):
                 msd_df = OperationService.execute('condensate_physics.compute_msd', {'tracks': tracks},
                                                   {'frame_interval_s': dt}).measurements
                 res['msd']    = msd_df
-                res['msd_fit']= OperationService.produce('condensate_physics.fit_anomalous_diffusion', {'msd_df': msd_df})
+                res['msd_fit']= OperationService.produce(
+                    'condensate_physics.fit_anomalous_diffusion', {'msd_df': msd_df})
                 res['msd_pt'] = msd_per_track(tracks, dt)
             if do['f']:
                 res['fusions'] = detect_and_fit_fusions(stack, tracks, None, mpx, dt)

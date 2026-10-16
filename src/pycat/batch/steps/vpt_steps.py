@@ -25,7 +25,6 @@ def replay_vpt_microrheology(state: dict, image_path: Path, params: dict, output
     REFUSES to emit a number — it writes a verdict row and stashes the verdict (mirroring
     ``replay_client_enrichment``'s calibration-validity stash), never a pixel-unit viscosity.
     """
-    from pycat.toolbox.vpt.measured_drift import measure_and_apply_if_real
     from pycat.utils.pixel_size import pixel_size_um, has_real_pixel_size
     from pycat.utils.frame_interval import frame_interval_s
     import pandas as pd
@@ -64,7 +63,8 @@ def replay_vpt_microrheology(state: dict, image_path: Path, params: dict, output
         {'max_displacement_um': float(params.get('max_displacement_um', 2.0))})
     # Same rule as the panel: drift is measured from the beads and subtracted for the MSD only when it is real
     # (and not when the recording says the user switched it off). The stored tracks keep the centroids.
-    tracks, msd_tracks, drift = measure_and_apply_if_real(tracks, mpx)
+    tracks, msd_tracks, drift = OperationService.produce(
+        'vpt.measured_drift', {'tracks_df': tracks, 'microns_per_pixel': mpx})
     if params.get('drift_mode') == 'none':
         msd_tracks = tracks
     msd = OperationService.execute('condensate_physics.compute_msd', {'tracks': msd_tracks}, {

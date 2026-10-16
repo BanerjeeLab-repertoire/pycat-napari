@@ -103,8 +103,7 @@ def _run_msd_analysis(ui_instance, w):
     (stack_dd_msd, dt_spin, lag_spin, min_len, per_track_cb, prog_msd, run_msd) = (
         w.stack_dd_msd, w.dt_spin, w.lag_spin, w.min_len, w.per_track_cb, w.prog_msd, w.run_msd)
     from pycat.toolbox.condensate_physics_tools import msd_per_track
-    from pycat.toolbox.dynamic_spatial_tools import (
-        extract_frame_properties, link_trajectories_bayesian)
+    from pycat.toolbox.dynamic_spatial_tools import link_trajectories_bayesian
     try:
         stack = ui_instance.viewer.layers[stack_dd_msd.currentText()].data
     except KeyError as e:
@@ -116,7 +115,8 @@ def _run_msd_analysis(ui_instance, w):
     prog_msd.setVisible(True); prog_msd.setRange(0,0); run_msd.setEnabled(False)
 
     def _task():
-        props  = extract_frame_properties(np.asarray(stack), mpx)
+        props  = OperationService.produce(
+            'dynamic_spatial.frame_properties', {'mask_stack': np.asarray(stack), 'microns_per_pixel': mpx})
         tracks = link_trajectories_bayesian(props,
                      max_displacement_um=float(dr.get('object_size', 3))*mpx*2)
         max_l  = lag_spin.value() or None

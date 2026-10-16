@@ -97,10 +97,7 @@ def replay_measure_binary_mask(state: dict, image_path: Path, params: dict, outp
     """Whole-mask statistics of the recorded mask over the recorded image -> ``<stem>_binary_mask_stats.csv``."""
     import pandas as pd
 
-    from pycat.toolbox.masks.measurement import (
-        _um2_per_px_gated,
-        binary_mask_properties,
-    )
+    from pycat.toolbox.masks.measurement import _um2_per_px_gated
     name = params.get('mask_layer')
     mask = _derived(state).get(name)
     if mask is None:
@@ -109,7 +106,9 @@ def replay_measure_binary_mask(state: dict, image_path: Path, params: dict, outp
         print(f'[PyCAT Batch]   Measure binary mask skipped for {image_path.name}: no mask named {name!r}.')
         return
     image = np.asarray(_layer(state, params.get('image_layer')))
-    props = binary_mask_properties(mask, image, _um2_per_px_gated(state['data_instance'].data_repository))
+    props = OperationService.produce(
+        'masks.measure_binary_mask',
+        {'mask': mask, 'image': image, 'um2_per_px': _um2_per_px_gated(state['data_instance'].data_repository)})
     df = pd.DataFrame([props]).round(4)
     state['data_instance'].set_data('binary_mask_stats_df', df)
     df.to_csv(output_dir / f'{image_path.stem}_binary_mask_stats.csv', index=False)

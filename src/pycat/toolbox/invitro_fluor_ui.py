@@ -316,7 +316,9 @@ def _ivf_preprocessing(ui, layout):
             if idx == 0:   # Gaussian blur
                 return OperationService.produce('gaussian', {'image': arr}, {'sigma': sigma})
             if idx == 1:   # LoG enhancement
-                return np.asarray(OperationService.produce('log_enhance', {'image': arr}, {'sigma': sigma})).astype(np.float32)
+                return np.asarray(OperationService.produce(
+                    'log_enhance', {'image': arr},
+                    {'sigma': sigma})).astype(np.float32)
             # Rolling-ball (legacy)
             return np.asarray(OperationService.produce('preprocess', {'image': arr},
                 {'ball_radius': ball, 'window_size': ball*2})).astype(np.float32)
@@ -897,8 +899,6 @@ def _ivf_spatial(ui, layout):
     form.addRow(_bwc(run, optional=True))
 
     def _on_run():
-        from pycat.toolbox.spatial_metrology_tools import (
-            get_puncta_centroids, run_all_spatial_metrics)
         from pycat.toolbox.spatial_metrology_ui import _results_to_dataframes
         try:
             mask = np.asarray(ui.viewer.layers[mask_dd.currentText()].data)
@@ -911,7 +911,9 @@ def _ivf_spatial(ui, layout):
         mpx = ui._mpx()
 
         def _task():
-            coords_df = get_puncta_centroids(mask, field_lbl, mpx)
+            coords_df = OperationService.produce(
+                'spatial_metrology.centroids',
+                {'puncta_mask': mask, 'labeled_cells': field_lbl, 'microns_per_pixel': mpx})
             if coords_df.empty:
                 return {}
             results = {}
@@ -921,7 +923,8 @@ def _ivf_spatial(ui, layout):
                 if len(coords) < 2:
                     continue
                 cmask  = (field_lbl == cell_lbl)
-                results[cell_lbl] = run_all_spatial_metrics(coords, cmask, mpx)
+                results[cell_lbl] = OperationService.produce(
+                    'spatial_metrology.ripley', {'coords': coords, 'cell_mask': cmask, 'microns_per_pixel': mpx})
             return results
 
         worker = _IVFWorker(_task)
@@ -1041,8 +1044,7 @@ def _ivf_dynamics(ui, layout):
             'run_kaplan_meier': cb_km.isChecked()})
 
     def _on_run():
-        from pycat.toolbox.dynamic_spatial_tools import (
-            extract_frame_properties, link_trajectories_bayesian, trajectory_metrics)
+        from pycat.toolbox.dynamic_spatial_tools import link_trajectories_bayesian, trajectory_metrics
         from pycat.toolbox.condensate_physics_tools import msd_per_track, kaplan_meier_lifetimes
         from pycat.toolbox.invitro_tools import (
             coarsening_statistics, detect_sedimentation,
@@ -1070,7 +1072,8 @@ def _ivf_dynamics(ui, layout):
         prog.setRange(0,0); prog.setVisible(True); run.setEnabled(False)
 
         def _task():
-            props  = extract_frame_properties(stack, mpx)
+            props  = OperationService.produce(
+                'dynamic_spatial.frame_properties', {'mask_stack': stack, 'microns_per_pixel': mpx})
             tracks = link_trajectories_bayesian(
                 props, max_displacement_um=disp_sp.value())
             res = {'tracks': tracks, 'props': props}

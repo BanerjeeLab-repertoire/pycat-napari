@@ -33,17 +33,24 @@ class KernelSpec:
     fn: Callable          # (inputs: dict, params: dict) -> AnalysisResult
     wraps: str            # 'module:function' -- the toolbox function that performs the science
     entity: str
+    part_of: Optional[str] = None   # a COMPONENT of this plannable catalog op (see register_kernel)
 
 
 #: op-id -> KernelSpec.
 _KERNELS: Dict[str, KernelSpec] = {}
 
 
-def register_kernel(op_id: str, fn: Callable, *, wraps: str, entity: str = 'image') -> None:
-    """Register the science for one operation. ``fn(inputs, params)`` must return an :class:`AnalysisResult`."""
+def register_kernel(op_id: str, fn: Callable, *, wraps: str, entity: str = 'image',
+                    part_of: Optional[str] = None) -> None:
+    """Register the science for one operation. ``fn(inputs, params)`` must return an :class:`AnalysisResult`.
+
+    ``part_of`` names the plannable catalog op this one is a COMPONENT of: a stage or a variant the Navigator
+    plans as one operation (the Manders sub-coefficients of colocalization, the per-frame properties that
+    trajectory linking reads). The component's own id is still the one every launcher calls, so the panel and
+    the batch replay run the same code; the planner sees the whole."""
     if ':' not in wraps:
         raise ValueError(f"wraps must be 'module:function', got {wraps!r}")
-    _KERNELS[str(op_id)] = KernelSpec(str(op_id), fn, wraps, entity)
+    _KERNELS[str(op_id)] = KernelSpec(str(op_id), fn, wraps, entity, part_of)
 
 
 def resolve(wraps: str) -> Callable:
@@ -66,7 +73,7 @@ def _result(op_id: str, entity: str, out) -> AnalysisResult:
 
 
 def passthrough(op_id: str, wraps: str, *, roles: tuple = ('image',), optional: Optional[dict] = None,
-                entity: str = 'image', first: bool = False) -> None:
+                entity: str = 'image', first: bool = False, part_of: Optional[str] = None) -> None:
     """Register the common kernel: ``fn(*inputs[roles], **optional_inputs, **params)``.
 
     ``roles`` are the required inputs, in the wrapped function's positional order. ``optional`` maps an optional
@@ -86,17 +93,17 @@ def passthrough(op_id: str, wraps: str, *, roles: tuple = ('image',), optional: 
             out = out[0]
         return _result(op_id, entity, out)
 
-    register_kernel(op_id, run, wraps=wraps, entity=entity)
+    register_kernel(op_id, run, wraps=wraps, entity=entity, part_of=part_of)
 
 
-def named(op_id: str, wraps: str, *, entity: str = 'image') -> None:
+def named(op_id: str, wraps: str, *, entity: str = 'image', part_of: Optional[str] = None) -> None:
     """Register a kernel that passes inputs AND params to the wrapped function by its own parameter names:
     ``fn(**inputs, **params)``. Inputs are the data (images, masks, tables), params the settings; the split is
     for the reader, the function's signature is the vocabulary."""
     def run(inputs: dict, params: dict) -> AnalysisResult:
         return _result(op_id, entity, resolve(wraps)(**inputs, **params))
 
-    register_kernel(op_id, run, wraps=wraps, entity=entity)
+    register_kernel(op_id, run, wraps=wraps, entity=entity, part_of=part_of)
 
 
 class OperationService:

@@ -346,8 +346,8 @@ def _add_spatial_metrology(ui_instance, layout=None, separate_widget=False):
         dr  = ui_instance.central_manager.active_data_class.data_repository
         mpx = pixel_size_um_or_default(dr, context='spatial_metrology_ui')
 
-        from pycat.toolbox.spatial_metrology_tools import get_puncta_centroids
-        coords_df = get_puncta_centroids(pmask, cmask, mpx)
+        coords_df = OperationService.produce(
+            'spatial_metrology.centroids', {'puncta_mask': pmask, 'labeled_cells': cmask, 'microns_per_pixel': mpx})
 
         if coords_df.empty:
             napari_show_warning("No condensates found in the mask.")

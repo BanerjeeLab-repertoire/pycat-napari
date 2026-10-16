@@ -36,6 +36,20 @@ corpus is unchanged, and the route-equivalence tests still pin each kernel to th
   watershed. No launcher calls a catalog operation's function directly any more (`tests/test_kernel_contract.py`).
   `_STEP_OPERATIONS` declares what each in-vitro / time-series replay runs (18 -> 23 steps).
 
+- **Measurement and analysis steps are catalog operations too** (67 sites, 31 ops): cell and condensate analysis,
+  binary-mask measurement, spatial metrology (centroids, the per-cell metrics, the whole-field variant), spatial
+  autocorrelation, the Manders k1/k2/overlap coefficients, per-frame properties for tracking, auto-crop, keyframe
+  Cellpose, VPT measured drift, the brightfield chain (staged preprocessing, condensate metrics, optical density
+  and its per-cell summary, the in-vitro field summary and size distribution), the cellular time series and its
+  time average, and the in-vitro time series (droplet measurement and linking, object and field trajectories,
+  kinetics and their heterogeneity). Each was shared by a panel and its batch replay with no operation id; now
+  both call it through `OperationService` by its catalog id. 12 are new plannable Navigator operations, each
+  gated to its own workflow (`brightfield`, `in_vitro`, `time_series`) and preferred below the op it could compete
+  with, so no existing plan changes; the rest are declared **components** (`part_of`) of the catalog op the
+  Navigator plans them as (`coloc.manders_k1` of `pixel_wise_corr.pearson_manders`, condensate analysis of
+  `feature_analysis.cell_analysis`). `feature_analysis.cell_analysis` and `spatial_metrology.ripley` now name the
+  functions they run (`cell_analysis_func`, `run_all_spatial_metrics`). `_STEP_OPERATIONS` declares 44 steps (was 26).
+
 ### Fixed
 - **MSD on a movie shorter than the minimum track length: a stated lag window, not a crash.** The Dynamics panels
   (brightfield, in-vitro brightfield, in-vitro fluorescence) use the 200-frame default; on a shorter movie no track
@@ -53,6 +67,10 @@ corpus is unchanged, and the route-equivalence tests still pin each kernel to th
   launcher (batch replay, panel function, UI module) calls a kernel's function directly; a step's declared
   operations include every op its replay sends to the kernel (`_STEP_OPERATIONS` is now checked, not just
   declared; 9 -> 17 steps declared).
+- **Everything in the catalog, enforced**: a launcher calling any public toolbox function must find a kernel for
+  it. 34 helpers that compute nothing a result depends on (plots, table layout, file and metadata reading,
+  environment probes, drawn-shape-to-mask geometry) are listed with the reason; 88 panel-only functions -- each
+  called by one panel, so no two routes can disagree yet -- are a ratchet that only shrinks.
 
 ### Removed
 - The real-data validation harness (corpus registry, golden masters, route matrix, weekly workflow) left the

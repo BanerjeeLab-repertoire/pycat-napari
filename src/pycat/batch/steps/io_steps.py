@@ -370,8 +370,6 @@ def replay_auto_crop_roi(state: dict, image_path: Path, params: dict, output_dir
     replay_condensate_segmentation reads this dict to process each cell
     in its own tight crop rather than operating on the full image.
     """
-    from pycat.toolbox.batch_roi_tools import cell_bboxes_from_mask, multi_otsu_foreground_bbox
-
     strategy = params.get('strategy', 'auto')
     padding  = int(params.get('padding_px', 8))
 
@@ -382,7 +380,9 @@ def replay_auto_crop_roi(state: dict, image_path: Path, params: dict, output_dir
                                    labeled_cells.max() > 0) else 'multi_otsu'
 
     if strategy == 'cellpose' and labeled_cells is not None and labeled_cells.max() > 0:
-        bboxes = cell_bboxes_from_mask(labeled_cells, padding_px=padding)
+        bboxes = OperationService.produce(
+            'auto_crop.cell_bboxes', {'labeled_cells': labeled_cells},
+            {'padding_px': padding})
         state['cell_bboxes'] = bboxes
         print(f"[PyCAT Batch]   Auto-crop (Cellpose): {len(bboxes)} cell bounding boxes computed.")
         for lbl, (y0, y1, x0, x1) in list(bboxes.items())[:3]:
@@ -397,8 +397,9 @@ def replay_auto_crop_roi(state: dict, image_path: Path, params: dict, output_dir
         # normalisation is harmless here — unlike the rolling-ball steps. Left as-is.
         image = _normalize_to_float(state.get('preprocessed', state['image']))
         n_classes = int(params.get('n_otsu_classes', 3))
-        bbox = multi_otsu_foreground_bbox(image, n_classes=n_classes,
-                                           padding_px=padding)
+        bbox = OperationService.produce(
+            'auto_crop.foreground_bbox', {'image': image},
+            {'n_classes': n_classes, 'padding_px': padding})
         if bbox is None:
             print("[PyCAT Batch]   Auto-crop (multi-Otsu): no foreground detected — "
                   "using full image.")

@@ -263,7 +263,6 @@ def _add_bf_preprocessing(ui, layout):
     form.addRow(_bwc(run))
 
     def _on_run():
-        from pycat.toolbox.brightfield_tools import preprocess_brightfield
         try:
             layer = ui.viewer.layers[img_dd.currentText()]
             img   = ui._get_image(img_dd)
@@ -280,9 +279,9 @@ def _add_bf_preprocessing(ui, layout):
         prog.setRange(0, 0); prog.setVisible(True); run.setEnabled(False)
 
         def _task():
-            return preprocess_brightfield(img, bg_kernel=bg_spin.value(),
-                                           halo_weight=halo_spin.value(),
-                                           background_image=ref)
+            return OperationService.produce(
+                'bf_preprocess.stages', {'image': img},
+                {'bg_kernel': bg_spin.value(), 'halo_weight': halo_spin.value(), 'background_image': ref})
         worker = _BFWorker(_task)
         ui._bf_preproc_worker = worker
 
@@ -532,8 +531,10 @@ def _add_bf_od_metrics(ui, layout):
         prog.setRange(0, 0); prog.setVisible(True); run.setEnabled(False)
 
         def _task():
-            from pycat.toolbox.brightfield_pipeline import bf_od_metrics
-            return bf_od_metrics(raw, mask, cells, ui._mpx(), _source(ui))   # shared with batch replay
+            return OperationService.produce(
+                'brightfield.od_metrics',
+                {'raw': raw, 'condensate_mask': mask, 'cell_labels': cells, 'microns_per_pixel': ui._mpx(),
+                 'source_path': _source(ui)})   # shared with batch replay
 
         worker = _BFWorker(_task)
         ui._bf_od_worker = worker
@@ -602,7 +603,6 @@ def _add_bf_per_cell_summary(ui, layout):
     form.addRow(_bwc(run))
 
     def _on_run():
-        from pycat.toolbox.brightfield_pipeline import bf_per_cell
         cond_df = ui._dr().get('bf_condensate_df')
         if cond_df is None or cond_df.empty:
             napari_show_warning("Run Step 5 (OD Metrics) first."); return
@@ -611,7 +611,10 @@ def _add_bf_per_cell_summary(ui, layout):
         except KeyError as e:
             napari_show_warning(f"Layer not found: {e}"); return
 
-        df = bf_per_cell(cond_df, cells, ui._mpx(), _source(ui))      # shared with batch replay
+        df = OperationService.produce(
+            'brightfield.per_cell',
+            {'condensate_df': cond_df, 'cell_labels': cells, 'microns_per_pixel': ui._mpx(),
+             'source_path': _source(ui)})      # shared with batch replay
         ui._dr()['bf_per_cell_df'] = df
         ui._record('bf_per_cell_summary', {'cell_layer': cell_dd.currentText(), 'n_cells': len(df)})
         from pycat.ui.ui_utils import show_dataframes_dialog
@@ -651,8 +654,6 @@ def _add_bf_spatial(ui, layout):
     form.addRow(_bwc(run, optional=True))
 
     def _on_run():
-        from pycat.toolbox.spatial_metrology_tools import (
-            get_puncta_centroids, run_all_spatial_metrics)
         from pycat.toolbox.spatial_metrology_ui import _results_to_dataframes
         try:
             mask  = np.asarray(ui.viewer.layers[mask_dd.currentText()].data)
@@ -666,7 +667,9 @@ def _add_bf_spatial(ui, layout):
             # Extract per-cell centroids, then run all metrics for each cell —
             # run_all_spatial_metrics takes a single cell's (N,2) coords array
             # and boolean mask, not a labeled mask directly.
-            coords_df = get_puncta_centroids(mask, cells, mpx)
+            coords_df = OperationService.produce(
+                'spatial_metrology.centroids',
+                {'puncta_mask': mask, 'labeled_cells': cells, 'microns_per_pixel': mpx})
             if coords_df.empty:
                 return {}
             results = {}
@@ -676,7 +679,8 @@ def _add_bf_spatial(ui, layout):
                 if len(coords) < 2:
                     continue
                 cmask  = (cells == cell_lbl)
-                results[cell_lbl] = run_all_spatial_metrics(coords, cmask, mpx)
+                results[cell_lbl] = OperationService.produce(
+                    'spatial_metrology.ripley', {'coords': coords, 'cell_mask': cmask, 'microns_per_pixel': mpx})
             return results
 
         worker = _BFWorker(_task)
@@ -761,7 +765,10 @@ def _add_bf_dynamics(ui, layout):
 
     def _on_run():
         from pycat.toolbox.dynamic_spatial_tools import (
-            extract_frame_properties, link_trajectories_bayesian, trajectory_metrics, cluster_lifetime_analysis)
+            link_trajectories_bayesian,
+            trajectory_metrics,
+            cluster_lifetime_analysis,
+        )
         from pycat.toolbox.condensate_physics_tools import msd_per_track, kaplan_meier_lifetimes
         try:
             from pycat.utils.qt_worker import materialize_off_thread
@@ -782,7 +789,8 @@ def _add_bf_dynamics(ui, layout):
             cb_km.isChecked(), cb_mf.isChecked())
 
         def _task():
-            props  = extract_frame_properties(stack, mpx)
+            props  = OperationService.produce(
+                'dynamic_spatial.frame_properties', {'mask_stack': stack, 'microns_per_pixel': mpx})
             tracks = link_trajectories_bayesian(
                 props, max_displacement_um=disp_spin.value())
             res = {'tracks': tracks, 'props': props}

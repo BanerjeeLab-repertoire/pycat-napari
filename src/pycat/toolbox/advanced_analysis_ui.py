@@ -362,7 +362,11 @@ def _run_dynamic_analysis(ui_instance, w):
     (stack_dd, prog_d, run_d, cb_track, cb_mf, cb_life, cb_nb, cb_grow, linker_dd, max_disp, max_gap, sigma_spin, area_w_spin, vel_check, tm_gap_dist, tm_merge_cb, tm_split_cb, tm_kalman_cb, prox_um, nb_rad, frame_dt, stop_d) = (
         w.stack_dd, w.prog_d, w.run_d, w.cb_track, w.cb_mf, w.cb_life, w.cb_nb, w.cb_grow, w.linker_dd, w.max_disp, w.max_gap, w.sigma_spin, w.area_w_spin, w.vel_check, w.tm_gap_dist, w.tm_merge_cb, w.tm_split_cb, w.tm_kalman_cb, w.prox_um, w.nb_rad, w.frame_dt, w.stop_d)
     from pycat.toolbox.dynamic_spatial_tools import (
-        extract_frame_properties, trajectory_metrics, cluster_lifetime_analysis, neighbourhood_persistence, growth_shrinkage_kinetics)
+        trajectory_metrics,
+        cluster_lifetime_analysis,
+        neighbourhood_persistence,
+        growth_shrinkage_kinetics,
+    )
     try:
         stack = ui_instance.viewer.layers[stack_dd.currentText()].data
     except KeyError as e:
@@ -386,7 +390,8 @@ def _run_dynamic_analysis(ui_instance, w):
         def _cancelled():
             return bool(should_cancel and should_cancel())
         res = {}
-        props = extract_frame_properties(np.asarray(stack), mpx)
+        props = OperationService.produce(
+            'dynamic_spatial.frame_properties', {'mask_stack': np.asarray(stack), 'microns_per_pixel': mpx})
         tracks = None
         progress_emit and progress_emit(1, 5)
         if _cancelled():
@@ -555,7 +560,6 @@ def _run_organizational_analysis(ui_instance, w):
         inter_condensate_spacing, per_cell_occupancy,
         distance_to_boundary,
     )
-    from pycat.toolbox.spatial_metrology_tools import get_puncta_centroids
     try:
         pmask = ui_instance.viewer.layers[punc_dd_o.currentText()].data
         cmask = ui_instance.viewer.layers[cell_dd_o.currentText()].data
@@ -564,7 +568,8 @@ def _run_organizational_analysis(ui_instance, w):
 
     dr  = ui_instance.central_manager.active_data_class.data_repository
     mpx = pixel_size_um_or_default(dr, context='advanced_analysis_ui')
-    coords_df = get_puncta_centroids(pmask, cmask, mpx)
+    coords_df = OperationService.produce(
+        'spatial_metrology.centroids', {'puncta_mask': pmask, 'labeled_cells': cmask, 'microns_per_pixel': mpx})
     cells = [c for c in coords_df['cell_label'].unique() if c != 0]
     n = len(cells)
     prog_o.setMaximum(max(n, 1)); prog_o.setValue(0); prog_o.setVisible(True)
