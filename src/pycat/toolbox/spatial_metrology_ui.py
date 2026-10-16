@@ -27,6 +27,7 @@ from qtpy.QtWidgets import (
     QProgressBar, QComboBox, QSizePolicy,
 )
 from qtpy.QtCore import QThread, Signal
+from pycat.kernel import OperationService
 
 
 class _SpatialWorker(QThread):
@@ -49,10 +50,7 @@ class _SpatialWorker(QThread):
     def run(self):
         try:
             from pycat.toolbox.spatial_metrology_tools import (
-                nearest_neighbour_distance, radial_localization_profile,
-                local_object_density, ripleys_l, pair_correlation_function,
-                voronoi_metrics, delaunay_metrics, minimum_spanning_tree,
-                convex_hull_metrics, distance_to_roi, spatial_null_envelope)
+                nearest_neighbour_distance, radial_localization_profile, local_object_density, pair_correlation_function, voronoi_metrics, delaunay_metrics, minimum_spanning_tree, convex_hull_metrics, distance_to_roi, spatial_null_envelope)
 
             df    = self._coords_df
             lc    = self._labeled_cells
@@ -84,8 +82,9 @@ class _SpatialWorker(QThread):
                     yx_px = np.clip((coords / mpx).astype(int), 0,
                                     np.array(cmask.shape) - 1)
                     bdist = edt_um[yx_px[:, 0], yx_px[:, 1]]
-                    r['ripleys_l'] = ripleys_l(coords, cell_area,
-                                               boundary_dist_um=bdist)
+                    r['ripleys_l'] = OperationService.produce(
+                        'spatial_statistics', {'coords': coords, 'boundary_dist_um': bdist},
+                        {'cell_area_um2': cell_area})
 
                     # ── Against a COMPARTMENT-CONSTRAINED null, not the CSR line ──
                     #

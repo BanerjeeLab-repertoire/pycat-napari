@@ -14,6 +14,7 @@ from pycat.toolbox.image_processing._base import _add_image, _napari
 from pycat.utils.general_utils import dtype_conversion_func
 from pycat.utils.notify import show_warning as napari_show_warning
 from pycat.utils.tag_registry import tags_layer
+from pycat.kernel import OperationService
 
 
 def wavelet_bg_and_noise_calculation(image, num_levels, noise_lvl):
@@ -216,7 +217,8 @@ def run_wbns(psf_input, noise_level_input, viewer):
     noise_lvl = int(noise_level_input.text()) if noise_level_input.text() else 1
 
     # Process the image with the WBNS function
-    WBNS_img, _ = wbns_func(image, psf_fwhm, noise_lvl)
+    WBNS_img, _ = OperationService.produce('wbns', {'img': image},
+        {'psf_px_resolution': psf_fwhm, 'noise_lvl': noise_lvl})
 
     # Display the processed image
     _add_image(WBNS_img, viewer, name=f"BG and Noise Corrected {active_layer.name}")
@@ -255,7 +257,8 @@ def run_wavelet_noise_subtraction(psf_input, noise_level_input, viewer):
     noise_lvl = int(noise_level_input.text()) if noise_level_input.text() else 1
 
     # Process the image with the WBNS function
-    _, wavelet_noise_corrected = wbns_func(image, psf_fwhm, noise_lvl)
+    _, wavelet_noise_corrected = OperationService.produce('wbns', {'img': image},
+        {'psf_px_resolution': psf_fwhm, 'noise_lvl': noise_lvl})
 
     # Display the processed image
     _add_image(wavelet_noise_corrected, viewer, name=f"Wavelet Noise Corrected {active_layer.name}")

@@ -22,6 +22,7 @@ from pycat.toolbox.image_processing._base import _safe_equalize_adapthist, _add_
 from pycat.toolbox.image_processing.background import soft_foreground_suppression
 from pycat.toolbox.image_processing.wavelet import wbns_func
 from pycat.toolbox.image_processing.filters import apply_laplace_of_gauss_enhancement
+from pycat.kernel import OperationService
 
 
 @tags_layer('preprocess', role='preprocessed',
@@ -232,10 +233,14 @@ def run_pre_process_image(data_instance, viewer):
         'suppress_foreground', True)
 
     # Apply pre-processing to the selected image
-    pre_processed_image = pre_process_image(
-        image, ball_radius, window_size,
-        suppress_foreground=suppress_foreground,
-        suppression_params=suppression_params)
+    pre_processed_image = OperationService.produce(
+        'preprocess', {'image': image},
+        {
+            'ball_radius': ball_radius,
+            'window_size': window_size,
+            'suppress_foreground': suppress_foreground,
+            'suppression_params': suppression_params,
+        })
 
     # Add the pre-processed image to the viewer with a default colormap
     _pre_layer = _add_image(pre_processed_image, viewer, name=f"Pre-Processed {active_layer.name}",

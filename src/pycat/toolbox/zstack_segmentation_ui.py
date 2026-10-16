@@ -31,6 +31,7 @@ from qtpy.QtWidgets import (
     QScrollArea, QSizePolicy,
 )
 from qtpy.QtCore import Qt, QThread, Signal
+from pycat.kernel import OperationService
 try:
     from pycat.ui.field_status import label_with_circle
 except Exception:
@@ -190,7 +191,6 @@ def _add_zstack_bg_removal(ui, layout):
                     getattr(ui, 'viewer', None), base_tooltip="Load a 3D z-stack to enable this.")
 
     def _on_run():
-        from pycat.toolbox.zstack_segmentation_tools import bg_removal_3d
         try:
             vol = ui._vol(vol_dd)
         except KeyError as e:
@@ -203,10 +203,13 @@ def _add_zstack_bg_removal(ui, layout):
         run.setEnabled(False)
 
         def _task():
-            return bg_removal_3d(
-                vol, ball_sp.value(),
-                progress_callback=lambda done, total: prog.setValue(done),
-                pseudo3d_linear=pseudo3d_cb.isChecked())
+            return OperationService.produce(
+                'bg_subtract_3d', {'volume': vol},
+                {
+                    'ball_radius': ball_sp.value(),
+                    'progress_callback': lambda done, total: prog.setValue(done),
+                    'pseudo3d_linear': pseudo3d_cb.isChecked(),
+                })
         worker = _ZWorker(_task)
         ui._zstack_bg_worker = worker
 
@@ -275,7 +278,6 @@ def _add_zstack_cell_seg(ui, layout):
                     getattr(ui, 'viewer', None), base_tooltip="Load a 3D z-stack to enable this.")
 
     def _on_run():
-        from pycat.toolbox.zstack_segmentation_tools import cellpose_segmentation_3d
         try:
             vol = ui._vol(vol_dd)
         except KeyError as e:
@@ -287,9 +289,13 @@ def _add_zstack_cell_seg(ui, layout):
         run.setEnabled(False)
 
         def _task():
-            return cellpose_segmentation_3d(
-                vol, diam_sp.value(), min_iou=iou_sp.value(),
-                progress_callback=lambda z, n: prog.setValue(z))
+            return OperationService.produce(
+                'cellpose_3d', {'volume': vol},
+                {
+                    'object_diameter': diam_sp.value(),
+                    'min_iou': iou_sp.value(),
+                    'progress_callback': lambda z, n: prog.setValue(z),
+                })
         worker = _ZWorker(_task)
         ui._zstack_cell_worker = worker
 
@@ -371,7 +377,6 @@ def _add_zstack_condensate_seg(ui, layout):
                     getattr(ui, 'viewer', None), base_tooltip="Load a 3D z-stack to enable this.")
 
     def _on_run():
-        from pycat.toolbox.zstack_segmentation_tools import segment_subcellular_objects_3d
         try:
             raw   = ui._vol(raw_dd)
             proc  = ui._vol(proc_dd)
@@ -395,13 +400,16 @@ def _add_zstack_condensate_seg(ui, layout):
             total_refined = np.zeros(raw.shape, dtype=bool)
             for cl in cell_labels:
                 cmask3d = (cells == cl)
-                refined, _ = segment_subcellular_objects_3d(
-                    raw, proc, cmask3d, int(cl), ball,
-                    kurtosis_threshold=kurt.value(),
-                    min_spot_radius=min_r.value(),
-                    connectivity=conn_sp.value(),
-                    progress_callback=lambda z, n: prog.setValue(z),
-                )
+                refined, _ = OperationService.produce(
+                    'subcellular_segment_3d', {'original_volume': raw, 'preprocessed_volume': proc, 'cell_mask_3d': cmask3d},
+                    {
+                        'cell_label': int(cl),
+                        'ball_radius': ball,
+                        'kurtosis_threshold': kurt.value(),
+                        'min_spot_radius': min_r.value(),
+                        'connectivity': conn_sp.value(),
+                        'progress_callback': lambda z, n: prog.setValue(z),
+                    })
                 total_refined |= refined
             labeled_3d = sk_label(total_refined, conn_sp.value())
             return labeled_3d

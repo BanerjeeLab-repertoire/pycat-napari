@@ -288,9 +288,6 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
     Run segment_subcellular_objects cell-by-cell (the inner loop from
     run_segment_subcellular_objects, without any viewer calls).
     """
-    from pycat.toolbox.segmentation_tools import (
-        segment_subcellular_objects, cell_mask_stretching
-    )
     import pandas as pd
 
     if state.get('no_cells'):
@@ -316,7 +313,8 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
     labeled_cells = state.get('labeled_cells')
     if labeled_cells is not None:
         cell_df = data_instance.get_data('cell_df', pd.DataFrame())
-        CMS_img = cell_mask_stretching(pre_processed_image, labeled_cells)
+        CMS_img = OperationService.produce(
+            'mask_stretch', {'image': pre_processed_image, 'cell_masks': labeled_cells})
     else:
         # No cell masks — run on whole image
         labeled_cells = np.ones_like(original_image).astype(int)
@@ -362,21 +360,19 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
             proc_crop  = CMS_img[y0:y1, x0:x1].copy()
             mask_crop  = cell_mask_holder[y0:y1, x0:x1]
 
-            refined_crop, unrefined_crop = segment_subcellular_objects(
-                orig_crop, proc_crop, mask_crop, label, ball_radius, cell_df,
-                **seg_kw, boundary_source=boundary_source[y0:y1, x0:x1],
-                ring_rejected=ring_rejected[y0:y1, x0:x1],
-            )
+            refined_crop, unrefined_crop = OperationService.produce('subcellular_segment', {
+                'original_image': orig_crop, 'pre_processed_image': proc_crop, 'cell_mask': mask_crop,
+                'cell_df': cell_df, 'boundary_source': boundary_source[y0:y1, x0:x1],
+                'ring_rejected': ring_rejected[y0:y1, x0:x1]}, {'cell_label': label, 'ball_radius': ball_radius, **seg_kw})
             # Stitch results back into full-image mask
             total_puncta_mask[y0:y1, x0:x1]         |= unrefined_crop
             total_refined_puncta_mask[y0:y1, x0:x1] |= refined_crop
         else:
             # No bounding box — process full image (original behaviour)
-            refined, unrefined = segment_subcellular_objects(
-                original_image.copy(), CMS_img.copy(),
-                cell_mask_holder, label, ball_radius, cell_df,
-                **seg_kw, boundary_source=boundary_source, ring_rejected=ring_rejected,
-            )
+            refined, unrefined = OperationService.produce('subcellular_segment', {
+                'original_image': original_image.copy(), 'pre_processed_image': CMS_img.copy(),
+                'cell_mask': cell_mask_holder, 'cell_df': cell_df, 'boundary_source': boundary_source,
+                'ring_rejected': ring_rejected}, {'cell_label': label, 'ball_radius': ball_radius, **seg_kw})
             total_puncta_mask |= unrefined
             total_refined_puncta_mask |= refined
 

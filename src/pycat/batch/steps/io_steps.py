@@ -11,6 +11,7 @@ import numpy as np
 from pycat.file_io.image_reader import open_image
 from pycat.batch.steps._common import (
     _get_data, _derive_split_companion_path, _source_path_for_recorded_channel, _load_image, _load_stack, _resolve_channel_for_layer, _save_array, _raw_counts, _normalize_to_float, _resolve_image_layer, _ivf_droplet_mask_and_image)
+from pycat.kernel import OperationService
 
 
 def _finalize_ball_radius(state: dict, image_path: Path) -> None:
@@ -369,10 +370,7 @@ def replay_auto_crop_roi(state: dict, image_path: Path, params: dict, output_dir
     replay_condensate_segmentation reads this dict to process each cell
     in its own tight crop rather than operating on the full image.
     """
-    from pycat.toolbox.batch_roi_tools import (
-        cell_bboxes_from_mask, multi_otsu_foreground_bbox,
-        multi_otsu_cell_mask,
-    )
+    from pycat.toolbox.batch_roi_tools import cell_bboxes_from_mask, multi_otsu_foreground_bbox
 
     strategy = params.get('strategy', 'auto')
     padding  = int(params.get('padding_px', 8))
@@ -415,8 +413,8 @@ def replay_auto_crop_roi(state: dict, image_path: Path, params: dict, output_dir
         # that expect a labeled_cells array (condensate_segmentation, analysis)
         if state.get('labeled_cells') is None:
             _cdiam = params.get('cell_diameter', 100)
-            otsu_mask = multi_otsu_cell_mask(image, n_classes=n_classes,
-                                              cell_diameter=int(_cdiam))
+            otsu_mask = OperationService.produce('multi_otsu', {'image': image},
+                {'n_classes': n_classes, 'cell_diameter': int(_cdiam)})
             state['cellpose_mask'] = otsu_mask
             state['labeled_cells'] = otsu_mask
             print(f"[PyCAT Batch]   Multi-Otsu cell mask: "

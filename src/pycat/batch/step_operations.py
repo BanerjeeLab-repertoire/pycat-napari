@@ -34,7 +34,7 @@ _STEP_OPERATIONS: dict[str, tuple[str, ...]] = {
     # 'ivf_segmentation' deliberately NOT declared: a fixed op tuple misleads for 4 of its 5 recorded methods -- see test_batch_step_composition._MIN_STEPS_DECLARED for the rationale.
     'bf_condensate_segmentation': ('bf_segment',),
     'ivbf_segmentation':        ('bf_segment',),
-    'ivf_size_distribution':    ('invitro.size_distribution',),   # a MEASURE op
+    'ivf_size_distribution':    ('invitro.size_distribution', 'size_distribution'),   # MEASURE op + its kernel op
     'vpt_microrheology':        ('vpt.microrheology', 'bead_detect', 'dynamic_spatial.link_trajectories',
                                  'condensate_physics.compute_msd', 'condensate_physics.fit_anomalous_diffusion',
                                  'viscosity'),   # INTERPRET terminal (N2b-1) and the chain it runs
@@ -49,6 +49,11 @@ _STEP_OPERATIONS: dict[str, tuple[str, ...]] = {
     'client_enrichment':        ('client_enrichment',),
     'msd_analysis':             ('condensate_physics.compute_msd', 'condensate_physics.fit_anomalous_diffusion'),
     'dynamic_spatial':          ('dynamic_spatial.link_trajectories', 'dynamic_spatial.detect_merge_fission'),
+    'ivf_droplet_segment':      ('ivf_droplet_segment',),
+    'ivf_droplet_analysis':     ('partition_coefficient',),
+    'ivf_field_summary':        ('partition_coefficient',),
+    'tsivf_segment_stack':      ('ts_droplet_segment',),
+    'tsivf_kinetics':           ('ts_track_relabel',),
 }
 
 

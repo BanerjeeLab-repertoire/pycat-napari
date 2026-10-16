@@ -28,6 +28,14 @@ corpus is unchanged, and the route-equivalence tests still pin each kernel to th
   panels' coarsening fit raised UnboundLocalError mid-migration (caught by the real-data verification; now a
   contract test).
 
+- **Every remaining catalog operation a launcher called directly now runs through the kernel** (42 more sites,
+  25 ops): brightfield and in-vitro segmentation, preprocessing, LoG enhancement, flat-field and clear-frame
+  correction, WBNS, deblurring, optical density, partition coefficient, size distribution, cell-mask stretching
+  and subcellular segmentation, the in-vitro time-series segmentation and track relabelling, multi-Otsu ROI,
+  Ripley's L, chromatin topology and voids, the three z-stack operations, foreground suppression and the OpenCV
+  watershed. No launcher calls a catalog operation's function directly any more (`tests/test_kernel_contract.py`).
+  `_STEP_OPERATIONS` declares what each in-vitro / time-series replay runs (18 -> 23 steps).
+
 ### Fixed
 - **MSD on a movie shorter than the minimum track length: a stated lag window, not a crash.** The Dynamics panels
   (brightfield, in-vitro brightfield, in-vitro fluorescence) use the 200-frame default; on a shorter movie no track

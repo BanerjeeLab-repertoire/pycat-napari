@@ -13,6 +13,7 @@ import numpy as np
 import scipy.ndimage as ndi
 from pycat.utils.tag_registry import tags_layer
 from pycat.toolbox.image_processing._base import upscale_image_interp, _add_image
+from pycat.kernel import OperationService
 
 
 @tags_layer('dpr', role='preprocessed',
@@ -161,7 +162,8 @@ def run_dpr(psf_input, gain_input, data_instance, viewer):
     window_size = math.ceil(data_instance.data_repository['cell_diameter'] / 2)
     
     # Apply DPR processing on the selected image layer
-    DPR_img, _ = deblur_by_pixel_reassignment(active_layer.data, psf_0, gain_0, window_size)
+    DPR_img, _ = OperationService.produce('dpr', {'I_in': active_layer.data},
+        {'PSF': psf_0, 'gain': gain_0, 'window_radius': window_size})
 
     # Display the processed image in the viewer
     _add_image(DPR_img, viewer, name=f"DPR Corrected {active_layer.name}", operation='preprocess')

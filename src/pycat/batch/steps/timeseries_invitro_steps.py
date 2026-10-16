@@ -20,6 +20,7 @@ from pathlib import Path
 import numpy as np
 
 from pycat.batch.steps._common import _get_data, _resolve_image_layer, _save_array
+from pycat.kernel import OperationService
 
 
 def _stack(state, layer_name=None):
@@ -47,7 +48,7 @@ def _dt(state, params):
 
 
 def replay_tsivf_segment_stack(state: dict, image_path: Path, params: dict, output_dir: Path):
-    from pycat.toolbox.timeseries_invitro_tools import make_frame_segmenter, segment_stack_per_frame
+    from pycat.toolbox.timeseries_invitro_tools import make_frame_segmenter
     stack = _stack(state, params.get('image_layer'))
     if stack is None:
         print(f'[PyCAT Batch]   TSIVF segmentation skipped for {image_path.name}: not a (T, H, W) stack.')
@@ -55,7 +56,8 @@ def replay_tsivf_segment_stack(state: dict, image_path: Path, params: dict, outp
     seg = make_frame_segmenter(params.get('method', 'Multi-Otsu'), params.get('multiotsu_classes', 3),
                                params.get('min_area_px', 20))
     kf = int(params.get('keyframe_every', 1) or 1)
-    state['tsivf_label_stack'] = segment_stack_per_frame(stack, seg, keyframe_every=kf, n_workers=1)
+    state['tsivf_label_stack'] = OperationService.produce('ts_droplet_segment', {'stack_like': stack},
+        {'segment_frame_fn': seg, 'keyframe_every': kf, 'n_workers': 1})
     state['tsivf_stack'] = stack
     print(f'[PyCAT Batch]   TSIVF: segmented {len(stack)} frames.')
 
@@ -143,8 +145,7 @@ def replay_tsivf_kinetics(state: dict, image_path: Path, params: dict, output_di
     labels = state.get('tsivf_label_stack')
     stack = state.get('tsivf_stack')
     if labels is not None and stack is not None:
-        from pycat.toolbox.timeseries_invitro_tools import relabel_stack_by_track
-        tracked = relabel_stack_by_track(labels, linked)
+        tracked = OperationService.produce('ts_track_relabel', {'label_stack': labels, 'linked_df': linked})
         footprint = np.asarray(tracked).max(axis=0).astype(np.uint32)       # track_id + 1 (0 = none)
         _save_array(time_average(stack), output_dir / f'{stem}_measured_image.tiff')
         _save_array(footprint, output_dir / f'{stem}_droplet_labels.tiff')

@@ -265,7 +265,6 @@ def _ivbf_segmentation(ui, layout):
     prog, run = _run_btn(form, "▶  Segment Droplets")
 
     def _on_run():
-        from pycat.toolbox.brightfield_tools import segment_bf_condensates
         try: enh = ui._img(enh_dd)
         except KeyError as e: napari_show_warning(str(e)); return
         _mi = method_dd.currentIndex()
@@ -275,12 +274,16 @@ def _ivbf_segmentation(ui, layout):
         _mind = min_d.value(); _maxd = max_d.value(); _circ = circ.value()
         prog.setRange(0,0); prog.setVisible(True); run.setEnabled(False)
         def _task():
-            return segment_bf_condensates(enh, min_diameter_px=_mind,
-                                           max_diameter_px=_maxd,
-                                           min_circularity=_circ,
-                                           method=_method,
-                                           texture_window=_tw,
-                                           split_touching=_split)
+            return OperationService.produce(
+                'bf_segment', {'enhanced_image': enh},
+                {
+                    'min_diameter_px': _mind,
+                    'max_diameter_px': _maxd,
+                    'min_circularity': _circ,
+                    'method': _method,
+                    'texture_window': _tw,
+                    'split_touching': _split,
+                })
         worker = _IVBFWorker(_task)
         ui._ivbf_seg_worker = worker
         def _done(labeled):

@@ -31,7 +31,6 @@ def replay_ivf_preprocess(state: dict, image_path: Path, params: dict, output_di
     recorded with 'gaussian' or 'log' replayed as a visibly different image
     than the one the interactive session actually produced, silently.
     """
-    from pycat.toolbox.image_processing_tools import apply_laplace_of_gauss_enhancement, pre_process_image
 
     # RAW counts: pre_process_image's rolling ball is NOT scale-invariant.
     # `_normalize_to_float` subtracts the pedestal; the GUI does not. See _proc, above.
@@ -43,9 +42,10 @@ def replay_ivf_preprocess(state: dict, image_path: Path, params: dict, output_di
     if method == 'gaussian':
         proc = OperationService.produce('gaussian', {'image': image}, {'sigma': sigma})
     elif method == 'log':
-        proc = apply_laplace_of_gauss_enhancement(image, sigma=sigma)
+        proc = OperationService.produce('log_enhance', {'image': image}, {'sigma': sigma})
     else:  # 'rolling-ball' (legacy default)
-        proc = pre_process_image(image, ball_radius=ball, window_size=ball * 2)
+        proc = OperationService.produce('preprocess', {'image': image},
+            {'ball_radius': ball, 'window_size': ball * 2})
     state['preprocessed'] = np.asarray(proc).astype(np.float32)
 
     _save_array(state['preprocessed'],
@@ -68,7 +68,7 @@ def _write_brushable_droplets(state, image_path, output_dir, per_droplet_df, mas
 
 def replay_ivf_field_summary(state: dict, image_path: Path, params: dict, output_dir: Path):
     """Replay in vitro field summary + partition coefficient from the droplet mask."""
-    from pycat.toolbox.invitro_tools import field_summary, partition_coefficient_local
+    from pycat.toolbox.invitro_tools import field_summary
     import pandas as pd
     mask, img = _ivf_droplet_mask_and_image(state)
     # The recorded step may have measured a DIFFERENT layer than the primary
@@ -105,9 +105,9 @@ def replay_ivf_field_summary(state: dict, image_path: Path, params: dict, output
             print(f"[PyCAT Batch]   IVF field summary: recorded dark reference "
                   f"'{dark_layer}' not found for this sample -- proceeding "
                   f"without one (result is an uncorrected ratio, not a true Kp).")
-    part = partition_coefficient_local(
-        img, mask.astype(np.int32), sample_type='in_vitro',
-        dark_reference=dark, allow_no_reference=True)
+    part = OperationService.produce(
+        'partition_coefficient', {'image': img, 'labeled_droplets': mask.astype(np.int32), 'dark_reference': dark},
+        {'sample_type': 'in_vitro', 'allow_no_reference': True})
 
     pd.DataFrame([summ]).to_csv(
         output_dir / f"{image_path.stem}_ivf_field_summary.csv", index=False)
@@ -123,7 +123,7 @@ def replay_ivf_field_summary(state: dict, image_path: Path, params: dict, output
 
 def replay_ivf_size_distribution(state: dict, image_path: Path, params: dict, output_dir: Path):
     """Replay in vitro droplet size-distribution fit from the droplet mask."""
-    from pycat.toolbox.invitro_tools import detection_limit_for_radii, fit_size_distribution
+    from pycat.toolbox.invitro_tools import detection_limit_for_radii
     import pandas as pd, numpy as np
     import skimage as sk
     mask, _ = _ivf_droplet_mask_and_image(state)
@@ -138,7 +138,8 @@ def replay_ivf_size_distribution(state: dict, image_path: Path, params: dict, ou
         return
     # The segmentation dropped objects under its minimum area: fit with that detection limit (A4).
     xmin = detection_limit_for_radii(radii, state.get('ivf_min_area_px'), mpx)
-    res = fit_size_distribution(radii, n_bins=int(params.get('n_bins', 30)), xmin=xmin)
+    res = OperationService.produce('size_distribution', {'radii_um': radii},
+        {'n_bins': int(params.get('n_bins', 30)), 'xmin': xmin})
     state['ivf_size_distribution'] = res        # expose the fit to the navigator (additive; batch unaffected)
     row = {k: v for k, v in res.items() if not hasattr(v, '__len__')}
     pd.DataFrame([row]).to_csv(
@@ -225,9 +226,8 @@ def replay_ivf_segmentation(state: dict, image_path: Path, params: dict, output_
         return lab.astype(np.int32)
 
     if method == 'droplet':
-        from pycat.toolbox.invitro.segmentation import segment_ivf_droplets
-        labeled, _ = segment_ivf_droplets(pre, raw, method='droplet', min_area=p_minarea,
-                                          reject_nonround=p_round)
+        labeled, _ = OperationService.produce('ivf_droplet_segment', {'pre': pre, 'raw': raw},
+            {'method': 'droplet', 'min_area': p_minarea, 'reject_nonround': p_round})
 
     elif method == 'otsu':
         t = filters.threshold_otsu(pre) * params.get('otsu_sensitivity', 1.0)
@@ -255,19 +255,20 @@ def replay_ivf_segmentation(state: dict, image_path: Path, params: dict, output_
         return
 
     else:  # 'spot' -- Advanced spot detection (original pipeline)
-        from pycat.toolbox.segmentation_tools import (
-            segment_subcellular_objects, cell_mask_stretching)
         H, W = pre.shape
         whole = np.ones((H, W), dtype=bool)
         whole[:2, :2] = False
-        cms = cell_mask_stretching(pre, whole.astype(int))
-        refined, unrefined = segment_subcellular_objects(
-            raw.copy(), cms.copy(), whole, 1, ball, cell_df=None,
-            min_spot_radius=params.get('min_radius', 2.0),
-            kurtosis_threshold=params.get('kurtosis', -3.0),
-            local_snr_threshold=params.get('local_snr_threshold', 0.8),
-            global_snr_threshold=0.8,
-        )
+        cms = OperationService.produce('mask_stretch', {'image': pre, 'cell_masks': whole.astype(int)})
+        refined, unrefined = OperationService.produce(
+            'subcellular_segment', {'original_image': raw.copy(), 'pre_processed_image': cms.copy(), 'cell_mask': whole, 'cell_df': None},
+            {
+                'cell_label': 1,
+                'ball_radius': ball,
+                'min_spot_radius': params.get('min_radius', 2.0),
+                'kurtosis_threshold': params.get('kurtosis', -3.0),
+                'local_snr_threshold': params.get('local_snr_threshold', 0.8),
+                'global_snr_threshold': 0.8,
+            })
         labeled = sk.measure.label(refined).astype(np.int32)
 
     state['ivf_droplet_mask'] = labeled
@@ -285,13 +286,15 @@ def replay_ivf_droplet_segment(state: dict, image_path: Path, params: dict, outp
     ``segment_ivf_droplets`` — the same function the in-vitro-fluorescence panel uses (whole-field threshold, no
     cells). Droplets ≡ condensates: the in-vitro context (not a different target) is what selects this over the
     in-cell puncta pipeline. Writes ``ivf_droplet_mask`` (the directly-labelled droplets)."""
-    from pycat.toolbox.invitro.segmentation import segment_ivf_droplets
     pre = np.asarray(state.get('preprocessed', state['image']))
     raw = _normalize_to_float(state['image'])
-    labeled, _unrefined = segment_ivf_droplets(
-        pre, raw, method=params.get('method', 'droplet'),
-        min_area=int(params.get('min_area', 6)),
-        reject_nonround=bool(params.get('reject_nonround', False)))
+    labeled, _unrefined = OperationService.produce(
+        'ivf_droplet_segment', {'pre': pre, 'raw': raw},
+        {
+            'method': params.get('method', 'droplet'),
+            'min_area': int(params.get('min_area', 6)),
+            'reject_nonround': bool(params.get('reject_nonround', False)),
+        })
     labeled = np.asarray(labeled).astype(np.int32)
     state['ivf_droplet_mask'] = labeled
     state['ivf_min_area_px'] = int(params.get('min_area', 6))    # the size fit's detection limit (A4)
@@ -309,14 +312,14 @@ def replay_ivf_droplet_analysis(state: dict, image_path: Path, params: dict, out
     intensities). The fluorescence-droplet analogue of the brightfield ``bf_condensate_metrics`` measure; it feeds
     the size-distribution INTERPRET. RAW counts, not a normalised image: partition/intensity ratios need the true
     zero point (same reason as brightfield OD)."""
-    from pycat.toolbox.invitro_tools import partition_coefficient_local
     mask = state.get('ivf_droplet_mask')
     if mask is None or int(np.asarray(mask).max()) == 0:
         print(f"[PyCAT Batch]   IVF droplet analysis skipped for {image_path.name}: no droplets.")
         return
     raw = np.asarray(state['image'], dtype=np.float64)
-    part = partition_coefficient_local(raw, np.asarray(mask).astype(np.int32),
-                                       sample_type='in_vitro', allow_no_reference=True)
+    part = OperationService.produce(
+        'partition_coefficient', {'image': raw, 'labeled_droplets': np.asarray(mask).astype(np.int32)},
+        {'sample_type': 'in_vitro', 'allow_no_reference': True})
     df = part.get('per_droplet_df') if isinstance(part, dict) else None
     state['ivf_droplet_df'] = df
     state['data_instance'].set_data('ivf_droplet_df', df)

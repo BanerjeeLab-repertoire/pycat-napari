@@ -31,6 +31,7 @@ import scipy.ndimage as ndi
 
 from pycat.utils.general_utils import dtype_conversion_func
 from pycat.toolbox.image_processing_tools import compute_rolling_ball_background
+from pycat.kernel import OperationService
 
 
 @tags_layer('topology_envelope', role='measurement',
@@ -306,7 +307,8 @@ def run_chromatin_topology(image_layer, data_instance, viewer,
     image = np.asarray(image_layer.data)
     ball_radius = int(data_instance.data_repository.get('ball_radius', 15))
 
-    envelope = compute_topology_envelope(image, ball_radius, mode=mode, smooth=True)
+    envelope = OperationService.produce('topology_envelope', {'image': image},
+        {'ball_radius': ball_radius, 'mode': mode, 'smooth': True})
 
     # Raw envelope layer (brightness comparable across cells).
     add_image_with_default_colormap(
@@ -544,8 +546,8 @@ def run_chromatin_void_detection(dapi_layer, viewer, data_instance,
     cond = np.asarray(condensate_layer.data) if condensate_layer is not None else None
     ball_radius = int(data_instance.data_repository.get('ball_radius', 15))
 
-    res = detect_chromatin_voids(dapi, ball_radius, condensate_image=cond,
-                                 params=params)
+    res = OperationService.produce('void_detect', {'dapi': dapi, 'condensate_image': cond},
+        {'ball_radius': ball_radius, 'params': params})
 
     # Add label layers (Labels so they carry the per-void id).
     if res['nucleolus_like'].any():

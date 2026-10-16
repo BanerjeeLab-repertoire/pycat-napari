@@ -435,7 +435,6 @@ def _add_bf_condensate_segmentation(ui, layout):
     form.addRow(_bwc(run))
 
     def _on_run():
-        from pycat.toolbox.brightfield_tools import segment_bf_condensates
         try:
             enh = ui._get_image(enh_dd)
         except KeyError as e:
@@ -443,10 +442,13 @@ def _add_bf_condensate_segmentation(ui, layout):
         prog.setRange(0, 0); prog.setVisible(True); run.setEnabled(False)
 
         def _task():
-            return segment_bf_condensates(enh,
-                                           min_diameter_px=min_d.value(),
-                                           max_diameter_px=max_d.value(),
-                                           min_circularity=circ.value())
+            return OperationService.produce(
+                'bf_segment', {'enhanced_image': enh},
+                {
+                    'min_diameter_px': min_d.value(),
+                    'max_diameter_px': max_d.value(),
+                    'min_circularity': circ.value(),
+                })
         worker = _BFWorker(_task)
         ui._bf_seg_worker = worker
 
@@ -906,8 +908,7 @@ def _add_bf_texture(ui, layout):
     form.addRow(_bwc(run, optional=True))
 
     def _on_run():
-        from pycat.toolbox.brightfield_tools import (
-            bf_texture_features, compute_optical_density)
+        from pycat.toolbox.brightfield_tools import bf_texture_features
         try:
             # RAW counts: this is the optical-density widget. OD = -log10(I / I0).
             raw_img = ui._get_image_raw(od_dd)
@@ -920,7 +921,7 @@ def _add_bf_texture(ui, layout):
             cells = None
 
         # Compute OD from the selected image
-        od = compute_optical_density(raw_img)
+        od = OperationService.produce('optical_density', {'image': raw_img})
 
         df = bf_texture_features(od, mask, cells)
         ui._dr()['bf_texture_df'] = df

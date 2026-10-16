@@ -36,6 +36,7 @@ from pycat.toolbox.spatial_acf_tools import _add_run_sacf_analysis
 from pycat.toolbox.timeseries_condensate_tools import _add_run_timeseries_condensate_analysis, _add_lazy_preprocess_stack, _add_ts_upscale_stack
 from pycat.toolbox.cell_ts_ui import add_cell_timeseries_panel as _add_cell_timeseries_panel
 from pycat.ui.base_ui import BaseUIClass, _WheelScrollGuard, _wheel_guard, guard_wheel, _relax_min_widths, _apply_scroll_guard
+from pycat.kernel import OperationService
 
 
 class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidgetsMixin, _SegmentationWidgetsMixin, _AnalysisWidgetsMixin, _LabelsMasksWidgetsMixin, _ImageOpsWidgetsMixin):
@@ -694,11 +695,10 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
                 _warn(f"Calibration shape {ref.shape} doesn't match image "
                       f"{tuple(img.shape[-2:])} — use a reference from the same acquisition.")
                 return
-            from pycat.toolbox.image_processing_tools import apply_flatfield_correction, apply_background_subtraction
             if method_dd.currentIndex() == 0:
-                corrected = apply_flatfield_correction(img, ref); suffix = "flatfield-corrected"; mkey = "flatfield"
+                corrected = OperationService.produce('flatfield', {'image': img, 'flat': ref}); suffix = "flatfield-corrected"; mkey = "flatfield"
             else:
-                corrected = apply_background_subtraction(img, ref); suffix = "bg-subtracted"; mkey = "subtraction"
+                corrected = OperationService.produce('bg_subtract_clear', {'image': img, 'background': ref}); suffix = "bg-subtracted"; mkey = "subtraction"
             self.viewer.add_image(corrected, name=f"{active.name} ({suffix})")
             try:
                 self._record('calibration_correction', {

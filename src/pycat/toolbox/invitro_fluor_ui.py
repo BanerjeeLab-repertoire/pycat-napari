@@ -316,11 +316,10 @@ def _ivf_preprocessing(ui, layout):
             if idx == 0:   # Gaussian blur
                 return OperationService.produce('gaussian', {'image': arr}, {'sigma': sigma})
             if idx == 1:   # LoG enhancement
-                from pycat.toolbox.image_processing_tools import apply_laplace_of_gauss_enhancement
-                return np.asarray(apply_laplace_of_gauss_enhancement(arr, sigma=sigma)).astype(np.float32)
+                return np.asarray(OperationService.produce('log_enhance', {'image': arr}, {'sigma': sigma})).astype(np.float32)
             # Rolling-ball (legacy)
-            from pycat.toolbox.image_processing_tools import pre_process_image
-            return np.asarray(pre_process_image(arr, ball_radius=ball, window_size=ball*2)).astype(np.float32)
+            return np.asarray(OperationService.produce('preprocess', {'image': arr},
+                {'ball_radius': ball, 'window_size': ball*2})).astype(np.float32)
 
         worker = _IVFWorker(_task)
         ui._ivf_pre_worker = worker
@@ -570,14 +569,24 @@ def _ivf_segmentation(ui, layout):
         cell_diam = int(ui._dr().get('cell_diameter', 100))
 
         def _task():
-            from pycat.toolbox.invitro.segmentation import segment_ivf_droplets
-            return segment_ivf_droplets(
-                pre, raw, method=method, otsu_sensitivity=p_sens,
-                multiotsu_classes=p_classes, multiotsu_upper=p_upper,
-                sauvola_window=p_win, sauvola_k=p_k, min_radius=p_minr,
-                kurtosis_threshold=p_kurt, local_snr_threshold=p_lsnr,
-                min_area=p_minarea, reject_nonround=p_round,
-                rf_scribbles=rf_scribbles, ball_radius=ball, cell_diameter=cell_diam)
+            return OperationService.produce(
+                'ivf_droplet_segment', {'pre': pre, 'raw': raw},
+                {
+                    'method': method,
+                    'otsu_sensitivity': p_sens,
+                    'multiotsu_classes': p_classes,
+                    'multiotsu_upper': p_upper,
+                    'sauvola_window': p_win,
+                    'sauvola_k': p_k,
+                    'min_radius': p_minr,
+                    'kurtosis_threshold': p_kurt,
+                    'local_snr_threshold': p_lsnr,
+                    'min_area': p_minarea,
+                    'reject_nonround': p_round,
+                    'rf_scribbles': rf_scribbles,
+                    'ball_radius': ball,
+                    'cell_diameter': cell_diam,
+                })
 
         worker = _IVFWorker(_task)
         ui._ivf_seg_worker = worker
@@ -765,7 +774,6 @@ def _ivf_field_summary(ui, layout):
         # Local annular dilute phase + the camera floor from the dark reference (if given).
         # `sample_type='in_vitro'` is not a guess: this is the IN VITRO fluorescence widget,
         # so the tool knows it must not try to auto-detect the floor.
-        from pycat.toolbox.invitro_tools import partition_coefficient_local
         _use_dark = dark_cb.isChecked()
         _dark = None
         if _use_dark:
@@ -787,14 +795,9 @@ def _ivf_field_summary(ui, layout):
                     "toward 1 by the camera pedestal.")
                 return
 
-        part = partition_coefficient_local(
-            img, mask.astype(np.int32), sample_type='in_vitro',
-            dark_reference=_dark,
-            # The bypass is now a DELIBERATE choice (the box is unticked), not a silent
-            # fallback. The raw ratio is returned so work can proceed, flagged
-            # `is_true_kp=False` so it cannot be mistaken for a partition coefficient. The
-            # contrast is exact regardless.
-            allow_no_reference=(not _use_dark))
+        part = OperationService.produce(
+            'partition_coefficient', {'image': img, 'labeled_droplets': mask.astype(np.int32), 'dark_reference': _dark},
+            {'sample_type': 'in_vitro', 'allow_no_reference': not _use_dark})
         ui._dr()['ivf_field_summary']   = summ
         ui._dr()['ivf_partition_coeff'] = part
         ui._record('ivf_field_summary', {
@@ -850,7 +853,7 @@ def _ivf_size_distribution(ui, layout):
     form.addRow(_bwc(run))
 
     def _on_run():
-        from pycat.toolbox.invitro_tools import detection_limit_for_radii, fit_size_distribution
+        from pycat.toolbox.invitro_tools import detection_limit_for_radii
         try:
             mask = np.asarray(ui.viewer.layers[mask_dd.currentText()].data)
         except KeyError as e: napari_show_warning(str(e)); return
@@ -862,7 +865,8 @@ def _ivf_size_distribution(ui, layout):
         # The segmentation dropped objects under its minimum area, so the sample is left-truncated there: fit with
         # that detection limit, or mu / sigma are biased (+50 % / -33 % at 35 % of droplets below it; A4).
         xmin = detection_limit_for_radii(radii, ui._dr().get('ivf_min_area_px'), mpx)
-        res = fit_size_distribution(radii, n_bins=bins_sp.value(), xmin=xmin)
+        res = OperationService.produce('size_distribution', {'radii_um': radii},
+            {'n_bins': bins_sp.value(), 'xmin': xmin})
         ui._dr()['ivf_size_dist'] = res
         ui._record('ivf_size_distribution', {
             'mask_layer': mask_dd.currentText(), 'n_bins': bins_sp.value()})

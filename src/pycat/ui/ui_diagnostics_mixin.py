@@ -21,6 +21,7 @@ from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
     QPushButton, QLabel, QVBoxLayout, QHBoxLayout, QLineEdit, QWidget,
     QComboBox, QSlider, QScrollArea, QSizePolicy)
+from pycat.kernel import OperationService
 
 
 class _DiagnosticsWidgetsMixin:
@@ -151,8 +152,7 @@ class _DiagnosticsWidgetsMixin:
         from qtpy.QtWidgets import (QLabel as _QLabel, QWidget as _QWidget,
                                      QFormLayout, QHBoxLayout as _QHBoxLayout)
         import napari
-        from pycat.toolbox.image_processing_tools import (
-            FOREGROUND_SUPPRESSION_DEFAULTS, soft_foreground_suppression)
+        from pycat.toolbox.image_processing_tools import FOREGROUND_SUPPRESSION_DEFAULTS
 
         outer = QVBoxLayout()
         self.add_text_label(outer, 'Foreground Suppression Tuner', bold=True)
@@ -236,10 +236,16 @@ class _DiagnosticsWidgetsMixin:
             ball_radius = int(dr.get('ball_radius', 50))
             p = _current()
             try:
-                out = soft_foreground_suppression(
-                    src, ball_radius, strength=p['strength'], log_p=p['log_p'],
-                    con_p=p['con_p'], min_area=p['min_area'],
-                    border_grow=p['border_grow'])
+                out = OperationService.produce(
+                    'fg_suppress', {'image': src},
+                    {
+                        'ball_radius': ball_radius,
+                        'strength': p['strength'],
+                        'log_p': p['log_p'],
+                        'con_p': p['con_p'],
+                        'min_area': p['min_area'],
+                        'border_grow': p['border_grow'],
+                    })
             except Exception as e:
                 from napari.utils.notifications import show_warning
                 show_warning(f"Suppression preview failed: {e}"); return
@@ -604,15 +610,13 @@ class _DiagnosticsWidgetsMixin:
                                                  include=include) if include else []
             # Watershed needs a binary input; wrap it specially if requested.
             if 'watershed' in include:
-                from pycat.toolbox.segmentation_tools import (
-                    opencv_watershed_func)
                 from skimage.filters import threshold_otsu
                 def _ws(img):
                     a = np.asarray(img, dtype=float)
                     try: t = threshold_otsu(a)
                     except Exception: t = a.mean()
-                    return np.asarray(opencv_watershed_func((a > t).astype(np.uint8),
-                                      original_image=a), dtype=np.int32)
+                    return np.asarray(OperationService.produce(
+                        'watershed_cv', {'binary_mask': (a > t).astype(np.uint8), 'original_image': a}), dtype=np.int32)
                 cands.append(bt.Candidate('Watershed', method_fn=_ws,
                                           params={'method': 'Otsu + watershed'}))
             for i in range(ext_list.count()):

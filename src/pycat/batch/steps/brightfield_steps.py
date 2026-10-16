@@ -11,6 +11,7 @@ import numpy as np
 from pycat.file_io.image_reader import open_image
 from pycat.batch.steps._common import (
     _get_data, _derive_split_companion_path, _source_path_for_recorded_channel, _load_image, _resolve_channel_for_layer, _save_array, _raw_counts, _normalize_to_float, _resolve_image_layer, _ivf_droplet_mask_and_image)
+from pycat.kernel import OperationService
 
 
 def _resolve_flat_field_reference(state, params, step_label):
@@ -61,19 +62,19 @@ def replay_bf_preprocess(state: dict, image_path: Path, params: dict, output_dir
 
 def replay_bf_condensate_segmentation(state: dict, image_path: Path, params: dict, output_dir: Path):
     """Replay brightfield dark-blob condensate segmentation."""
-    from pycat.toolbox.brightfield_tools import segment_bf_condensates
 
     enhanced = state.get('bf_enhanced')
     if enhanced is None:
         print("[PyCAT Batch] BF condensate segmentation: no enhanced image — skipping.")
         return
 
-    labeled = segment_bf_condensates(
-        enhanced,
-        min_diameter_px=params.get('min_diameter_px', 3.0),
-        max_diameter_px=params.get('max_diameter_px', 50.0),
-        min_circularity=params.get('min_circularity', 0.5),
-    )
+    labeled = OperationService.produce(
+        'bf_segment', {'enhanced_image': enhanced},
+        {
+            'min_diameter_px': params.get('min_diameter_px', 3.0),
+            'max_diameter_px': params.get('max_diameter_px', 50.0),
+            'min_circularity': params.get('min_circularity', 0.5),
+        })
     state['bf_condensate_mask'] = labeled
     state['cellpose_mask']      = labeled   # alias for downstream compatibility
     state['labeled_cells']      = labeled
@@ -162,22 +163,22 @@ def replay_ivbf_segmentation(state: dict, image_path: Path, params: dict, output
     regardless of what was recorded, the same bug class already found and
     fixed in replay_ivf_preprocess.
     """
-    from pycat.toolbox.brightfield_tools import segment_bf_condensates
 
     enhanced = state.get('ivbf_enhanced')
     if enhanced is None:
         print("[PyCAT Batch] IVBF segmentation: no enhanced image — skipping.")
         return
 
-    labeled = segment_bf_condensates(
-        enhanced,
-        min_diameter_px=params.get('min_d', 4.0),
-        max_diameter_px=params.get('max_d', 200.0),
-        min_circularity=params.get('min_circularity', 0.5),
-        method=params.get('method', 'intensity'),
-        texture_window=params.get('texture_window', 9),
-        split_touching=params.get('split', True),
-    )
+    labeled = OperationService.produce(
+        'bf_segment', {'enhanced_image': enhanced},
+        {
+            'min_diameter_px': params.get('min_d', 4.0),
+            'max_diameter_px': params.get('max_d', 200.0),
+            'min_circularity': params.get('min_circularity', 0.5),
+            'method': params.get('method', 'intensity'),
+            'texture_window': params.get('texture_window', 9),
+            'split_touching': params.get('split', True),
+        })
     state['ivbf_droplet_mask'] = labeled
     state['cellpose_mask']     = labeled
     state['labeled_cells']     = labeled

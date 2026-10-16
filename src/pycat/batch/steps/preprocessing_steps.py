@@ -361,8 +361,6 @@ def replay_calibration_correction(state: dict, image_path: Path, params: dict, o
     """Replay calibration-frame correction: reload the reference and apply it."""
     import os
     import numpy as np
-    from pycat.toolbox.image_processing_tools import (
-        apply_flatfield_correction, apply_background_subtraction)
     calib = params.get('calibration_path', '')
     if not calib or not os.path.exists(calib):
         print('[PyCAT Batch]   Calibration correction skipped (reference file not found).')
@@ -388,9 +386,9 @@ def replay_calibration_correction(state: dict, image_path: Path, params: dict, o
         print(f'[PyCAT Batch]   Calibration correction skipped (shape {ref.shape} != image {img.shape[-2:]}).')
         return
     if params.get('method') == 'flatfield':
-        corrected = apply_flatfield_correction(img, ref)
+        corrected = OperationService.produce('flatfield', {'image': img, 'flat': ref})
     else:
-        corrected = apply_background_subtraction(img, ref)
+        corrected = OperationService.produce('bg_subtract_clear', {'image': img, 'background': ref})
     state['preprocessed'] = corrected
     state['image'] = corrected
     _save_array(corrected.astype(np.float32),

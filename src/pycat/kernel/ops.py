@@ -103,3 +103,35 @@ named('bead_detect', 'pycat.toolbox.vpt.detection:detect_beads_stack', entity='b
 named('viscosity', 'pycat.toolbox.vpt.viscosity:viscosity_from_diffusion', entity='condensate')
 named('host_segment', 'pycat.toolbox.vpt.host:segment_host_condensate', entity='mask')
 named('host_erode', 'pycat.toolbox.vpt.host:erode_host_mask', entity='mask')
+
+# ── In-vitro, brightfield and preprocessing ───────────────────────────────────────────────────────────────────
+_PRE = 'pycat.toolbox.image_processing.preprocessing'
+_BF = 'pycat.toolbox.brightfield_tools'
+_TSIVF = 'pycat.toolbox.timeseries_invitro_tools'
+named('preprocess', f'{_PRE}:pre_process_image')
+named('flatfield', f'{_PRE}:apply_flatfield_correction')
+named('bg_subtract_clear', f'{_PRE}:apply_background_subtraction')
+named('log_enhance', f'{_FILTERS}:apply_laplace_of_gauss_enhancement')
+named('wbns', 'pycat.toolbox.image_processing.wavelet:wbns_func')
+named('fg_suppress', f'{_BG}:soft_foreground_suppression')
+named('dpr', 'pycat.toolbox.image_processing.deblur:deblur_by_pixel_reassignment')
+named('optical_density', f'{_BF}:compute_optical_density')
+named('bf_segment', f'{_BF}:segment_bf_condensates', entity='mask')
+named('ivf_droplet_segment', 'pycat.toolbox.invitro.segmentation:segment_ivf_droplets', entity='mask')
+named('partition_coefficient', 'pycat.toolbox.invitro.partition:partition_coefficient_local', entity='condensate')
+named('size_distribution', 'pycat.toolbox.invitro.size_distribution:fit_size_distribution', entity='condensate')
+named('ts_droplet_segment', f'{_TSIVF}:segment_stack_per_frame', entity='mask')
+named('ts_track_relabel', f'{_TSIVF}:relabel_stack_by_track', entity='mask')
+named('multi_otsu', 'pycat.toolbox.batch_roi_tools:multi_otsu_cell_mask', entity='mask')
+named('mask_stretch', 'pycat.toolbox.segmentation.morphology:cell_mask_stretching', entity='mask')
+named('subcellular_segment', 'pycat.toolbox.segmentation.subcellular:segment_subcellular_objects', entity='mask')
+named('watershed_cv', 'pycat.toolbox.segmentation.watershed:opencv_watershed_func', entity='mask')
+
+# ── Spatial, topology, z-stack ────────────────────────────────────────────────────────────────────────────────
+_ZS = 'pycat.toolbox.zstack_segmentation_tools'
+named('spatial_statistics', 'pycat.toolbox.spatial_metrology_tools:ripleys_l', entity='condensate')
+named('topology_envelope', 'pycat.toolbox.topology_tools:compute_topology_envelope')
+named('void_detect', 'pycat.toolbox.topology_tools:detect_chromatin_voids', entity='mask')
+named('bg_subtract_3d', f'{_ZS}:bg_removal_3d')
+named('cellpose_3d', f'{_ZS}:cellpose_segmentation_3d', entity='cell')
+named('subcellular_segment_3d', f'{_ZS}:segment_subcellular_objects_3d', entity='mask')

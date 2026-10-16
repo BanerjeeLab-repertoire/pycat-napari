@@ -37,6 +37,7 @@ from qtpy.QtWidgets import (
 )
 from napari.utils.notifications import (
     show_info as napari_show_info, show_warning as napari_show_warning)
+from pycat.kernel import OperationService
 
 
 class _TSIVFWorker(QThread):
@@ -280,7 +281,6 @@ def _tsivf_segmentation(ui, layout):
         return make_frame_segmenter(method_dd.currentText(), classes_sp.value(), min_area_sp.value())
 
     def _on_run():
-        from pycat.toolbox.timeseries_invitro_tools import segment_stack_per_frame
         try:
             stack = ui._stack_layer(img_dd)
         except KeyError as e:
@@ -298,8 +298,14 @@ def _tsivf_segmentation(ui, layout):
         _threads = 1 if kf > 1 else max(1, min(8, (__import__('os').cpu_count() or 2) - 1))
 
         def _task(progress):
-            return segment_stack_per_frame(
-                stack, seg_fn, keyframe_every=kf, progress_callback=progress, n_workers=_threads)
+            return OperationService.produce(
+                'ts_droplet_segment', {'stack_like': stack},
+                {
+                    'segment_frame_fn': seg_fn,
+                    'keyframe_every': kf,
+                    'progress_callback': progress,
+                    'n_workers': _threads,
+                })
 
         def _prog(d, t):
             prog.setRange(0, t)
@@ -404,7 +410,7 @@ def _tsivf_linking(ui, layout):
     prog, run = _run_row(form, "▶  Link Condensates")
 
     def _on_run():
-        from pycat.toolbox.timeseries_invitro_tools import link_condensates, relabel_stack_by_track
+        from pycat.toolbox.timeseries_invitro_tools import link_condensates
         from pycat.toolbox.invitro.timeseries_kinetics import measure_droplets_multichannel
         label_stack = ui._dr().get('tsivf_label_stack')
         if label_stack is None:
@@ -438,7 +444,8 @@ def _tsivf_linking(ui, layout):
             if minlen > 1 and 'track_id' in linked.columns:
                 counts = linked.groupby('track_id')['frame'].transform('size')
                 linked = linked[counts >= minlen].reset_index(drop=True)
-            tracked = relabel_stack_by_track(label_stack, linked)
+            tracked = OperationService.produce(
+                'ts_track_relabel', {'label_stack': label_stack, 'linked_df': linked})
             return linked, fusions, tracked
 
         def _prog(d, t):

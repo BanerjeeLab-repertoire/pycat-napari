@@ -161,3 +161,27 @@ def test_OperationService_is_imported_once_at_module_level():
                             and any(a.name == 'OperationService' for a in node.names)):
                         local.append(f'{rel}:{node.lineno} (in {fn.name})')
     assert not local, 'import OperationService at module level instead:\n' + '\n'.join(sorted(set(local)))
+
+
+def test_every_catalog_op_a_launcher_calls_has_a_kernel():
+    """The rule above only polices functions that already HAVE a kernel. This closes the gap: a launcher calling
+    any catalog operation's function (``@tags_layer`` toolbox ops, curated measure ops) must find a kernel for it,
+    so a new panel cannot quietly go back to calling the science directly."""
+    catalog, measure = _vocabulary()
+    kernels = {spec.wraps.split(':', 1)[1] for spec in _specs().values()}
+    op_functions = {o['function'] for o in catalog.values() if o['kind'] == 'toolbox'}
+    op_functions |= {m['api'].rsplit('.', 1)[-1] for m in measure.values() if m.get('api')}
+    missing = set()
+    for path in SRC.rglob('*.py'):
+        rel = path.relative_to(SRC).as_posix()
+        if rel.startswith('kernel/'):
+            continue
+        tree = ast.parse(path.read_text(encoding='utf-8'))
+        for qualname, fn in _launchers(tree, rel):
+            for call in ast.walk(fn):
+                if isinstance(call, ast.Call):
+                    name = getattr(call.func, 'id', None) or getattr(call.func, 'attr', None)
+                    if name in op_functions and name not in kernels:
+                        missing.add((rel, qualname, name))
+    assert not missing, ('launchers call catalog operations that have no kernel -- register one in '
+                         'pycat/kernel/ops.py and call it through OperationService:\n' + '\n'.join(map(str, sorted(missing))))
