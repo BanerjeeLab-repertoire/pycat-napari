@@ -87,6 +87,28 @@ pip install -e ".[test]"
   ```bash
   pytest tests/
   ```
+- **Then run what GitHub runs, before you push:**
+  ```bash
+  python tools/run_ci_locally.py            # all CI jobs; or name some: core wheel minimal
+  ```
+  `pytest tests/` in your dev environment is **not** the CI run, and passing it does not mean CI will
+  pass. CI was red for many commits while every local run was green, because:
+
+  | Local dev run | GitHub (`.github/workflows/core.yml`) |
+  |---|---|
+  | `pytest tests/` (everything) | `pytest -m "core or base"`; `minimal` runs `-m core` |
+  | napari, Qt, bioio, h5py, cellpose, torch installed | only the packages the workflow installs: no napari, Qt, bioio or h5py |
+  | the editable source tree | the editable source **and**, separately, the built wheel |
+  | the working tree, untracked files included | a clean checkout of the commit |
+  | Windows, cp1252 console | Linux, UTF-8 |
+
+  The script reads `core.yml` and runs each job's own steps in a fresh-per-job venv and a copy of the
+  repo built from the git index, so it cannot drift from the workflow. Only the OS still differs.
+- A `core` or `base` test must not need the GUI stack or an optional package. If a test reaches Qt through
+  a science module, fix the import at the source: move data or helpers to a Qt-free module, or import
+  `pycat.file_io.stack_access` rather than `pycat.file_io.file_io`. If the test itself needs napari, h5py,
+  bioio and the like, use `pytest.importorskip(...)`. A function-level `@pytest.mark.integration` does
+  **not** remove a test from a file whose `pytestmark` is `base`.
 - Maintain or improve test coverage
 
 ## Submitting Changes
