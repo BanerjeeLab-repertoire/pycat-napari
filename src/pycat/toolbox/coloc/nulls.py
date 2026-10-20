@@ -114,6 +114,21 @@ def spatial_null_test(image1, image2, roi_mask=None, coefficient='pearson',
     corr_len = spatial_correlation_length(b, roi_mask)
     bs = int(block_size) if block_size else max(2, 2 * corr_len)
 
+    # Fewer than 2 blocks per axis cannot be block-shuffled: `_block_shuffle` then shuffles single PIXELS --
+    # the uncalibrated null measured above at 85 % false positives -- and the "p" it gave was that test's,
+    # labelled as the block test's (a 128 px image with no 1/e decay inside the 64 px lag window: one
+    # 128 px block, p = 0.005). Refuse instead of reporting it.
+    H, W = b.shape[:2]
+    n_blocks = (H // max(bs, 1)) * (W // max(bs, 1))
+    if H // max(bs, 1) < 2 or W // max(bs, 1) < 2:
+        why = ("the given" if block_size else f"the image stays correlated over {corr_len} px, so the")
+        return dict(coefficient=r_obs, null_mean=np.nan, null_sd=np.nan, p_value=np.nan, n_permutations=0,
+                    block_size=bs, correlation_length=int(corr_len), n_blocks=int(n_blocks), significant=False,
+                    verdict=(f"r = {r_obs:.3f}; no spatial-null p-value: {why} {bs} px block fits fewer than "
+                             f"twice per axis in this {H}x{W} field, so there is nothing to shuffle. Use a larger "
+                             f"field (or a less-blurred channel); the coefficient alone is not evidence of "
+                             f"association."))
+
     rng = np.random.default_rng(seed)
     null = np.empty(int(n_permutations), dtype=float)
     for i in range(int(n_permutations)):
@@ -138,11 +153,16 @@ def spatial_null_test(image1, image2, roi_mask=None, coefficient='pearson',
                    f"autocorrelation is accounted for.** A coefficient of this size is "
                    f"what two INDEPENDENT channels with this PSF would produce anyway.")
 
+    if n_blocks < 50:
+        # As in `perform_costes_test`: with few independent blocks the null is thin and the test goes liberal.
+        verdict += (f" Caution: only {n_blocks} blocks fit this field (fewer than ~50), so this p-value "
+                    f"is optimistic.")
+
     return dict(
         coefficient=r_obs,
         null_mean=float(null.mean()), null_sd=float(null.std()),
         p_value=p, n_permutations=int(null.size),
-        block_size=bs, correlation_length=int(corr_len),
+        block_size=bs, correlation_length=int(corr_len), n_blocks=int(n_blocks),
         significant=bool(p < 0.05), verdict=verdict,
     )
 

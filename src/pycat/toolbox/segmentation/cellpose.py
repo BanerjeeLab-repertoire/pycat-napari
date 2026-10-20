@@ -353,7 +353,8 @@ def train_and_apply_rf_classifier(image, training_labels, object_diameter):
     training_label_pxs = training_labels[training_labels != 0]
 
     # Random Forest classifier initialization and training
-    rf_classifier = RandomForestClassifier(n_estimators=500, max_depth=4, criterion='entropy', n_jobs=-1)
+    rf_classifier = RandomForestClassifier(n_estimators=500, max_depth=4, criterion='entropy', n_jobs=-1,
+                                           random_state=0)   # same scribbles -> same mask, run to run
     rf_classifier.fit(training_img_pixels.reshape(-1, 1), training_label_pxs)
 
     # Segmentation using the trained classifier

@@ -44,6 +44,8 @@ Author
     Gable Wadsworth, Banerjee Lab, SUNY Buffalo
 """
 
+import weakref
+
 import numpy as np
 from scipy.optimize import curve_fit
 from scipy.special import gammaln
@@ -529,14 +531,26 @@ def _read_noise_model(x, read_noise_var):
 # ---------------------------------------------------------------------------
 # Top-level runners wired to the UI
 # ---------------------------------------------------------------------------
+# The calibrated epsilon_0, per viewer. napari's Viewer has no free-form ``metadata`` dict (0.9.1), so
+# ``viewer.metadata[...]`` raised after the fit and the calibration was never kept; held here instead.
+_EPSILON0 = weakref.WeakKeyDictionary()
+
+
+def _stored_epsilon0(viewer):
+    try:
+        return _EPSILON0.get(viewer)
+    except TypeError:                     # not weak-referenceable (a stand-in viewer): nothing stored
+        return None
+
+
 def run_spida_calibration(image_layer, roi_shapes_layer, n_bins, white_noise,
                           viewer, modality='confocal', read_noise_sd=0.0):
     """
     Measure the **monomeric quantal brightness epsilon_0** from a control ROI
     (a region known to contain monomers, e.g. a monomeric-GFP control). The
     returned epsilon_0 is used to convert brightness to oligomeric state in
-    subsequent analyses. The value is stashed on the viewer
-    (``viewer.metadata['spida_epsilon0']``) so the analysis widget can pick it up.
+    subsequent analyses. The value is kept per viewer (``_EPSILON0``) so the analysis step's
+    "0 = auto" picks it up, and returned.
     """
     pixels = _roi_pixels(image_layer, roi_shapes_layer, viewer)
     if pixels is None:
@@ -563,11 +577,15 @@ def run_spida_calibration(image_layer, roi_shapes_layer, n_bins, white_noise,
             napari_show_warning('SpIDA: ' + res['reason'])
         return
     eps0 = res['epsilon']
-    viewer.metadata['spida_epsilon0'] = float(eps0)
+    try:
+        _EPSILON0[viewer] = float(eps0)
+    except TypeError:                     # not weak-referenceable: the value is still returned and reported
+        pass
     napari_show_info(
         f"SpIDA calibration: monomeric epsilon_0 = {eps0:.1f} iu "
         f"(N = {res['N']:.2f} particles/beam-area, R^2 = {res['r_squared']:.3f}). "
         "This will be used as the monomer reference for oligomeric state.")
+    return float(eps0)
 
 
 def run_spida_analysis(image_layer, roi_shapes_layer, n_bins, white_noise,
@@ -612,7 +630,7 @@ def run_spida_analysis(image_layer, roi_shapes_layer, n_bins, white_noise,
     r2 = res['r_squared']
 
     # Oligomeric state requires a monomer reference.
-    eps0 = epsilon0 if epsilon0 and epsilon0 > 0 else viewer.metadata.get('spida_epsilon0')
+    eps0 = epsilon0 if epsilon0 and epsilon0 > 0 else _stored_epsilon0(viewer)
     lines = [
         "── SpIDA result ─────────────────────────────",
         f"Density N        : {N:.2f} particles / beam-area",

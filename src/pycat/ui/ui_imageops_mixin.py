@@ -254,7 +254,7 @@ class _ImageOpsWidgetsMixin:
         clip_pct.setToolTip(
             "Fluorescence only. The subtraction is softened so no more than this "
             "fraction of pixels clips at zero. If the applied strength drops well "
-            "below 100%%, the reference is likely too bright / mismatched for this "
+            "below 100%, the reference is likely too bright / mismatched for this "
             "data.")
         adv_row.addWidget(clip_pct)
         adv_w = QWidget(); adv_w.setLayout(adv_row); lay.addWidget(adv_w)
@@ -306,7 +306,7 @@ class _ImageOpsWidgetsMixin:
                 msg = f"Added '{nm}'."
                 if mode == 'fluorescence':
                     a = info.get('alpha', 1.0)
-                    msg += (f" Subtraction strength {a*100:.0f}%%"
+                    msg += (f" Subtraction strength {a*100:.0f}%"
                             + ("" if a > 0.98 else
                                " — softened; reference may be too bright for this data."))
                 napari.utils.notifications.show_info(msg)
@@ -410,6 +410,9 @@ class _ImageOpsWidgetsMixin:
         ctrl_dds = []
         for k in range(4):
             dd = self.create_layer_dropdown(napari.layers.Image)
+            if k >= 2:                    # optional: default to "None", or with 3+ layers loaded these picked a
+                dd.insertItem(0, "None")  # layer by themselves and a 2-channel run was refused ("4 controls")
+                dd.setCurrentIndex(0)
             lay.addWidget(QLabel(f"Single-label control for channel {k}"
                                  f"{' (optional)' if k >= 2 else ''}:"))
             lay.addWidget(dd); ctrl_dds.append(dd)

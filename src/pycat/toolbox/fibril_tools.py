@@ -256,7 +256,7 @@ def run_bead_detection(image_layer, mask_layer, min_bead_radius,
 
     centroids = np.array([b['centroid'] for b in beads])
     viewer.add_points(centroids, name=f"Beads ({mask_layer.name})",
-                      size=6, face_color='red', edge_color='white')
+                      size=6, face_color='red', border_color='white')
     viewer.add_image(skel.astype(np.uint8),
                      name=f"Skeleton ({mask_layer.name})", colormap='green',
                      opacity=0.6, blending='additive')
@@ -615,11 +615,11 @@ def run_fibril_graph(mask_layer, px_size_um, viewer):
                      colormap='green', opacity=0.6, blending='additive')
     if len(j_coords):
         viewer.add_points(j_coords, name=f"Crossings ({mask_layer.name})",
-                          size=8, face_color='red', edge_color='white',
+                          size=8, face_color='red', border_color='white',
                           symbol='cross')
     if len(e_coords):
         viewer.add_points(e_coords, name=f"Endpoints ({mask_layer.name})",
-                          size=6, face_color='cyan', edge_color='white',
+                          size=6, face_color='cyan', border_color='white',
                           symbol='disc')
 
     deg_str = '  '.join(f"deg{d}:{n}" for d, n in

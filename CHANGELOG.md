@@ -68,6 +68,32 @@ corpus is unchanged, and the route-equivalence tests still pin each kernel to th
   functions that also run in the main process on the serial path, leaving a process-wide filter behind.
 
 ### Fixed
+- **Panel bugs found by the kernel batch E real-data scenarios** (each present before the refactor; regression
+  tests in `tests/test_panel_bug_fixes.py`):
+  - **Fibril bead detection and fibril graph** crashed after computing (`add_points(edge_color=)`; napari's Points
+    keyword is `border_color`), so the beads, skeleton, crossings and endpoints layers never appeared.
+  - **Chromatin topology with a cell mask** crashed on the first cell: the basin persistences are a list, which
+    `.loc` cannot put in one cell. List-valued metrics are now written as a `;`-joined string.
+  - **SpIDA calibration** raised after the fit (napari's `Viewer` has no `metadata`), so epsilon_0 was never kept
+    and the analysis's "0 = auto" raised too. The calibrated value is now kept per viewer, and returned.
+  - **Spectral unmixing**: the optional controls for channels 2 and 3 default to "None". With three or more image
+    layers loaded they picked a layer by themselves and a two-channel run was refused ("4 controls").
+  - **Fusion, image mode (Otsu/triangle/Li)** kept only the largest object, so before contact the droplet pair
+    read as one round drop (aspect ratio ~1), `n_objects` was never 2 and R1/R2 and the tau/R column never
+    appeared. Every object at least a quarter of the largest is kept, as the brightfield mask already did. **This
+    changes the image-mode aspect-ratio signal before contact.**
+  - **FRAP**: a reaction-diffusion or circular mobile fraction more than 2 sigma outside [0, 1] (3.0 and 1.58 on
+    the corpus recording) now warns that the model does not suit the curve; the empirical model already warned.
+  - **Contrast cascade, percentile bands**: on an image with a zero pedestal (67 % of `condensate_incell1_gfp`)
+    tied percentile edges collapsed 4 requested bands to 2. The pedestal is now the dimmest band and the values
+    above it are split by percentile.
+  - **Colocalization spatial null**: when the block (2x the correlation length) fit fewer than twice per axis,
+    `_block_shuffle` silently shuffled single PIXELS, the uncalibrated null its own docstring measures at 85 %
+    false positives, and reported that p as the block test's. It now gives no p-value and says why, and cautions
+    below ~50 blocks, as the Costes test already did.
+  - **Random-forest pixel classifiers** (Cellpose scribble classifier, contrast-cascade classifier) are seeded
+    (`random_state=0`): the same scribbles give the same mask, run to run.
+  - Reference subtraction showed "100%%" (a `%%` in an f-string and a tooltip).
 - **MSD on a movie shorter than the minimum track length: a stated lag window, not a crash.** The Dynamics panels
   (brightfield, in-vitro brightfield, in-vitro fluorescence) use the 200-frame default; on a shorter movie no track
   could meet it, the MSD came back with no columns and the fit raised `KeyError: 'n_pairs'` (found by the refactor

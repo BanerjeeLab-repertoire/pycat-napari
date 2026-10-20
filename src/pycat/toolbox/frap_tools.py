@@ -445,6 +445,22 @@ def fit_frap_recovery(time: np.ndarray, norm_intensity: np.ndarray) -> dict:
 # coefficient and an off-rate directly, using the ROI's physical dimensions.
 
 
+def _warn_mobile_out_of_range(f_f, f_f_err, model):
+    """Warn when a fitted mobile fraction is outside [0, 1] by more than 2 sigma: a fraction of the bleached
+    material cannot exceed all of it. The fit still reports the number -- the curve/ROI likely does not suit
+    this model -- but the panel no longer presents e.g. 'mobile frac = 3' without comment."""
+    if not np.isfinite(f_f):
+        return False
+    tol = 2.0 * f_f_err if np.isfinite(f_f_err) else 0.0
+    if f_f - tol > 1.0 or f_f + tol < 0.0:
+        napari_show_warning(
+            f"FRAP ({model}): the fitted mobile fraction is {f_f:.3g}, outside [0, 1] -- not physical. "
+            "This model likely does not suit this curve or ROI (check the bleach geometry, the normalisation "
+            "and the photofading correction), so its D and fractions should not be trusted.")
+        return True
+    return False
+
+
 def reaction_diffusion_recovery(t, f_f, f_b, D, k_off, d_x, d_y):
     """Rectangular-ROI reaction-diffusion FRAP recovery (see module notes)."""
     import scipy.special as _sp
@@ -547,6 +563,7 @@ def fit_reaction_diffusion(time, norm_intensity, d_x_um, d_y_um,
                    D_err=float(errs[2]),
                    k_off_err=float(errs[3]) if fit_koff else 0.0,
                    r_squared=float(r2), fit_time=t, fit_curve=fit_curve)
+        _warn_mobile_out_of_range(out['f_f'], out['f_f_err'], 'reaction-diffusion')
         return out
     except Exception as e:  # broad-ok: scientific_result — a fit failure returns an all-NaN result AND warns the user — an honest missing value the caller can see, never a fabricated default
         napari_show_warning(f"Reaction-diffusion fit failed: {e}")
@@ -666,6 +683,7 @@ def fit_circular_soumpasis(time, norm_intensity, bleach_radius_um):
         if np.isfinite(errs[1]) and tau_D > 0:
             D_err = abs((bleach_radius_um ** 2) / (4.0 * tau_D ** 2)) * errs[1]
 
+        _warn_mobile_out_of_range(float(f_f), float(errs[0]), 'circular Soumpasis')
         return dict(f_f=float(f_f), tau_D_s=float(tau_D),
                     D_um2_per_s=float(D), offset=float(offset),
                     f_f_err=float(errs[0]), tau_D_err=float(errs[1]),

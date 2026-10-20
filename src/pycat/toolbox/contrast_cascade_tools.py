@@ -63,6 +63,14 @@ def contrast_cascade_bands(image, n_bands=4, method='percentile',
     if method != 'multiotsu':
         qs = np.linspace(0, 100, n_bands + 1)
         edges = np.percentile(vals, qs)
+        if np.unique(edges).size < edges.size:
+            # Tied percentiles: a pedestal value (zeros outside the cells) fills the lower quantiles and the edges
+            # collapse -- 4 requested bands came back as 2. The pedestal becomes the dimmest band and the
+            # values ABOVE it are split by percentile into the rest.
+            floor = vals.min()
+            above = vals[vals > floor]
+            if above.size:
+                edges = np.concatenate([[floor], np.percentile(above, np.linspace(0, 100, n_bands))])
     edges = np.unique(edges)
 
     bands = []
@@ -181,7 +189,7 @@ def cascade_rf_segment(image, training_labels, object_diameter=20,
         raise ValueError("Need scribbles for at least two classes "
                          "(e.g. body, fiber, background).")
     clf = RandomForestClassifier(n_estimators=n_estimators, max_depth=12,
-                                 n_jobs=-1, class_weight='balanced')
+                                 n_jobs=-1, class_weight='balanced', random_state=0)
     clf.fit(X[train_mask], tl.ravel()[train_mask])
     _progress(2, 3)                       # forest trained
     pred = clf.predict(X).reshape(H, W).astype(np.int32)

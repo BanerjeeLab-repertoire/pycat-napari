@@ -36,6 +36,7 @@ A hand-maintained list of a derivable fact will drift. This derives it.
 import ast
 import pathlib
 import re
+import sys
 
 import pytest
 
@@ -59,7 +60,7 @@ _STDLIB = {
     "random", "hashlib", "csv", "io", "glob", "uuid", "textwrap", "__future__", "concurrent",
     "threading", "queue", "pickle", "inspect", "operator", "string", "struct", "base64",
     "zipfile", "platform", "builtins", "types",
-}
+} | set(sys.stdlib_module_names)   # the hand list drifted (weakref, 1.7.006); the interpreter's own list cannot
 
 # import name -> pip name
 _PIP_NAME = {

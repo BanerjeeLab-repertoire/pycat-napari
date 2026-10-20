@@ -349,6 +349,8 @@ def run_chromatin_topology(image_layer, data_instance, viewer,
             {'connectivity_percentile': connectivity_percentile, 'ball_radius': ball_radius,
              'image_noise': OperationService.produce('topology.image_noise', {'image': image})})
         for k, v in m.items():
+            if isinstance(v, (list, tuple, np.ndarray)):     # a per-cell list (basin persistences): one cell, one
+                v = ';'.join(f"{float(x):.6g}" for x in v)   # string -- .loc cannot put a sequence in one cell
             cell_df.loc[cell_df['label'] == label, k] = v
 
     data_instance.data_repository['cell_df'] = cell_df

@@ -497,7 +497,11 @@ def brightfield_droplet_mask(frame: np.ndarray, ridge_sigmas=(2, 3), hysteresis_
     return np.isin(lab, [p.label for p in props if p.area >= keep_fraction * biggest])
 
 
-def _threshold_mask(frame, thr_fn):
+def _threshold_mask(frame, thr_fn, keep_fraction: float = 0.25):
+    """The fusing droplet(s) in one fluorescence frame by an intensity threshold, or None. Every object at
+    least ``keep_fraction`` of the largest is kept, as ``brightfield_droplet_mask`` does: keeping only the
+    largest dropped the second droplet, so before contact the 'pair' was one round drop (aspect ratio ~1),
+    ``n_objects`` was never 2 and ``droplet_radii_um`` could never measure R1/R2."""
     import skimage as sk
     frame = frame.astype(np.float32)
     mn, mx = float(frame.min()), float(frame.max())
@@ -511,7 +515,8 @@ def _threshold_mask(frame, thr_fn):
     props = sk.measure.regionprops(labeled)
     if not props:
         return None
-    return labeled == max(props, key=lambda p: p.area).label
+    biggest = max(p.area for p in props)
+    return np.isin(labeled, [p.label for p in props if p.area >= keep_fraction * biggest])
 
 
 def aspect_ratio_signal(
@@ -541,7 +546,7 @@ def aspect_ratio_signal(
     Returns
     -------
     (time, aspect_ratio) arrays — plus the details dict when ``return_details``. aspect_ratio =
-    major_axis / minor_axis of the droplet pair (brightfield) or of the largest object (threshold).
+    major_axis / minor_axis of the droplet pair (every object at least a quarter the size of the largest).
     """
     import skimage as sk
 
