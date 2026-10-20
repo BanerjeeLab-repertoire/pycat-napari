@@ -470,7 +470,9 @@ def run_train_and_apply_rf_classifier(image_layer, label_layer, data_instance, v
     training_labels = label_layer.data
 
     # Train and apply the Random Forest classifier for segmentation
-    output_mask_list = train_and_apply_rf_classifier(image, training_labels, object_diameter)
+    output_mask_list = OperationService.produce(
+        'rf_classifier.train_apply',
+        {'image': image, 'training_labels': training_labels, 'object_diameter': object_diameter})
 
     # Display the segmentation results in the viewer
     if len(output_mask_list) == 0:

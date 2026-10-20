@@ -64,6 +64,10 @@ _SHRINK_THRESHOLD = 0.70
 # This list is not an escape hatch — it is **the record of what was removed and why.** A future
 # reader should be able to check every entry.
 _DELIBERATE = {
+    # 1.7.006 — the VPT panel's linking job (linker choice, population split, singlet promotion) moved whole into
+    # toolbox/vpt/link_step.py::link_bead_populations so the batch replay runs the same code; `_job` now calls the
+    # `vpt.link_beads` operation. Proven panel == batch identical on the corpus bead movie.
+    'vpt_ui.py::_job',
     # 1.7.005 — napari >= 0.9.1 is now the floor, where `scale_bar.unit` is a no-op (removed in 0.10). The
     # selection-changed handler did nothing but set it, so it and its FileIOClass stub and event hookup are gone;
     # the bar's label comes from Layer.units (_align_layer_scales). Completion Spec D "Watch".

@@ -191,7 +191,7 @@ def run_im2bw(threshold_input, viewer):
     except ValueError:
         napari_show_warning("Threshold must be a number.")
         return
-    binary = im2bw(active.data, thresh)
+    binary = OperationService.produce('im2bw.threshold', {'image': active.data, 'threshold': thresh})
     viewer.add_labels(binary.astype(int), name=f"{active.name} im2bw (t={thresh:g})")
     napari_show_info(f"Binarized at threshold {thresh:g}: "
                      f"{int(binary.sum())} pixels above threshold.")

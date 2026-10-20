@@ -55,6 +55,21 @@ from pycat.utils.notify import show_warning as napari_show_warning
 # ROI mask construction
 # ---------------------------------------------------------------------------
 
+def frap_fit_geometry(bleach_mask, fit_model: str, pixel_um: float, entered_radius_um: float = 1.0):
+    """``(roi_dims_um, bleach_radius_um)`` the model fits need, from the bleach ROI (the panel's rule, shared with
+    batch). Reaction-diffusion takes the ROI's bounding box in µm; the circular (Soumpasis) model the entered
+    radius -- or, when it was left at the 1.0 default, the radius of a circle with the ROI's area. Both None for
+    the empirical model."""
+    if fit_model == 'reaction_diffusion':
+        ys, xs = np.where(bleach_mask)
+        return ((xs.max() - xs.min() + 1) * pixel_um, (ys.max() - ys.min() + 1) * pixel_um), None
+    if fit_model == 'circular':
+        px = pixel_um if pixel_um > 0 else 1.0
+        r_from_area = (float(np.asarray(bleach_mask).sum()) / np.pi) ** 0.5 * px
+        return None, (entered_radius_um if abs(entered_radius_um - 1.0) > 1e-6 else r_from_area)
+    return None, None
+
+
 def circular_mask(shape: tuple, center_yx: tuple, radius: float) -> np.ndarray:
     """Boolean circular mask of given radius (px) centred at center_yx=(y,x)."""
     h, w = shape

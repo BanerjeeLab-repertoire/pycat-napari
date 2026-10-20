@@ -40,6 +40,10 @@ def _init_worker_threads():
     genuinely benefit from BLAS parallelism.
     """
     import os
+    import warnings
+    # CuPy's CUDA-path warning, silenced in workers only (the per-frame functions also run in-process, serially).
+    warnings.filterwarnings("ignore", message="CUDA path could not be detected", category=UserWarning)
+    os.environ.setdefault("CUDA_PATH", "")  # prevents CuPy from searching
     for _v in ('OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS',
                'NUMEXPR_NUM_THREADS', 'VECLIB_MAXIMUM_THREADS'):
         os.environ[_v] = '1'
@@ -153,10 +157,6 @@ def _ts_analyze_frame_worker(args):
 
     Returns (t, list_of_metric_dicts, condensate_mask_uint8_for_frame).
     """
-    import warnings, os
-    warnings.filterwarnings("ignore", message="CUDA path could not be detected",
-                            category=UserWarning)
-    os.environ.setdefault("CUDA_PATH", "")
 
     (t, raw_zarr_path, proc_zarr_path, labeled_cell_mask, cell_labels,
      reference_raw, use_drift_correction, reference_frame,

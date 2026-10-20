@@ -31,6 +31,7 @@ from qtpy.QtWidgets import (
 from qtpy.QtCore import Qt
 from pycat.ui.field_status import (
     status_row, add_reset_buttons, REQUIRED, OPTIONAL, AUTO, EXPERT)
+from pycat.kernel import OperationService
 
 
 class TemperatureDependentUI:
@@ -243,8 +244,10 @@ class TemperatureDependentUI:
 
     def _on_sync(self):
         from pycat.toolbox.temperature_tools import (
-            read_micromanager_times, sync_temperatures, elapsed_to_seconds,
-            build_temperature_labels)
+            read_micromanager_times,
+            elapsed_to_seconds,
+            build_temperature_labels,
+        )
         sname = self._stack_dd.currentText()
         if sname not in [l.name for l in self.viewer.layers]:
             napari_show_warning(f"Stack layer '{sname}' not found."); return
@@ -271,10 +274,10 @@ class TemperatureDependentUI:
         self._sync_prog.setVisible(True); self._sync_prog.setRange(0, 0)
         try:
             times = read_micromanager_times(tiff)
-            temps = sync_temperatures(
-                times['received'], csv,
-                temp_column=self._temp_col.text().strip() or 'AI0 (°C)',
-                csv_header=self._csv_header.value())
+            temps = OperationService.produce(
+                'temperature.sync_temperatures', {'received_times': times['received'], 'csv_path': csv},
+                {'temp_column': self._temp_col.text().strip() or 'AI0 (°C)',
+                 'csv_header': self._csv_header.value()})
             elapsed_s = elapsed_to_seconds(times['elapsed_ms'])
         except Exception as e:
             self._sync_prog.setVisible(False)
@@ -301,8 +304,13 @@ class TemperatureDependentUI:
         if self._add_text_layer.isChecked():
             self._make_text_layer(sname, temps, elapsed_s)
 
+        # Where the temperatures came from, so batch finds each file's CSV the same way: by the TIFF's date in the
+        # recorded folder (or this CSV when a file was given), with the same column and header rows.
         self._record('temperature_sync', {
             'tiff': os.path.basename(tiff), 'csv': os.path.basename(csv),
+            'temperature_root': temp if os.path.isdir(temp) else os.path.dirname(csv),
+            'csv_path': csv if not os.path.isdir(temp) else None,
+            'temp_column': self._temp_col.text().strip() or 'AI0 (°C)', 'csv_header': self._csv_header.value(),
             'n_frames': times['n_frames'], 'n_matched': matched})
         napari_show_info(
             f"Synced {matched}/{times['n_frames']} frames to temperatures "
@@ -474,14 +482,13 @@ class TemperatureDependentUI:
         layout.addWidget(grp)
 
     def _on_guess_clear_frame(self):
-        from pycat.toolbox.temperature_tools import guess_clear_frame
         sname = self._stack_dd.currentText()
         if sname not in [l.name for l in self.viewer.layers]:
             napari_show_warning(f"Stack layer '{sname}' not found."); return
         stack = self._get_stack(sname, progress_bar=self._sync_prog)
         if stack.ndim != 3:
             napari_show_warning("Reference-frame guessing needs a (T, H, W) stack."); return
-        res = guess_clear_frame(stack)
+        res = OperationService.produce('temperature.clear_frame', {'stack': stack})
         self._ref_frame.setValue(res['index'])
         if res['is_clear']:
             self._subtract_first.setChecked(True)
@@ -501,7 +508,6 @@ class TemperatureDependentUI:
         the shared reference_subtraction (brightfield mode = the temperature use
         case: subtract the static pattern, keep the gray baseline; the reference
         frame is rebuilt from neighbours)."""
-        from pycat.toolbox.temperature_tools import reference_subtraction
         sname = self._stack_dd.currentText()
         if sname not in [l.name for l in self.viewer.layers]:
             napari_show_warning(f"Stack layer '{sname}' not found."); return
@@ -511,9 +517,9 @@ class TemperatureDependentUI:
         ref_idx = int(self._ref_frame.value())
         ref_idx = max(0, min(ref_idx, stack.shape[0] - 1))
         try:
-            corrected, info = reference_subtraction(
-                stack, stack[ref_idx], mode='brightfield',
-                rebuild_reference_index=ref_idx)
+            corrected, info = OperationService.produce(
+                'temperature.reference_subtraction', {'stack': stack, 'reference': stack[ref_idx]},
+                {'mode': 'brightfield', 'rebuild_reference_index': ref_idx})
         except Exception as e:
             napari_show_warning(f"Subtraction failed: {e}")
             import traceback; traceback.print_exc(); return
@@ -526,8 +532,6 @@ class TemperatureDependentUI:
             napari_show_warning(f"Could not add layer: {e}")
 
     def _on_turbidity(self):
-        from pycat.toolbox.temperature_tools import (
-            entropy_turbidity_curve, detect_transitions)
         sname = self._stack_dd.currentText()
         if sname not in [l.name for l in self.viewer.layers]:
             napari_show_warning(f"Stack layer '{sname}' not found."); return
@@ -540,16 +544,16 @@ class TemperatureDependentUI:
 
         self._turb_prog.setVisible(True); self._turb_prog.setRange(0, 0)
         try:
-            df = entropy_turbidity_curve(
-                stack, temps,
-                subtract_first_frame=self._subtract_first.isChecked(),
-                correct_focal_drift=self._correct_focus.isChecked(),
-                bins=self._entropy_bins.value(),
-                reference_frame_index=self._ref_frame.value())
+            df = OperationService.produce(
+                'temperature.turbidity', {'stack': stack, 'temperatures': temps},
+                {'subtract_first_frame': self._subtract_first.isChecked(),
+                 'correct_focal_drift': self._correct_focus.isChecked(), 'bins': self._entropy_bins.value(),
+                 'reference_frame_index': self._ref_frame.value()})
             sig_col = 'entropy_corrected' if self._correct_focus.isChecked() else 'entropy'
             method = 'baseline' if self._method_baseline.isChecked() else 'midpoint'
-            trans = detect_transitions(df, sig_col, method=method,
-                                       frac=self._onset_frac.value() / 100.0)
+            trans = OperationService.produce(
+                'temperature.detect_transitions', {'turbidity_df': df, 'signal_column': sig_col},
+                {'method': method, 'frac': self._onset_frac.value() / 100.0})
         except Exception as e:
             self._turb_prog.setVisible(False)
             napari_show_warning(f"Turbidity analysis failed: {e}")
@@ -573,6 +577,9 @@ class TemperatureDependentUI:
         self._record('temperature_turbidity', {
             'subtract_first': self._subtract_first.isChecked(),
             'correct_focal_drift': self._correct_focus.isChecked(),
+            # every knob the curve and the transition detection read, so batch replays this run
+            'bins': self._entropy_bins.value(), 'reference_frame_index': self._ref_frame.value(),
+            'method': method, 'onset_frac': self._onset_frac.value() / 100.0,
             'T_phase_C': trans['T_phase_C'], 'T_clear_C': trans['T_clear_C'],
             'hysteresis_C': trans['hysteresis_C']})
 
@@ -672,14 +679,14 @@ class TemperatureDependentUI:
     def _corrected_stack(self):
         """Return the pattern-corrected stack for the selected layer + reference
         frame, or None if unavailable."""
-        from pycat.toolbox.temperature_tools import apply_static_pattern_correction
         sname = self._stack_dd.currentText()
         if sname not in [l.name for l in self.viewer.layers]:
             napari_show_warning(f"Stack layer '{sname}' not found."); return None
         stack = self._get_stack(sname, progress_bar=self._export_prog)
         if stack.ndim != 3:
             napari_show_warning("Pattern correction needs a (T, H, W) stack."); return None
-        return apply_static_pattern_correction(stack, self._ref_frame.value())
+        return OperationService.produce(
+            'temperature.static_pattern_correction', {'stack': stack, 'reference_index': self._ref_frame.value()})
 
     def _on_add_corrected_layer(self):
         corrected = self._corrected_stack()
@@ -736,8 +743,9 @@ class TemperatureDependentUI:
 
         stack = self._get_stack(sname, progress_bar=self._export_prog)
         if self._export_corrected.isChecked():
-            from pycat.toolbox.temperature_tools import apply_static_pattern_correction
-            stack = apply_static_pattern_correction(stack, self._ref_frame.value())
+            stack = OperationService.produce(
+                'temperature.static_pattern_correction',
+                {'stack': stack, 'reference_index': self._ref_frame.value()})
         self._export_prog.setVisible(True); self._export_prog.setRange(0, stack.shape[0])
         try:
             self._render_annotated_mp4(
@@ -827,7 +835,6 @@ class TemperatureDependentUI:
             line_edit.setText(p)
 
     def _on_batch(self):
-        from pycat.toolbox.temperature_tools import run_temperature_batch
         tiff_root = self._batch_tiff_root.text().strip()
         temp_root = self._batch_temp_root.text().strip()
         if not tiff_root or not os.path.isdir(tiff_root):
@@ -837,19 +844,8 @@ class TemperatureDependentUI:
 
         self._batch_prog.setVisible(True); self._batch_prog.setRange(0, 0)
         try:
-            df = run_temperature_batch(
-                tiff_root, temp_root,
-                subtract_first_frame=self._subtract_first.isChecked(),
-                correct_focal_drift=self._correct_focus.isChecked(),
-                temp_column=self._temp_col.text().strip() or 'AI0 (°C)',
-                csv_header=self._csv_header.value(),
-                export_mp4=self._batch_export_mp4.isChecked(),
-                export_corrected=self._batch_export_corrected.isChecked(),
-                fps=self._fps.value(),
-                pixel_um=self._pixel_size(),
-                scalebar_um=(10.0 if self._use_scalebar.isChecked() else 0.0),
-                progress_callback=lambda i, n: (
-                    self._batch_prog.setRange(0, n), self._batch_prog.setValue(i)))
+            df = OperationService.produce('temperature.folder_batch', {'tiff_root': tiff_root, 'temperature_root': temp_root}, {'subtract_first_frame': self._subtract_first.isChecked(), 'correct_focal_drift': self._correct_focus.isChecked(), 'temp_column': self._temp_col.text().strip() or 'AI0 (°C)', 'csv_header': self._csv_header.value(), 'export_mp4': self._batch_export_mp4.isChecked(), 'export_corrected': self._batch_export_corrected.isChecked(), 'fps': self._fps.value(), 'pixel_um': self._pixel_size(), 'scalebar_um': 10.0 if self._use_scalebar.isChecked() else 0.0, 'progress_callback': lambda i, n: (
+                    self._batch_prog.setRange(0, n), self._batch_prog.setValue(i))})
         except Exception as e:
             self._batch_prog.setVisible(False)
             napari_show_warning(f"Batch failed: {e}")

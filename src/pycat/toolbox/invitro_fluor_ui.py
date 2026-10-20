@@ -1044,7 +1044,6 @@ def _ivf_dynamics(ui, layout):
             'run_kaplan_meier': cb_km.isChecked()})
 
     def _on_run():
-        from pycat.toolbox.dynamic_spatial_tools import link_trajectories_bayesian, trajectory_metrics
         from pycat.toolbox.condensate_physics_tools import msd_per_track, kaplan_meier_lifetimes
         from pycat.toolbox.invitro_tools import (
             coarsening_statistics, detect_sedimentation,
@@ -1074,8 +1073,9 @@ def _ivf_dynamics(ui, layout):
         def _task():
             props  = OperationService.produce(
                 'dynamic_spatial.frame_properties', {'mask_stack': stack, 'microns_per_pixel': mpx})
-            tracks = link_trajectories_bayesian(
-                props, max_displacement_um=disp_sp.value())
+            tracks = OperationService.produce(
+                'dynamic_spatial.link_bayesian', {'props_df': props},
+                {'max_displacement_um': disp_sp.value()})
             res = {'tracks': tracks, 'props': props}
 
             if do['coarse'] or do['sed']:

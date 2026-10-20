@@ -173,3 +173,80 @@ def test_condensate_analysis_dispatches_on_the_produced_mask():
     assert resolve_batch_step("feature_analysis.cell_analysis", intent,
                               {"puncta_mask": np.zeros((4, 4))}) == "condensate_analysis"
     assert resolve_batch_step("feature_analysis.cell_analysis", intent) == "condensate_analysis"   # no-state default
+
+
+# ── 2026-10-19: the planner names the brightfield measurement itself, and runs what the panels run ─────────
+#
+# Before, every brightfield plan measured with `feature_analysis.cell_analysis` (the fluorescence intensity
+# analysis): the executor swapped in the OD metrics at run time, but an in-vitro 'size' plan then ran the
+# FLUORESCENCE size-distribution fit (`ivf_size_distribution`) on a brightfield image, and the in-vitro panel's
+# field summary never ran. Terminal selection now ranks by the workflow contexts (in vitro, brightfield).
+
+def _plan_for(observables, **facts):
+    from pycat.navigator.canonical import _ctx
+    from pycat.navigator.op_catalog import build_operation_registry
+    from pycat.navigator.planner import Planner
+    ctx = _ctx(**facts)
+    return Planner(build_operation_registry()).compile(
+        AnalysisIntent(target="condensate", observables=list(observables)), ctx), ctx
+
+
+@pytest.mark.parametrize("obs", ["morphology", "size", "count", "shape", "optical_density"])
+def test_brightfield_plans_measure_with_the_brightfield_ops(obs):
+    invitro, _ = _plan_for([obs], modality="brightfield", in_vitro=True)
+    cellular, _ = _plan_for([obs], modality="brightfield")
+    assert "brightfield.invitro_field_summary" in invitro.ordered_modules
+    assert "brightfield.condensate_metrics" in cellular.ordered_modules
+    for plan in (invitro, cellular):
+        assert "feature_analysis.cell_analysis" not in plan.ordered_modules
+        assert "invitro.size_distribution" not in plan.ordered_modules          # the fluorescence fit
+    if obs in ("size", "count"):
+        assert invitro.ordered_modules[-1] == "brightfield.invitro_size_distribution"
+
+
+def test_fluorescence_plans_are_unchanged_and_an_od_plan_on_fluorescence_is_refused():
+    fl, _ = _plan_for(["size"], modality="fluorescence")
+    assert "feature_analysis.cell_analysis" in fl.ordered_modules
+    ivf, _ = _plan_for(["size"], modality="fluorescence", in_vitro=True)
+    assert ivf.ordered_modules[-1] == "invitro.size_distribution"
+    od, _ = _plan_for(["optical_density"], modality="fluorescence")
+    assert not od.is_executable and any("brightfield" in b for b in od.blockers())
+
+
+def test_the_in_vitro_review_seeds_the_in_vitro_panel_defaults():
+    plan, ctx = _plan_for(["size"], modality="brightfield", in_vitro=True)
+    review = build_param_review(plan, ctx=ctx)
+    pre = {p.name: p.default for p in review.step("bf_preprocess").params}
+    seg = {p.name: p.default for p in review.step("bf_segment").params}
+    assert pre == {"bg_kernel": 60, "halo_weight": 0.3}
+    assert seg["min_diameter_px"] == 4.0 and seg["max_diameter_px"] == 200.0
+    cplan, cctx = _plan_for(["size"], modality="brightfield")
+    assert {p.name: p.default for p in build_param_review(cplan, ctx=cctx).step("bf_segment").params}[
+        "max_diameter_px"] == 50.0
+
+
+def test_a_guided_in_vitro_brightfield_run_equals_the_panel_bit_for_bit(tmp_path):
+    from pycat.batch.steps._common import _raw_counts
+    from pycat.toolbox.brightfield_pipeline import ivbf_field_summary, ivbf_size_and_contact
+    plan, ctx = _plan_for(["size"], modality="brightfield", in_vitro=True)
+    img = _scene()
+    state = _seg_state(img)
+    state["data_instance"].set_data("microns_per_pixel_sq", 0.04)
+    review = build_param_review(plan, ctx=ctx)
+    image_path = tmp_path / "droplets.tif"
+    report = run_plan(plan, state, ctx=ctx, params_by_step=review.params_by_step(), image_path=image_path,
+                      output_dir=tmp_path)
+    outcomes = {s.name: s.outcome for s in report.steps}
+    assert outcomes["brightfield.invitro_field_summary"] == "ran"
+    assert outcomes["brightfield.invitro_size_distribution"] == "ran"
+    mask = _manual_mask(img, bg_kernel=60, halo_weight=0.3, min_diameter_px=4.0, max_diameter_px=200.0)
+    np.testing.assert_array_equal(state["bf_condensate_mask"], mask)          # the in-vitro panel's defaults
+    di = state["data_instance"].data_repository
+    _, _, per_drop = ivbf_field_summary(_raw_counts(img), mask, 0.2, str(image_path))
+    pd.testing.assert_frame_equal(di["ivbf_droplet_df"], per_drop)
+    fit, _, _ = ivbf_size_and_contact(mask, _raw_counts(img), 0.2, n_bins=30,
+                                      min_area_px=int(np.pi * 2.0 ** 2), contact_label=0)
+    assert di["ivbf_size_dist"].keys() == fit.keys()
+    for k, v in fit.items():
+        if isinstance(v, float):
+            assert di["ivbf_size_dist"][k] == v or (v != v and di["ivbf_size_dist"][k] != di["ivbf_size_dist"][k])

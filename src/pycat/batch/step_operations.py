@@ -35,6 +35,17 @@ _STEP_OPERATIONS: dict[str, tuple[str, ...]] = {
     'bf_condensate_segmentation': ('bf_segment',),
     'ivbf_segmentation':        ('bf_segment',),
     'ivf_size_distribution':    ('invitro.size_distribution', 'size_distribution'),   # MEASURE op + its kernel op
+    'frap_analysis':             ('frap.fit_recovery',),
+    'fusion_build_signal':       ('condensate_physics.fit_fusion_relaxation',),
+    'fusion_fit':                ('condensate_physics.fit_fusion_relaxation',),
+    'fd_segment':                ('fd_curve.segment_cycles',),
+    'fd_rips':                   ('fd_curve.segment_cycles',),
+    'temperature_sync':          ('temperature.turbidity',),
+    'temperature_turbidity':     ('temperature.turbidity',),
+    'vpt_segment_host':         ('host_segment', 'host_erode'),
+    'vpt_infer_host':           ('bead_detect', 'host_erode'),
+    'vpt_detect_beads':         ('bead_detect',),
+    'vpt_link_trajectories':    ('vpt.microrheology',),     # vpt.link_beads, a component of it
     'vpt_microrheology':        ('vpt.microrheology', 'bead_detect', 'dynamic_spatial.link_trajectories',
                                  'condensate_physics.compute_msd', 'condensate_physics.fit_anomalous_diffusion',
                                  'viscosity'),   # INTERPRET terminal (N2b-1) and the chain it runs

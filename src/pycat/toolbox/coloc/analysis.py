@@ -25,6 +25,7 @@ import pandas as pd
 # Notification + debug shim: keeps the coefficients importable with no GUI stack.
 from pycat.utils.notify import show_warning as napari_show_warning
 from pycat.utils.general_utils import debug_log
+from pycat.kernel import OperationService
 
 # Diagnostics from the most recent colocalization run: threshold sensitivity, the
 # calibrated spatial null, and the replication-unit note. Published here so they can be
@@ -50,8 +51,8 @@ from pycat.utils.notify import show_warning as napari_show_error
 from pycat.toolbox.coloc.metrics import (
     pearsons_correlation, spearman_r_calculation, kendall_tau_calculation, weighted_tau_calculation,
     manders_overlap, manders_k1_calculation, manders_k2_calculation, li_intensity_correlation)
-from pycat.toolbox.coloc.thresholding import costes_thresholding, manders_threshold_sensitivity
-from pycat.toolbox.coloc.nulls import spatial_null_test, perform_costes_test
+from pycat.toolbox.coloc.thresholding import costes_thresholding
+from pycat.toolbox.coloc.nulls import perform_costes_test
 
 # Local application imports
 # ui_utils pulls in Qt -> imported at CALL time in the functions that display tables.
@@ -504,8 +505,8 @@ def pixel_wise_correlation_analysis(image1, image2, roi_mask, method_selections,
     threshold_sensitivity = None
     if _THRESHOLDED & set(selected_methods):
         try:
-            threshold_sensitivity = manders_threshold_sensitivity(
-                image1, image2, roi_mask)
+            threshold_sensitivity = OperationService.produce(
+                'coloc.manders_threshold_sensitivity', {'image1': image1, 'image2': image2, 'roi_mask': roi_mask})
             if not threshold_sensitivity.get('stable', True):
                 napari_show_warning(
                     "Colocalization: " + threshold_sensitivity['verdict'])
@@ -538,8 +539,9 @@ def pixel_wise_correlation_analysis(image1, image2, roi_mask, method_selections,
                     "Kendall's Tau value", "Weighted Tau value"}
     if _CORRELATION & set(selected_methods):
         try:
-            spatial_null = spatial_null_test(image1, image2, roi_mask,
-                                             n_permutations=200)
+            spatial_null = OperationService.produce(
+                'coloc.spatial_null', {'image1': image1, 'image2': image2, 'roi_mask': roi_mask},
+                {'n_permutations': 200})
             napari_show_warning("Colocalization: " + spatial_null['verdict'])
         except Exception as _e:
             debug_log("coloc: spatial null failed", _e)
@@ -605,7 +607,10 @@ def pixel_wise_correlation_analysis(image1, image2, roi_mask, method_selections,
         selected_methods.remove("Cytofluorogram")
 
     # Process standard correlation analysis methods.
-    table1_data = process_pwcca_methods(selected_methods, method_functions, image1, image2, roi_mask)
+    table1_data = OperationService.produce(
+        'coloc.pwcca_methods',
+        {'selected_methods': selected_methods, 'method_functions': method_functions, 'image1': image1,
+         'image2': image2, 'roi_mask': roi_mask})
 
     # Additional processing for selected special cases (e.g., Costes thresholding, correlation matrix analysis).
     if costes_m1_m2_selected:
@@ -662,7 +667,10 @@ def pixel_wise_correlation_analysis(image1, image2, roi_mask, method_selections,
             # Add these thresholded images to the viewer as new layers
             viewer.add_image(thresholded_image1, name='Thresholded Image 1', colormap='red', blending='additive')
             viewer.add_image(thresholded_image2, name='Thresholded Image 2', colormap='green', blending='additive')
-            table2_data = process_pwcca_methods(selected_methods, method_functions, thresholded_image1, thresholded_image2, thresh_mask)
+            table2_data = OperationService.produce(
+                'coloc.pwcca_methods',
+                {'selected_methods': selected_methods, 'method_functions': method_functions,
+                 'image1': thresholded_image1, 'image2': thresholded_image2, 'roi_mask': thresh_mask})
             if costes_m1_m2_selected:
                 table2_data = pd.concat([table2_data, row_df1], ignore_index=True)
                 table2_data = pd.concat([table2_data, row_df2], ignore_index=True)
@@ -692,7 +700,8 @@ def pixel_wise_correlation_analysis(image1, image2, roi_mask, method_selections,
         return table1_data, table2_data, correlation_matrix_table
     # Plots Li's ICA histogram
     if ica_histogram_selected:
-        ica_product, li_img1, li_img2 = li_ica_histogram(image1, image2, roi_mask)
+        ica_product, li_img1, li_img2 = OperationService.produce(
+            'coloc.li_ica', {'image1': image1, 'image2': image2, 'roi_mask': roi_mask})
         li_ica_plot(ica_product, li_img1, li_img2)
     # Plots Cytofluorogram (intensity of image1 vs intensity of image2)
     if cytofluorogram_selected:
@@ -856,7 +865,7 @@ def run_pwcca(image_layer1, image_layer2, roi_mask_layer, data_instance, viewer)
 
     # Create and execute the PWCCA dialog to get user method selections.
     dialog = pwcaDialog()
-    result = dialog.exec_()
+    result = dialog.exec()
 
     if result == QDialog.Accepted:
         method_selections = dialog.get_selected_methods()

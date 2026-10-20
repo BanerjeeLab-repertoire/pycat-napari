@@ -182,7 +182,7 @@ def _open_session_loader(self):
         dlg.accept()
 
     load_btn.clicked.connect(_on_load)
-    dlg.exec_()
+    dlg.exec()
 
 
 def _load_discovered_session(self, folder, sessions):

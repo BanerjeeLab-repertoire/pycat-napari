@@ -371,7 +371,7 @@ def run_measure_region_props(mask_layer, image_layer, data_instance):
                     'moments', 'moments_central', 'moments_hu', 'moments_normalized', 'moments_weighted', 'moments_weighted_central', 
                     'moments_weighted_hu', 'moments_weighted_normalized', 'num_pixels', 'orientation', 'perimeter', 'perimeter_crofton', 'slice', 'solidity']
     dialog = MeasurementDialog(all_props)
-    result = dialog.exec_()
+    result = dialog.exec()
 
     # Get the selected properties from the dialog
     if result == QDialog.Accepted:

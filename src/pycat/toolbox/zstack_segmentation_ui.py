@@ -506,7 +506,6 @@ def _add_zstack_metrics(ui, layout):
     form.addRow(_bwc(run))
 
     def _on_run():
-        from pycat.toolbox.zstack_segmentation_tools import condensate_metrics_3d
         # 3-D metrics treat the stack axis as Z (volumes, sphericity) — warn once
         # if the axis was assumed at load.
         try:
@@ -525,7 +524,10 @@ def _add_zstack_metrics(ui, layout):
         except KeyError as e:
             napari_show_warning(str(e)); return
 
-        df = condensate_metrics_3d(mask, intensity, ui._mpx(), z_step_sp.value())
+        df = OperationService.produce(
+            'zstack.condensate_metrics_3d',
+            {'labeled_3d': mask, 'intensity_volume': intensity, 'microns_per_pixel': ui._mpx(),
+             'z_step_um': z_step_sp.value()})
         # Identity on the real columns (condensate_label, central slice as frame) -> a brushable table (F2).
         from pycat.utils.entity_ref import finalize_entity_table, source_path_of
         df = finalize_entity_table(df, 'zstack_condensate_metrics',

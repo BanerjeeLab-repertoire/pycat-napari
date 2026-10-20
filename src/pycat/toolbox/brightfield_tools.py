@@ -73,6 +73,7 @@ import pandas as pd
 import skimage as sk
 from scipy import ndimage, optimize, stats
 from typing import Optional
+from pycat.kernel import OperationService
 
 
 # ---------------------------------------------------------------------------
@@ -911,7 +912,7 @@ def run_best_slice(method_dropdown, viewer):
         _warn("Best-slice needs a 3D (Z/T, H, W) stack.")
         return
     method = method_dropdown.currentText() if hasattr(method_dropdown, 'currentText') else 'std'
-    idx = select_best_slice(data, method=method)
+    idx = OperationService.produce('best_slice.select', {'stack': data}, {'method': method})
     viewer.add_image(data[idx], name=f"{active.name} best slice [{method} #{idx}]")
     _info(f"Best slice by {method}: index {idx} of {data.shape[0]}.")
 

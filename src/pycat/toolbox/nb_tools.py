@@ -56,6 +56,7 @@ Author
 """
 
 import numpy as np
+from pycat.kernel import OperationService
 
 try:
     from napari.utils.notifications import show_warning as napari_show_warning
@@ -396,9 +397,10 @@ def run_nb_analysis(image_layer, gain, offset, read_variance, detrend_window,
             "extract the intended 2D+time series explicitly for best results.")
 
     try:
-        res = number_and_brightness(
-            data, gain=gain, offset=offset, read_variance=read_variance,
-            detrend='boxcar', detrend_window=detrend_window)
+        res = OperationService.produce(
+            'nb.number_and_brightness', {'stack': data},
+            {'gain': gain, 'offset': offset, 'read_variance': read_variance, 'detrend': 'boxcar',
+             'detrend_window': detrend_window})
     except ValueError as e:
         napari_show_warning(f"N&B: {e}")
         return

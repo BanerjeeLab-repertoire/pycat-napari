@@ -489,7 +489,7 @@ def _show_dialog(items, protected_now, now, total):
     cancel.clicked.connect(_do_cancel)
 
     dlg.resize(640, 460)
-    dlg.exec_()
+    dlg.exec()
 
     if result['action'] != 'clear':
         return None

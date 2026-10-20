@@ -509,7 +509,6 @@ def _ivbf_dynamics(ui, layout):
     prog, run = _run_btn(form, "▶  Run Dynamics")
 
     def _on_run():
-        from pycat.toolbox.dynamic_spatial_tools import link_trajectories_bayesian
         from pycat.toolbox.condensate_physics_tools import msd_per_track
         from pycat.toolbox.invitro_tools import (
             coarsening_statistics, detect_sedimentation, detect_and_fit_fusions)
@@ -529,7 +528,8 @@ def _ivbf_dynamics(ui, layout):
         def _task():
             props  = OperationService.produce(
                 'dynamic_spatial.frame_properties', {'mask_stack': stack, 'microns_per_pixel': mpx})
-            tracks = link_trajectories_bayesian(props, max_displacement_um=disp_sp.value())
+            tracks = OperationService.produce('dynamic_spatial.link_bayesian', {'props_df': props},
+                                              {'max_displacement_um': disp_sp.value()})
             res = {'tracks': tracks}
             cs = coarsening_statistics(stack, mpx, dt)
             res['coarsening_stats'] = cs
@@ -624,7 +624,6 @@ def _ivbf_focus_qc(ui, layout):
     form.addRow(run)
 
     def _on_run():
-        from pycat.toolbox.brightfield_tools import bf_analyse_frame_quality
         try:
             from pycat.utils.qt_worker import materialize_off_thread
             stack = materialize_off_thread(ui.viewer.layers[stack_dd.currentText()].data,
@@ -636,7 +635,9 @@ def _ivbf_focus_qc(ui, layout):
         if mx > mn: stack = (stack-mn)/(mx-mn)
         run.setEnabled(False)
         def _task():
-            return bf_analyse_frame_quality(stack, dt_sp.value(), thr_sp.value())
+            return OperationService.produce(
+                'brightfield.frame_quality',
+                {'stack': stack, 'frame_interval_s': dt_sp.value(), 'threshold_fraction': thr_sp.value()})
         worker = _IVBFWorker(_task)
         ui._ivbf_qc_worker = worker
         def _done(res):

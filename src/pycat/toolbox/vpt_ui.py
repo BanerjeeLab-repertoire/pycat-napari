@@ -386,7 +386,8 @@ class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin,
         self.viewer.add_labels(eroded.astype(int), name="Inferred Host Mask")
         self._dr()['vpt_host_mask'] = eroded
         self._record('vpt_infer_host', {
-            'bead_channel': name,
+            'bead_channel': name, 'min_sigma': self._min_sigma.value(), 'max_sigma': self._max_sigma.value(),
+            'threshold': self._bead_thresh.value(),
             'min_condensate_radius_um': self._min_cond_radius.value(),
             'erosion_px': self._erosion_spin.value(),
             'n_condensates': int(eroded.max())})
@@ -615,12 +616,16 @@ class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin,
                 self.viewer.add_points(
                     coords, name="Bead Detections", size=6,
                     face_color='#00ff00', border_color='white', opacity=0.7)
+            # Every knob the detection read, so batch replays THIS run (bead size, template, de-dup radius and
+            # strictness were missing, and so was the host mode -- which decides whether the host mask filters).
             rec = {'bead_channel': name, 'min_sigma': self._min_sigma.value(),
                    'max_sigma': self._max_sigma.value(),
                    'threshold': self._bead_thresh.value(),
                    'quality_mode': self._quality_mode.currentData(),
                    'subpixel': self._subpixel.isChecked(),
-                   'template_mode': ('per_frame' if self._template_per_frame.isChecked() else 'per_stack')}
+                   'template_mode': ('per_frame' if self._template_per_frame.isChecked() else 'per_stack'),
+                   'host_mode': mode, 'bead_size_nm': bead_nm, 'template_type': template_type,
+                   'merge_radius_px': merge_radius, 'strictness': self._strictness.value()}
             if 'bead_class' in det_df.columns:
                 counts = det_df['bead_class'].value_counts().to_dict()
                 rec['class_counts'] = counts
@@ -689,10 +694,6 @@ class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin,
         return 'trackmate'
 
     def _on_link(self):
-        from pycat.toolbox.vpt_tools import (
-            _link, split_bead_populations,
-            aggregate_population_stats, reclassify_by_temporal_stability,
-            select_bead_population)
         det = self._dr().get('vpt_detections')
         if det is None or det.empty:
             napari_show_warning("No bead detections found — run Step 3 first."); return
@@ -707,43 +708,18 @@ class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin,
         self._track_prog.setRange(0, max(1, _n_link_frames))
         self._track_prog.setValue(0)
 
+        # The temporal-stability pass (a dim track that persists stably is a real faint bead, promoted back to
+        # singlet) affects the viscosity population, so it is an explicit, recorded choice (#10): OFF gives a
+        # stricter singlet-only viscosity that excludes any defocused bead.
+        _promote = (self._promote_stable.isChecked() if hasattr(self, '_promote_stable') else True)
+
         def _job(progress):
-            if has_classes:
-                # The chosen population drives microrheology; aggregates are
-                # ALWAYS tracked separately (never in the viscosity set).
-                pops = split_bead_populations(det)
-                primary = select_bead_population(det, pop_which)
-                aggregates = pops['aggregate']
-            else:
-                primary, aggregates = det, det.iloc[0:0]
-            ptracks, drift = self._with_measured_drift(_link(       # drift beside the centroids, never on them
-                primary, self._linker_name(), self._max_link.value(), self._max_gap.value(), self._mpx(),
-                progress_callback=progress))
-            # Temporal stability pass: a dim track that persists stably across
-            # frames is a real (faint) bead, not an out-of-focus blink — promote
-            # it back to singlet. Blinking dim tracks stay yellow. This is a
-            # judgement call that affects the viscosity population, so it is an
-            # explicit, recorded choice (#10): with it OFF, out-of-plane tracks
-            # are never merged into the singlet set, giving a stricter,
-            # singlet-only viscosity that excludes any defocused bead whose
-            # axial fluctuations could masquerade as 2D motion.
-            _promote = (self._promote_stable.isChecked()
-                        if hasattr(self, '_promote_stable') else True)
-            if _promote:
-                ptracks = reclassify_by_temporal_stability(ptracks)
-            atracks = None
-            if len(aggregates) >= 2:
-                try:
-                    atracks = _link(aggregates, self._linker_name(),
-                                    self._max_link.value(), self._max_gap.value(),
-                                    self._mpx())
-                except Exception:
-                    atracks = None
-            total_by_frame = det.groupby('frame').size()
-            astats = (aggregate_population_stats(aggregates, total_by_frame=total_by_frame)
-                      if len(aggregates) else None)
-            return dict(primary=ptracks, aggregate_tracks=atracks,
-                        aggregate_stats=astats, aggregates=aggregates, drift=drift)
+            # The chosen population drives microrheology; aggregates are ALWAYS tracked separately (never in the
+            # viscosity set); the drift is measured and stored beside the centroids, never on them.
+            return OperationService.produce('vpt.link_beads', {'detections': det}, {
+                'linker': self._linker_name(), 'max_linking_distance_um': self._max_link.value(),
+                'max_frame_gap': self._max_gap.value(), 'microns_per_pixel': self._mpx(),
+                'population': pop_which, 'promote_stable_to_singlet': _promote, 'progress_callback': progress})
 
         w = _VPTWorker(_job)
         def _done(res):
@@ -852,6 +828,7 @@ class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin,
                 'max_linking_distance_um': self._max_link.value(),
                 'max_frame_gap': self._max_gap.value(),
                 'microrheology_population': pop_which,
+                'promote_stable_to_singlet': _promote,
                 'n_aggregate_tracks': n_agg_tracks,
                 'drift_real': bool((res.get('drift') or {}).get('real')),
                 'drift_peak_px': float((res.get('drift') or {}).get('peak_px', 0.0))})
@@ -1029,6 +1006,13 @@ class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin,
                                           and self._drift_apply.isChecked()) else 'none'),
             'promote_stable_to_singlet': (self._promote_stable.isChecked()
                                           if hasattr(self, '_promote_stable') else True),
+            # the fit window, so batch fits the same lags
+            'upper_lag_rule': self._lag_rule.currentData() if hasattr(self, '_lag_rule') else 'fraction',
+            'upper_lag_fraction': self._lag_fraction.value() if hasattr(self, '_lag_fraction') else 0.25,
+            'upper_lag_fixed_s': self._lag_fixed_s.value() if hasattr(self, '_lag_fixed_s') else None,
+            'min_independent_pairs': self._lag_minpairs.value() if hasattr(self, '_lag_minpairs') else 10,
+            'confine_to_defensible_bounds': (self._lag_confine.isChecked() if hasattr(self, '_lag_confine')
+                                             else True),
             'D_um2_per_s': D, 'alpha': alpha, 'eta_Pa_s': eta})
 
         # Graphs: consolidated 2×2 panel (MSD spaghetti, Evans G′/G″, centered

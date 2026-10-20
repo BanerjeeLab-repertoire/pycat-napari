@@ -49,8 +49,6 @@ class _SpatialWorker(QThread):
 
     def run(self):
         try:
-            from pycat.toolbox.spatial_metrology_tools import (
-                nearest_neighbour_distance, radial_localization_profile, local_object_density, pair_correlation_function, voronoi_metrics, delaunay_metrics, minimum_spanning_tree, convex_hull_metrics, distance_to_roi, spatial_null_envelope)
 
             df    = self._coords_df
             lc    = self._labeled_cells
@@ -68,12 +66,15 @@ class _SpatialWorker(QThread):
                 r = {}
                 c = self._checks
                 if c.get('nnd'):
-                    r['nnd'] = nearest_neighbour_distance(coords)
+                    r['nnd'] = OperationService.produce('spatial_metrology.nearest_neighbour', {'coords': coords})
                 if c.get('radial'):
-                    r['radial'] = radial_localization_profile(
-                        coords, cmask, self._n_radial_bins, mpx)
+                    r['radial'] = OperationService.produce(
+                        'spatial_metrology.radial_profile',
+                        {'coords': coords, 'cell_mask': cmask, 'n_bins': self._n_radial_bins,
+                         'microns_per_pixel': mpx})
                 if c.get('kde'):
-                    r['kde_density'] = local_object_density(coords)
+                    r['kde_density'] = OperationService.produce(
+                        'spatial_metrology.local_density', {'coords': coords})
                 if c.get('ripley'):
                     # Per-point distance to the cell boundary (µm) enables the
                     # rigorous border-method edge correction inside ripleys_l.
@@ -108,9 +109,9 @@ class _SpatialWorker(QThread):
                     # its own metric calls rather than going through run_all_spatial_metrics
                     # — so it never picked up the null envelope added in 1.5.397.
                     try:
-                        _env_df, _env = spatial_null_envelope(
-                            (coords / mpx), cmask, microns_per_pixel=mpx,
-                            n_simulations=99)
+                        _env_df, _env = OperationService.produce(
+                            'spatial_metrology.null_envelope', {'coords': coords / mpx, 'region_mask': cmask},
+                            {'microns_per_pixel': mpx, 'n_simulations': 99})
                         r['ripleys_l_envelope'] = _env_df
                         r['ripleys_l_null'] = _env
                     except Exception as _exc:
@@ -122,18 +123,24 @@ class _SpatialWorker(QThread):
                                      f"'regular' OR 'clustered' for objects that are in "
                                      f"fact randomly placed."))
                 if c.get('pcf'):
-                    r['pcf'] = pair_correlation_function(coords, cell_area)
+                    r['pcf'] = OperationService.produce(
+                        'spatial_metrology.pair_correlation', {'coords': coords, 'cell_area_um2': cell_area})
                 if c.get('voronoi'):
-                    r['voronoi'] = voronoi_metrics(coords, cmask, mpx)
+                    r['voronoi'] = OperationService.produce(
+                        'spatial_metrology.voronoi',
+                        {'coords': coords, 'cell_mask': cmask, 'microns_per_pixel': mpx})
                 if c.get('delaunay'):
-                    r['delaunay'] = delaunay_metrics(coords)
+                    r['delaunay'] = OperationService.produce('spatial_metrology.delaunay', {'coords': coords})
                 if c.get('mst'):
-                    r['mst'] = minimum_spanning_tree(coords)
+                    r['mst'] = OperationService.produce(
+                        'spatial_metrology.minimum_spanning_tree', {'coords': coords})
                 if c.get('hull'):
-                    r['convex_hull'] = convex_hull_metrics(coords, cell_area)
+                    r['convex_hull'] = OperationService.produce(
+                        'spatial_metrology.convex_hull', {'coords': coords, 'cell_area_um2': cell_area})
                 if c.get('roi') and self._roi_coords is not None:
-                    r['roi_distance'] = distance_to_roi(
-                        coords, self._roi_coords, self._roi_type)
+                    r['roi_distance'] = OperationService.produce(
+                        'spatial_metrology.distance_to_roi',
+                        {'coords': coords, 'roi_coords': self._roi_coords, 'roi_type': self._roi_type})
 
                 all_results[cell_lbl] = r
                 self.progress.emit(i + 1, n)

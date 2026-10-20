@@ -39,6 +39,7 @@ import numpy as np
 import networkx as nx
 from scipy.ndimage import distance_transform_edt
 from scipy.spatial import cKDTree
+from pycat.kernel import OperationService
 
 try:
     import skimage as sk
@@ -245,9 +246,9 @@ def run_bead_detection(image_layer, mask_layer, min_bead_radius,
     if mask.ndim > 2:
         mask = mask[tuple(int(i) for i in viewer.dims.current_step[:mask.ndim-2])]
 
-    beads, skel, dt = detect_beads_on_fibrils(
-        mask, min_bead_radius=min_bead_radius,
-        width_threshold_factor=width_factor)
+    beads, skel, dt = OperationService.produce(
+        'fibril.beads', {'binary_mask': mask},
+        {'min_bead_radius': min_bead_radius, 'width_threshold_factor': width_factor})
 
     if not beads:
         napari_show_info("Fibril bead detection: no beads found with current thresholds.")
@@ -436,7 +437,9 @@ def run_fibril_morphometry(mask_layer, px_size_um, viewer):
     if mask.ndim > 2:
         mask = mask[tuple(int(i) for i in viewer.dims.current_step[:mask.ndim-2])]
 
-    seg_rows, node_rows, summary = fibril_morphometry(mask, px_size_um=px_size_um)
+    seg_rows, node_rows, summary = OperationService.produce(
+        'fibril.morphometry', {'binary_mask': mask},
+        {'px_size_um': px_size_um})
     if not seg_rows:
         napari_show_info("Fibril morphometry: no segments found.")
         return
@@ -503,7 +506,7 @@ def run_fibril_registration(ref_layer, moving_layer, viewer):
         napari_show_warning("Fibril registration: images must have the same shape.")
         return
 
-    shift, registered, error = register_images(ref, mov)
+    shift, registered, error = OperationService.produce('fibril.register', {'reference': ref, 'moving': mov})
     diff = registered - ref
     viewer.add_image(registered, name=f"Registered ({moving_layer.name})",
                      colormap='green', blending='additive', opacity=0.7)
@@ -601,7 +604,8 @@ def run_fibril_graph(mask_layer, px_size_um, viewer):
     if mask.ndim > 2:
         mask = mask[tuple(int(i) for i in viewer.dims.current_step[:mask.ndim-2])]
 
-    j_coords, e_coords, metrics, G, skel = fibril_graph_analysis(mask, px_size_um)
+    j_coords, e_coords, metrics, G, skel = OperationService.produce(
+        'fibril.graph', {'binary_mask': mask, 'px_size_um': px_size_um})
     if G.number_of_nodes() == 0:
         napari_show_info("Fibril graph: no skeleton found.")
         return

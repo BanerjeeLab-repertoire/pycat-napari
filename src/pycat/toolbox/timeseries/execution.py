@@ -11,7 +11,6 @@ which the staying UI builders call.
 """
 from __future__ import annotations
 
-import warnings
 import numpy as np
 import pandas as pd
 from pycat.toolbox.timeseries.frame_access import _read_source_frame, _compute_stack_global_range
@@ -56,13 +55,7 @@ def _process_frame_worker(args):
     Reads one pre-normalised frame from a filesystem zarr store,
     applies the named processing function, and returns (t, result).
     """
-    import os
-    # Suppress CuPy CUDA path warnings before any imports can trigger them.
-    # Must use both filterwarnings AND env var because different Python
-    # versions check them in different orders at process startup.
-    warnings.filterwarnings("ignore", message="CUDA path could not be detected",
-                            category=UserWarning)
-    os.environ.setdefault("CUDA_PATH", "")  # prevents CuPy from searching
+    # CuPy's CUDA-path warning is silenced by the pool initializer (analysis._init_worker_threads).
 
     t, src_desc, process_fn_name, process_fn_kwargs = args
 

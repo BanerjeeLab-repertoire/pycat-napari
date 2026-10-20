@@ -455,7 +455,7 @@ def prompt_pixel_size_on_load(get_dr, parent=None, central_manager=None):
 
     set_btn.clicked.connect(_accept)
     skip_btn.clicked.connect(dlg.reject)
-    dlg.exec_()
+    dlg.exec()
     return result['set']
 
 

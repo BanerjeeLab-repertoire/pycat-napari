@@ -599,7 +599,9 @@ def run_sacf_analysis(image_layer, mode, data_instance, viewer,
             )
             return
         napari_show_info("Running SACF on drawn rectangles …")
-        results_df = sacf_drawn_rect_mode(stack, shapes_layer, microns_per_pixel)
+        results_df = OperationService.produce(
+            'spatial_acf.drawn_rect',
+            {'stack': stack, 'shapes_layer': shapes_layer, 'microns_per_pixel': microns_per_pixel})
         if results_df.empty:
             return
 

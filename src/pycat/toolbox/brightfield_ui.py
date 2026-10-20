@@ -764,11 +764,6 @@ def _add_bf_dynamics(ui, layout):
     form.addRow(_bwc(run, optional=True))
 
     def _on_run():
-        from pycat.toolbox.dynamic_spatial_tools import (
-            link_trajectories_bayesian,
-            trajectory_metrics,
-            cluster_lifetime_analysis,
-        )
         from pycat.toolbox.condensate_physics_tools import msd_per_track, kaplan_meier_lifetimes
         try:
             from pycat.utils.qt_worker import materialize_off_thread
@@ -791,8 +786,9 @@ def _add_bf_dynamics(ui, layout):
         def _task():
             props  = OperationService.produce(
                 'dynamic_spatial.frame_properties', {'mask_stack': stack, 'microns_per_pixel': mpx})
-            tracks = link_trajectories_bayesian(
-                props, max_displacement_um=disp_spin.value())
+            tracks = OperationService.produce(
+                'dynamic_spatial.link_bayesian', {'props_df': props},
+                {'max_displacement_um': disp_spin.value()})
             res = {'tracks': tracks, 'props': props}
 
             if do_msd:
@@ -916,7 +912,6 @@ def _add_bf_texture(ui, layout):
     form.addRow(_bwc(run, optional=True))
 
     def _on_run():
-        from pycat.toolbox.brightfield_tools import bf_texture_features
         try:
             # RAW counts: this is the optical-density widget. OD = -log10(I / I0).
             raw_img = ui._get_image_raw(od_dd)
@@ -931,7 +926,8 @@ def _add_bf_texture(ui, layout):
         # Compute OD from the selected image
         od = OperationService.produce('optical_density', {'image': raw_img})
 
-        df = bf_texture_features(od, mask, cells)
+        df = OperationService.produce(
+            'brightfield.texture', {'od_image': od, 'condensate_mask': mask, 'labeled_cells': cells})
         ui._dr()['bf_texture_df'] = df
         ui._record('bf_texture', {
             'od_layer': od_dd.currentText(), 'mask_layer': mask_dd.currentText(),
@@ -981,7 +977,6 @@ def _add_bf_frame_qc(ui, layout):
     form.addRow(_bwc(run, optional=True))
 
     def _on_run():
-        from pycat.toolbox.brightfield_tools import bf_analyse_frame_quality
         try:
             from pycat.utils.qt_worker import materialize_off_thread
             stack = materialize_off_thread(
@@ -998,7 +993,9 @@ def _add_bf_frame_qc(ui, layout):
             # Normalise stack
             mn, mx = stack.min(), stack.max()
             s = (stack - mn) / (mx - mn + 1e-8) if mx > mn else stack
-            return bf_analyse_frame_quality(s, dt_spin.value(), thr_spin.value())
+            return OperationService.produce(
+                'brightfield.frame_quality',
+                {'stack': s, 'frame_interval_s': dt_spin.value(), 'threshold_fraction': thr_spin.value()})
 
         worker = _BFWorker(_task)
         ui._bf_qc_worker = worker

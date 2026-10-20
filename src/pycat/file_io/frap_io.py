@@ -23,8 +23,8 @@ import numpy as np
 
 from pycat.utils.general_utils import debug_log
 
-from napari.utils.notifications import show_info as napari_show_info
-from napari.utils.notifications import show_warning as napari_show_warning
+from pycat.utils.notify import show_info as napari_show_info
+from pycat.utils.notify import show_warning as napari_show_warning
 
 
 # ---------------------------------------------------------------------------
@@ -334,6 +334,69 @@ def load_lumicks_fusion(h5_path: str) -> dict:
 # Lumicks C-Trap force-distance curves (DNA tethering)
 # ---------------------------------------------------------------------------
 
+class _H5Channel:
+    """One Bluelake channel read with h5py, with the three things ``load_lumicks_fd`` takes from a pylake channel:
+    ``data``, ``timestamps`` (ns) and ``sample_rate`` (continuous channels only -- an LF channel's records carry
+    their own timestamps and no fixed rate, so it raises, as the caller expects)."""
+
+    def __init__(self, ds):
+        self._ds = ds
+
+    @property
+    def data(self):
+        ds = self._ds
+        return np.asarray(ds['Value'] if ds.dtype.names else ds[:], dtype=float)
+
+    @property
+    def timestamps(self):
+        ds = self._ds
+        if ds.dtype.names:
+            return np.asarray(ds['Timestamp'])
+        rate = float(ds.attrs['Sample rate (Hz)'])
+        return int(ds.attrs.get('Start time (ns)', 0)) + (np.arange(len(ds)) * 1e9 / rate).astype(np.int64)
+
+    @property
+    def sample_rate(self):
+        if 'Sample rate (Hz)' not in self._ds.attrs:
+            raise AttributeError('an LF channel has no fixed sample rate')
+        return float(self._ds.attrs['Sample rate (Hz)'])
+
+
+class _H5FDFile:
+    """``f[group]`` lists channel names, ``f[group][name]`` is an ``_H5Channel`` -- the subset of pylake.File the FD
+    loader uses. The file is read once into memory and closed."""
+
+    def __init__(self, h5_path):
+        try:
+            import h5py
+        except ImportError as _e:
+            raise ImportError("Reading a Lumicks .h5 needs lumicks.pylake or h5py: "
+                              "pip install lumicks.pylake") from _e
+        self._groups = {}
+        with h5py.File(h5_path, 'r') as h5:
+            for group in ('Distance', 'Force LF', 'Force HF'):
+                if group in h5:
+                    self._groups[group] = {name: _H5Channel(_Loaded(h5[group][name])) for name in h5[group]}
+
+    def __getitem__(self, group):
+        return self._groups[group]
+
+
+class _Loaded:
+    """An in-memory copy of an h5py dataset: the values, dtype, length and attributes."""
+
+    def __init__(self, ds):
+        self._a = ds[:]
+        self.dtype = ds.dtype
+        self.attrs = dict(ds.attrs)
+
+    def __getitem__(self, key):
+        return self._a[key]
+
+    def __len__(self):
+        return len(self._a)
+
+
 def _best_fd_force_channel(f, force_group, force_channels, dist_obj):
     """Pick the force channel that best shows the force-distance signal.
 
@@ -411,11 +474,9 @@ def load_lumicks_fd(h5_path: str,
     """
     try:
         import lumicks.pylake as pylake
-    except ImportError as _e:
-        raise ImportError(
-            "lumicks.pylake not installed. Run: pip install lumicks.pylake") from _e
-
-    f = pylake.File(h5_path)
+        f = pylake.File(h5_path)
+    except ImportError:
+        f = _H5FDFile(h5_path)        # plain HDF5 read of the same channels (as the fusion loader does)
 
     # Enumerate available distance and force channels
     def _list_group(group_name):

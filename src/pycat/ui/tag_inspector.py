@@ -127,4 +127,4 @@ def open_tag_inspector(self):
     picker.currentIndexChanged.connect(lambda *_: _refresh_table())
     set_btn.clicked.connect(_apply_override)
     _refresh_table()
-    dlg.exec_()
+    dlg.exec()

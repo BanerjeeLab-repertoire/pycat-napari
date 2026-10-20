@@ -76,7 +76,7 @@ def _ask_copy_to_local(file_path, verdict):
     box.setDefaultButton(QMessageBox.Yes)
     always = QCheckBox("Always do this for slow files this session")
     box.setCheckBox(always)
-    res = box.exec_()
+    res = box.exec()
     if res == QMessageBox.Yes:
         return 'always' if always.isChecked() else 'yes'
     return 'never' if always.isChecked() else 'no'
@@ -219,7 +219,7 @@ def _ask_multipage_axis(file_path, n_pages):
     v.addWidget(remember)
     ok = QPushButton("Load"); ok.clicked.connect(dlg.accept)
     v.addWidget(ok)
-    if dlg.exec_() != QDialog.Accepted:
+    if dlg.exec() != QDialog.Accepted:
         return None
     choice = 'T' if rb_t.isChecked() else ('Z' if rb_z.isChecked() else 'separate')
     if remember.isChecked():
@@ -697,7 +697,7 @@ class _DialogsMixin:
             _designated_condensate = None
         else:
             dialog = ChannelAssignmentDialog(all_channels, is_mask=is_mask, channel_info=channel_info)
-            result = dialog.exec_()
+            result = dialog.exec()
 
             if result == QDialog.Accepted:
                 # Get the names assigned by the user

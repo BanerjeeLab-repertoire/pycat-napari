@@ -27,6 +27,7 @@ from pycat.toolbox.segmentation.object_scale import (
 from pycat.toolbox.segmentation.reconcile import reconcile_scales
 from pycat.toolbox.segmentation.boundary_refit import (BOUNDARY_LEVEL, refit_object_boundaries,
                                                        refit_regional_boundaries)
+from pycat.kernel import OperationService
 
 
 def _segment_one_scale(enhanced_crop, orig_crop, proc_crop, mask_crop, ball_radius,
@@ -409,11 +410,13 @@ def show_below_floor(viewer, below):
 def _split_at_contrast_floor(viewer, data_instance, labels, original_image, cell_masks, on, floor):
     """Measure every object's local CNR once and split at the floor (`segmentation.contrast_floor`);
     returns the objects above it, and shows the ones below."""
-    from pycat.toolbox.segmentation.contrast_floor import (CONTRAST_FLOOR_DEFAULT, apply_floor,
-                                                           measure_for_floor)
+    from pycat.toolbox.segmentation.contrast_floor import CONTRAST_FLOOR_DEFAULT
     floor = CONTRAST_FLOOR_DEFAULT if floor is None else float(floor)
-    measure_for_floor(data_instance, labels, original_image, cell_masks)
-    above, below = apply_floor(data_instance, floor, on)
+    OperationService.produce(
+        'contrast_floor.measure',
+        {'data_instance': data_instance, 'labels': labels, 'raw': original_image, 'cell_labels': cell_masks})
+    above, below = OperationService.produce(
+        'contrast_floor.apply', {'data_instance': data_instance, 'floor': floor, 'apply': on})
     show_below_floor(viewer, below)
     n_below = int(len(np.unique(below)) - 1)
     if n_below:
@@ -552,18 +555,20 @@ def run_segment_subcellular_objects(pre_processed_image_layer, original_image_la
 
     # Every cell, segmented as `segment_condensates_in_cells` does it (the time-series workflow calls the
     # same function, so a movie frame and a 2D image are segmented identically).
-    seg = segment_condensates_in_cells(
-        original_image, pre_processed_image, cell_masks, ball_radius, cell_df, stretch=stretch,
-        on_cell=lambda i, n, label: napari_show_info(f"Processing cell... {label} of {n}"),
-        kurtosis_threshold=kurtosis_threshold, local_snr_threshold=local_snr_threshold,
-        global_snr_threshold=global_snr_threshold, intensity_hwhm_scale=intensity_hwhm_scale,
-        max_area_fraction=max_area_fraction, min_spot_radius=min_spot_radius,
-        punctate_gate=punctate_gate, punctate_gate_sigma=punctate_gate_sigma,
-        punctate_gate_abs_sigma=punctate_gate_abs_sigma,
-        multiscale=multiscale, boundary_refit=boundary_refit,
-        refit_level=refit_level, boundary_mode=boundary_mode, second_pass=second_pass,
-        transfected_route=transfected_route, ring_rejection=ring_rejection,
-        scale_reconciliation=scale_reconciliation)
+    seg = OperationService.produce(
+        'subcellular_segment.in_cells',
+        {'original_image': original_image, 'pre_processed_image': pre_processed_image, 'cell_masks': cell_masks,
+         'ball_radius': ball_radius, 'cell_df': cell_df},
+        {'stretch': stretch,
+         'on_cell': lambda i, n, label: napari_show_info(f"Processing cell... {label} of {n}"),
+         'kurtosis_threshold': kurtosis_threshold, 'local_snr_threshold': local_snr_threshold,
+         'global_snr_threshold': global_snr_threshold, 'intensity_hwhm_scale': intensity_hwhm_scale,
+         'max_area_fraction': max_area_fraction, 'min_spot_radius': min_spot_radius,
+         'punctate_gate': punctate_gate, 'punctate_gate_sigma': punctate_gate_sigma,
+         'punctate_gate_abs_sigma': punctate_gate_abs_sigma, 'multiscale': multiscale,
+         'boundary_refit': boundary_refit, 'refit_level': refit_level, 'boundary_mode': boundary_mode,
+         'second_pass': second_pass, 'transfected_route': transfected_route, 'ring_rejection': ring_rejection,
+         'scale_reconciliation': scale_reconciliation})
     total_puncta_mask, total_refined_puncta_mask = seg['puncta'], seg['refined']
     ring_rejected = seg['ring_rejected']
 

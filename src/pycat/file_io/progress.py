@@ -105,7 +105,7 @@ class _ProgressMixin:
         _timer.start()
         thread.start()
         dlg.show()
-        loop.exec_()                 # nested loop; the window keeps painting until quit()
+        loop.exec()                 # nested loop; the window keeps painting until quit()
         dlg.close()
 
         if _state['cancelled']:

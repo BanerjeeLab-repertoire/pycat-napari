@@ -76,6 +76,6 @@ def prompt_channel_identities(channel_infos, *, parent=None):
         from qtpy.QtWidgets import QDialog
     except Exception:      # broad-ok: optional_probe — headless
         return None
-    if dialog.exec_() != QDialog.Accepted:
+    if dialog.exec() != QDialog.Accepted:
         return {}
     return dialog.harvest()

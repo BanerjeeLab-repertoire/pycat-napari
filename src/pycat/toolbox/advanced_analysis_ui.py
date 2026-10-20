@@ -144,10 +144,6 @@ def _build_morphological_tab(ui_instance, tabs):
     mf.addRow(prog_m); mf.addRow(run_m); mf.addRow(stop_m)
 
     def _on_morph():
-        from pycat.toolbox.morphological_complexity_tools import (
-            fractal_dimension_per_cell, lacunarity,
-            tortuosity_per_object, orientation_order_parameter,
-        )
         try:
             pmask = ui_instance.viewer.layers[punc_dd_m.currentText()].data
             cmask = ui_instance.viewer.layers[cell_dd_m.currentText()].data
@@ -165,20 +161,23 @@ def _build_morphological_tab(ui_instance, tabs):
             def _cancelled():
                 return bool(should_cancel and should_cancel())
             if cb_fd.isChecked():
-                results['fractal_dimension'] = fractal_dimension_per_cell(pmask, cmask)
+                results['fractal_dimension'] = OperationService.produce(
+                    'morphological_complexity.fractal_per_cell', {'puncta_mask': pmask, 'labeled_cells': cmask})
             if cb_lac.isChecked():
                 # Whole-image lacunarity
-                results['lacunarity'] = lacunarity(pmask > 0)
+                results['lacunarity'] = OperationService.produce(
+                    'morphological_complexity.lacunarity', {'binary_mask': pmask > 0})
             if cb_tort.isChecked():
                 import skimage as sk
                 lp = sk.measure.label(pmask > 0)
-                results['tortuosity'] = tortuosity_per_object(lp, mpx)
+                results['tortuosity'] = OperationService.produce(
+                    'morphological_complexity.tortuosity', {'labeled_mask': lp, 'microns_per_pixel': mpx})
             if _cancelled():
                 return results
             if cb_orient.isChecked():
                 import skimage as sk
                 lp = sk.measure.label(pmask > 0)
-                r  = orientation_order_parameter(lp)
+                r  = OperationService.produce('morphological_complexity.orientation_order', {'labeled_mask': lp})
                 results['orientation_summary'] = pd.DataFrame([{
                     'S_order_parameter':  r['S'],
                     'circular_variance':  r['circular_variance'],
@@ -361,12 +360,6 @@ def _run_dynamic_analysis(ui_instance, w):
     """Run the dynamic spatial-phenotyping analysis for the Dynamic tab."""
     (stack_dd, prog_d, run_d, cb_track, cb_mf, cb_life, cb_nb, cb_grow, linker_dd, max_disp, max_gap, sigma_spin, area_w_spin, vel_check, tm_gap_dist, tm_merge_cb, tm_split_cb, tm_kalman_cb, prox_um, nb_rad, frame_dt, stop_d) = (
         w.stack_dd, w.prog_d, w.run_d, w.cb_track, w.cb_mf, w.cb_life, w.cb_nb, w.cb_grow, w.linker_dd, w.max_disp, w.max_gap, w.sigma_spin, w.area_w_spin, w.vel_check, w.tm_gap_dist, w.tm_merge_cb, w.tm_split_cb, w.tm_kalman_cb, w.prox_um, w.nb_rad, w.frame_dt, w.stop_d)
-    from pycat.toolbox.dynamic_spatial_tools import (
-        trajectory_metrics,
-        cluster_lifetime_analysis,
-        neighbourhood_persistence,
-        growth_shrinkage_kinetics,
-    )
     try:
         stack = ui_instance.viewer.layers[stack_dd.currentText()].data
     except KeyError as e:
@@ -400,18 +393,13 @@ def _run_dynamic_analysis(ui_instance, w):
         if cb_track.isChecked() or cb_life.isChecked() or cb_nb.isChecked() or cb_grow.isChecked():
             linker_idx = linker_dd.currentIndex()
             if linker_idx == 0:
-                from pycat.toolbox.dynamic_spatial_tools import link_trajectories_bayesian
-                tracks = link_trajectories_bayesian(
-                    props,
-                    max_displacement_um=max_disp.value(),
-                    max_gap_frames=max_gap.value(),
-                    sigma_um=sigma_spin.value(),
-                    area_weight=area_w_spin.value(),
-                    use_velocity=vel_check.isChecked(),
-                )
+                tracks = OperationService.produce(
+                    'dynamic_spatial.link_bayesian', {'props_df': props},
+                    {'max_displacement_um': max_disp.value(), 'max_gap_frames': max_gap.value(),
+                     'sigma_um': sigma_spin.value(), 'area_weight': area_w_spin.value(),
+                     'use_velocity': vel_check.isChecked()})
             elif linker_idx == 2:
-                from pycat.toolbox.trackmate_bridge import (
-                    trackmate_bridge_available, run_trackmate_lap_tracking)
+                from pycat.toolbox.trackmate_bridge import trackmate_bridge_available
                 if not trackmate_bridge_available():
                     raise ImportError(
                         "TrackMate bridge requires pyimagej. Install with:\n"
@@ -421,15 +409,12 @@ def _run_dynamic_analysis(ui_instance, w):
                         "(pip does not install Java \u2014 use conda "
                         "install openjdk=11 or your OS package manager), "
                         "then retry.")
-                tm_result = run_trackmate_lap_tracking(
-                    props,
-                    max_linking_distance_um=max_disp.value(),
-                    max_gap_closing_distance_um=tm_gap_dist.value(),
-                    max_frame_gap=max_gap.value(),
-                    allow_merging=tm_merge_cb.isChecked(),
-                    allow_splitting=tm_split_cb.isChecked(),
-                    use_kalman=tm_kalman_cb.isChecked(),
-                )
+                tm_result = OperationService.produce(
+                    'dynamic_spatial.link_trackmate', {'props_df': props},
+                    {'max_linking_distance_um': max_disp.value(),
+                     'max_gap_closing_distance_um': tm_gap_dist.value(), 'max_frame_gap': max_gap.value(),
+                     'allow_merging': tm_merge_cb.isChecked(), 'allow_splitting': tm_split_cb.isChecked(),
+                     'use_kalman': tm_kalman_cb.isChecked()})
                 # Drop any spots TrackMate left unlinked (track_id == -1)
                 # so downstream trajectory functions never see an
                 # ambiguous "-1" pseudo-track.
@@ -439,7 +424,8 @@ def _run_dynamic_analysis(ui_instance, w):
                     {'max_displacement_um': max_disp.value(), 'max_gap_frames': max_gap.value()})
             if cb_track.isChecked():
                 res['trajectories']    = tracks
-                res['trajectory_metrics'] = trajectory_metrics(tracks)
+                res['trajectory_metrics'] = OperationService.produce(
+                    'dynamic_spatial.trajectory_metrics', {'tracks_df': tracks})
             progress_emit and progress_emit(2, 5)
 
         if cb_mf.isChecked():
@@ -452,12 +438,14 @@ def _run_dynamic_analysis(ui_instance, w):
             progress_emit and progress_emit(3, 5)
 
         if cb_life.isChecked() and tracks is not None:
-            res['lifetime_distribution'] = cluster_lifetime_analysis(tracks)
+            res['lifetime_distribution'] = OperationService.produce(
+                'dynamic_spatial.cluster_lifetimes', {'tracks_df': tracks})
             progress_emit and progress_emit(3, 5)
 
         if cb_nb.isChecked() and tracks is not None:
-            res['neighbourhood_persistence'] = neighbourhood_persistence(
-                props, tracks, nb_rad.value())
+            res['neighbourhood_persistence'] = OperationService.produce(
+                'dynamic_spatial.neighbourhood_persistence',
+                {'props_df': props, 'tracks_df': tracks, 'radius_um': nb_rad.value()})
             progress_emit and progress_emit(4, 5)
 
         if cb_grow.isChecked() and tracks is not None:
@@ -466,8 +454,8 @@ def _run_dynamic_analysis(ui_instance, w):
                 warn_if_assumed_axis(ui_instance.central_manager.active_data_class.data_repository, 'Growth/shrinkage kinetics (treats frames as time)')
             except Exception as _exc:
                 report_guarantee_failure('advanced_analysis_ui: warn_if_assumed_axis', _exc)
-            res['growth_kinetics'] = growth_shrinkage_kinetics(
-                tracks, frame_dt.value())
+            res['growth_kinetics'] = OperationService.produce(
+                'dynamic_spatial.growth_shrinkage', {'tracks_df': tracks, 'frame_interval_s': frame_dt.value()})
             progress_emit and progress_emit(5, 5)
 
         return res
@@ -555,11 +543,6 @@ def _run_organizational_analysis(ui_instance, w):
     """Run the organizational-metrics analysis for the Organizational tab."""
     (punc_dd_o, cell_dd_o, prog_o, run_o, stop_o, cb_ent, cb_clsz, cb_spc, cb_occ, cb_bnd, ebin_spin, eps_spin, knn_spin) = (
         w.punc_dd_o, w.cell_dd_o, w.prog_o, w.run_o, w.stop_o, w.cb_ent, w.cb_clsz, w.cb_spc, w.cb_occ, w.cb_bnd, w.ebin_spin, w.eps_spin, w.knn_spin)
-    from pycat.toolbox.organizational_metrics_tools import (
-        spatial_entropy, cluster_size_distribution,
-        inter_condensate_spacing, per_cell_occupancy,
-        distance_to_boundary,
-    )
     try:
         pmask = ui_instance.viewer.layers[punc_dd_o.currentText()].data
         cmask = ui_instance.viewer.layers[cell_dd_o.currentText()].data
@@ -578,7 +561,9 @@ def _run_organizational_analysis(ui_instance, w):
     def _task(progress_emit=None, should_cancel=None):
         def _cancelled():
             return bool(should_cancel and should_cancel())
-        res = {'occupancy': per_cell_occupancy(pmask, cmask, mpx) if cb_occ.isChecked() else None}
+        res = {'occupancy': OperationService.produce(
+            'organizational_metrics.occupancy',
+            {'puncta_mask': pmask, 'labeled_cells': cmask, 'microns_per_pixel': mpx}) if cb_occ.isChecked() else None}
         ent_rows, clsz_rows, spc_rows, bnd_rows = [], [], [], []
 
         for i, cl in enumerate(cells):
@@ -589,11 +574,14 @@ def _run_organizational_analysis(ui_instance, w):
             cm = (cmask == cl).astype(bool)
 
             if cb_ent.isChecked():
-                e = spatial_entropy(coords, cm, ebin_spin.value(), mpx)
+                e = OperationService.produce(
+                    'organizational_metrics.entropy',
+                    {'coords': coords, 'cell_mask': cm, 'n_bins': ebin_spin.value(), 'microns_per_pixel': mpx})
                 ent_rows.append({'cell_label': cl, **e})
 
             if cb_clsz.isChecked():
-                cs = cluster_size_distribution(coords, eps_spin.value())
+                cs = OperationService.produce(
+                    'organizational_metrics.cluster_sizes', {'coords': coords, 'eps_um': eps_spin.value()})
                 clsz_rows.append({'cell_label': cl,
                                   'n_clusters':        cs.attrs.get('n_clusters', 0),
                                   'n_noise':           cs.attrs.get('n_noise', 0),
@@ -601,14 +589,17 @@ def _run_organizational_analysis(ui_instance, w):
                                   'fraction_clustered':cs.attrs.get('fraction_clustered', np.nan)})
 
             if cb_spc.isChecked():
-                sp = inter_condensate_spacing(coords, knn_spin.value())
+                sp = OperationService.produce(
+                    'organizational_metrics.pairwise_spacing', {'coords': coords, 'k_neighbours': knn_spin.value()})
                 spc_rows.append({'cell_label': cl,
                                  'mean_spacing_um':  sp.attrs.get('mean_spacing_um', np.nan),
                                  'median_spacing_um':sp.attrs.get('median_spacing_um', np.nan),
                                  'spacing_cv':       sp.attrs.get('coefficient_of_variation', np.nan)})
 
             if cb_bnd.isChecked():
-                bd = distance_to_boundary(coords, cm, mpx)
+                bd = OperationService.produce(
+                    'organizational_metrics.distance_to_boundary',
+                    {'coords': coords, 'cell_mask': cm, 'microns_per_pixel': mpx})
                 bnd_rows.append({'cell_label': cl,
                                  'mean_dist_to_boundary_um':   bd['mean_dist_um'],
                                  'median_dist_to_boundary_um': bd['median_dist_um'],

@@ -88,4 +88,4 @@ def _show_recorded_steps_dialog(self):
     _close = QPushButton("Close"); _close.clicked.connect(dialog.accept); btn_row.addWidget(_close)
     layout.addLayout(btn_row)
 
-    dialog.exec_()
+    dialog.exec()

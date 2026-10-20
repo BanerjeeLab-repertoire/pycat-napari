@@ -27,6 +27,7 @@ from qtpy.QtWidgets import (
     QSizePolicy,
 )
 from qtpy.QtCore import Qt
+from pycat.kernel import OperationService
 
 
 class FDCurveUI:
@@ -111,10 +112,7 @@ class FDCurveUI:
 
     def _on_load(self):
         from qtpy.QtWidgets import QFileDialog
-        from pycat.file_io.frap_io import lumicks_available, load_lumicks_fd
-        if not lumicks_available():
-            napari_show_warning("lumicks.pylake not installed. Run: pip install lumicks.pylake")
-            return
+        from pycat.file_io.frap_io import load_lumicks_fd     # pylake, or a plain h5py read of the same channels
         path, _ = QFileDialog.getOpenFileName(
             None, "Open Lumicks C-Trap .h5", "", "Lumicks HDF5 (*.h5)")
         if not path:
@@ -167,6 +165,11 @@ class FDCurveUI:
         self._dr()['fd_force'] = data['force']
         self._dr()['fd_distance'] = data['distance']
         self._dr()['fd_time'] = data['time_s']
+        # The channels now in use ARE the load step's result: record it again, so batch reads these, not the
+        # auto-selected ones.
+        self._record('fd_load', {
+            'file': os.path.basename(path), 'force_channel': data['force_channel'],
+            'distance_channel': data['distance_channel'], 'n_samples': int(len(data['force']))})
         napari_show_info(
             f"Now using F='{data['force_channel']}', d='{data['distance_channel']}'.")
 
@@ -207,7 +210,6 @@ class FDCurveUI:
         layout.addWidget(grp)
 
     def _on_segment(self):
-        from pycat.toolbox.fd_curve_tools import segment_fd_cycles, smooth_force, summarise_cycles
         force = self._dr().get('fd_force')
         dist = self._dr().get('fd_distance')
         if force is None or dist is None:
@@ -215,23 +217,26 @@ class FDCurveUI:
 
         f = np.asarray(force, dtype=float)
         if self._smooth.isChecked():
-            f = smooth_force(f, window_length=self._smooth_win.value(), polyorder=3)
+            f = OperationService.produce(
+                'fd_curve.smooth_force', {'force': f},
+                {'window_length': self._smooth_win.value(), 'polyorder': 3})
 
-        seg = segment_fd_cycles(f, dist,
-                                min_segment=self._min_seg.value(),
-                                smooth_window=self._dist_smooth.value())
+        seg = OperationService.produce(
+            'fd_curve.segment_cycles', {'force': f, 'distance': dist},
+            {'min_segment': self._min_seg.value(), 'smooth_window': self._dist_smooth.value()})
         self._dr()['fd_segments'] = seg
         self._dr()['fd_force_used'] = f
 
         self._record('fd_segment', {
             'smoothed': self._smooth.isChecked(),
             'min_segment': self._min_seg.value(),
+            'smooth_window': self._smooth_win.value(), 'distance_smooth_window': self._dist_smooth.value(),
             'n_stretches': len(seg['stretches']),
             'n_relaxes': len(seg['relaxes'])})
 
         try:
             from pycat.ui.ui_utils import show_dataframes_dialog
-            summ = summarise_cycles(seg)
+            summ = OperationService.produce('fd_curve.summarise_cycles', {'seg_result': seg})
             show_dataframes_dialog("FD Cycles", [('Half-cycle summary', summ.round(3))])
         except Exception:
             pass
@@ -366,7 +371,7 @@ class FDCurveUI:
         layout.addWidget(grp)
 
     def _on_rips(self):
-        from pycat.toolbox.fd_curve_tools import detect_all_rips, TERRA_REPEAT_NT
+        from pycat.toolbox.fd_curve_tools import TERRA_REPEAT_NT
         from pycat.utils.operation_runner import OperationRunner
         seg = self._dr().get('fd_segments')
         if seg is None:
@@ -378,6 +383,9 @@ class FDCurveUI:
             self._record('fd_rips', {
                 'na_type': self._na_type.currentText(),
                 'min_force_drop_pN': self._min_drop.value(),
+                # the WLC constants the fit used, so batch fits the same model
+                'kuhn_length_nm': self._kuhn.value(), 'stretch_modulus_pN': self._ss_mod.value(),
+                'rise_nm_per_nt': self._rise.value(),
                 'n_rips': int(len(rips))})
             try:
                 from pycat.ui.ui_utils import show_dataframes_dialog
@@ -407,10 +415,15 @@ class FDCurveUI:
         # Off the Qt thread via the ONE operation runner: a WLC fit per half-cycle runs on a worker
         # behind a modal progress dialog (detect_all_rips' per-cycle progress_callback drives it).
         _parent = getattr(getattr(getattr(self, 'viewer', None), 'window', None), '_qt_window', None)
+        knobs = {'which': 'stretches', 'min_force_drop_pN': self._min_drop.value(),
+                 'kuhn_length_nm': self._kuhn.value(), 'stretch_modulus_pN': self._ss_mod.value(),
+                 'rise_nm_per_nt': self._rise.value()}
+
+        def _rips(progress_callback=None):
+            return OperationService.produce('fd_curve.rips', {'seg_result': seg},
+                                            {**knobs, 'progress_callback': progress_callback})
         OperationRunner().execute(
-            detect_all_rips, seg, which='stretches',
-            min_force_drop_pN=self._min_drop.value(), kuhn_length_nm=self._kuhn.value(),
-            stretch_modulus_pN=self._ss_mod.value(), rise_nm_per_nt=self._rise.value(),
+            _rips,
             on_result=_done, on_error=lambda exc: napari_show_warning(f"Rip detection failed: {exc}"),
             parent=_parent, title='Detecting rips', text='Fitting each half-cycle…')
 

@@ -140,4 +140,4 @@ def open_command_palette(mm):
 
     _refresh()
     box.setFocus()
-    dlg.exec_()
+    dlg.exec()

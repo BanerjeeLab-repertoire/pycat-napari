@@ -89,7 +89,7 @@ class _LoadingMixin:
             mask_btn = box.addButton("Mask (Labels)", QMessageBox.AcceptRole)
             img_btn = box.addButton("Image", QMessageBox.RejectRole)
             box.setDefaultButton(mask_btn if looks_like_mask else img_btn)
-            box.exec_()
+            box.exec()
             as_mask = (box.clickedButton() is mask_btn)
         except Exception:
             pass

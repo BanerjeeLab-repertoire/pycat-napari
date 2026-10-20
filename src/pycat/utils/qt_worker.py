@@ -31,7 +31,7 @@ takes ``progress_callback(done, total)``. So a site becomes::
 
 ── Why a nested event loop, and what it costs ───────────────────────────────────────────
 
-``dlg.exec_()`` spins a nested event loop until the worker finishes. That is what keeps the window
+``dlg.exec()`` spins a nested event loop until the worker finishes. That is what keeps the window
 painting, and it is the same mechanism the BioFormats open already uses (``file_io.py``). The cost is
 that the loop also delivers *other* events: without care the user could start a second operation on
 top of the first. The dialog is therefore **window-modal**, which is what blocks that.
@@ -106,9 +106,9 @@ def run_with_progress(fn, *, title='Working', text='Working…', parent=None,
     # avoid. A QObject constructed *here* lives on the main thread, so `AutoConnection`
     # resolves to `QueuedConnection` and the slots run where the dialog lives.
     #
-    # It also removes a race. `dlg.exec_()` used to be closed by `dlg.reset()` from the
-    # finish handler — but with fast work the worker finishes BEFORE `exec_()` is entered,
-    # so `reset()` ran first and `exec_()` then blocked forever with nothing left to close
+    # It also removes a race. `dlg.exec()` used to be closed by `dlg.reset()` from the
+    # finish handler — but with fast work the worker finishes BEFORE `exec()` is entered,
+    # so `reset()` ran first and `exec()` then blocked forever with nothing left to close
     # it. (The BioFormats caller in `file_io.py` has the same shape and never sees it: its
     # work is a ~33 s Java call, so the worker cannot win that race. A small stack can.)
     # A queued slot cannot be delivered until the loop is spinning, so "finished before we
@@ -152,7 +152,7 @@ def run_with_progress(fn, *, title='Working', text='Working…', parent=None,
 
     thread.start()
     dlg.show()
-    loop.exec_()                               # nested loop: the window keeps painting
+    loop.exec()                               # nested loop: the window keeps painting
     thread.wait()
     dlg.close()
 

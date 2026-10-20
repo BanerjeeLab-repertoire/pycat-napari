@@ -410,10 +410,11 @@ class _DiagnosticsWidgetsMixin:
             ball_radius = int(dr.get('ball_radius', 15))
             windows = [window_spin.value()] if override_cb.isChecked() else [1, 2]
 
-            from pycat.toolbox.temporal_enhancement_tools import compete_methods
             run_btn.setEnabled(False); run_btn.setText("Running competition...")
             try:
-                results = compete_methods(data, ball_radius, windows=windows)
+                results = OperationService.produce(
+                    'temporal_enhance.compete', {'raw_stack': data, 'ball_radius': ball_radius},
+                    {'windows': windows})
             except Exception as e:
                 import traceback; print(traceback.format_exc())
                 show_warning("Competition failed: %s - see terminal." % e)
@@ -739,8 +740,7 @@ class _DiagnosticsWidgetsMixin:
             import warnings
             import numpy as np
             from napari.utils.notifications import show_info, show_warning
-            from pycat.toolbox.control_validation import (
-                validate_against_controls, recommend_parameters, control_report_figure)
+            from pycat.toolbox.control_validation import control_report_figure
 
             pn, nn = pos_dd.currentText(), neg_dd.currentText()
             if not pn or not nn or pn == nn:
@@ -769,9 +769,11 @@ class _DiagnosticsWidgetsMixin:
 
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
-                df = validate_against_controls(pos, neg, _thresh, grid, microns_per_px=mpx,
-                                               expected_negative=int(exp_neg.value()))
-                rec = recommend_parameters(df)
+                df = OperationService.produce(
+                    'control_validation.validate',
+                    {'positive_image': pos, 'negative_image': neg, 'method': _thresh, 'param_grid': grid},
+                    {'microns_per_px': mpx, 'expected_negative': int(exp_neg.value())})
+                rec = OperationService.produce('control_validation.recommend', {'results': df})
             refusal = next((str(w.message) for w in caught
                             if 'do not separate' in str(w.message)
                             or 'distinguishes your positive' in str(w.message)), None)

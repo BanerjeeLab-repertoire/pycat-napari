@@ -170,6 +170,11 @@ named('cellpose.keyframe', 'pycat.toolbox.ts_cellpose_tools:run_keyframe_cellpos
       part_of='cellpose')
 named('vpt.measured_drift', 'pycat.toolbox.vpt.measured_drift:measure_and_apply_if_real', entity='bead',
       part_of='vpt.microrheology')
+named('vpt.link_beads', 'pycat.toolbox.vpt.link_step:link_bead_populations', entity='bead',
+      part_of='vpt.microrheology')
+named('vpt.drift', 'pycat.toolbox.vpt.measured_drift:measure_drift', entity='bead', part_of='vpt.microrheology')
+named('vpt.drift_corrected', 'pycat.toolbox.vpt.measured_drift:drift_corrected_for_msd', entity='bead',
+      part_of='vpt.microrheology')
 
 # brightfield
 named('bf_preprocess.stages', f'{_BF}:preprocess_brightfield', part_of='bf_preprocess')
@@ -193,3 +198,161 @@ named('invitro_timeseries.kinetics_heterogeneity', f'{_KIN}:kinetics_heterogenei
       part_of='invitro_timeseries.kinetics')
 named('invitro_timeseries.heterogeneity_over_time', f'{_KIN}:heterogeneity_over_time', entity='condensate',
       part_of='invitro_timeseries.kinetics')
+
+# ── Panel-only science (until 2026-10-19 each was called by one panel, so no two routes could disagree) ─────────
+# Now in the catalog like everything else: a stage of an op the Navigator already plans is part_of it; a method
+# with no op yet has its own entry in ``navigator.op_catalog._measure_ops``, under an observable of its own.
+named('spatial_metrology.convex_hull', f'{_SPM}:convex_hull_metrics',
+      entity='condensate', part_of='spatial_metrology.ripley')
+named('spatial_metrology.delaunay', f'{_SPM}:delaunay_metrics',
+      entity='condensate', part_of='spatial_metrology.ripley')
+named('spatial_metrology.distance_to_roi', f'{_SPM}:distance_to_roi',
+      entity='condensate', part_of='spatial_metrology.ripley')
+named('spatial_metrology.local_density', f'{_SPM}:local_object_density',
+      entity='condensate', part_of='spatial_metrology.ripley')
+named('spatial_metrology.minimum_spanning_tree', f'{_SPM}:minimum_spanning_tree',
+      entity='condensate', part_of='spatial_metrology.ripley')
+named('spatial_metrology.nearest_neighbour', f'{_SPM}:nearest_neighbour_distance',
+      entity='condensate', part_of='spatial_metrology.ripley')
+named('spatial_metrology.pair_correlation', f'{_SPM}:pair_correlation_function',
+      entity='condensate', part_of='spatial_metrology.ripley')
+named('spatial_metrology.radial_profile', f'{_SPM}:radial_localization_profile',
+      entity='condensate', part_of='spatial_metrology.ripley')
+named('spatial_metrology.null_envelope', f'{_SPM}:spatial_null_envelope',
+      entity='condensate', part_of='spatial_metrology.ripley')
+named('spatial_metrology.voronoi', f'{_SPM}:voronoi_metrics', entity='condensate', part_of='spatial_metrology.ripley')
+
+_ORG = 'pycat.toolbox.organizational_metrics_tools'
+named('organizational_metrics.cluster_sizes', f'{_ORG}:cluster_size_distribution',
+      entity='condensate', part_of='organizational_metrics.spacing')
+named('organizational_metrics.distance_to_boundary', f'{_ORG}:distance_to_boundary',
+      entity='condensate', part_of='organizational_metrics.spacing')
+named('organizational_metrics.pairwise_spacing', f'{_ORG}:inter_condensate_spacing',
+      entity='condensate', part_of='organizational_metrics.spacing')
+named('organizational_metrics.occupancy', f'{_ORG}:per_cell_occupancy',
+      entity='condensate', part_of='organizational_metrics.spacing')
+named('organizational_metrics.entropy', f'{_ORG}:spatial_entropy',
+      entity='condensate', part_of='organizational_metrics.spacing')
+
+_MCX = 'pycat.toolbox.morphological_complexity_tools'
+named('morphological_complexity.fractal_per_cell', f'{_MCX}:fractal_dimension_per_cell',
+      entity='condensate', part_of='morphological_complexity.fractal')
+named('morphological_complexity.lacunarity', f'{_MCX}:lacunarity',
+      entity='condensate', part_of='morphological_complexity.fractal')
+named('morphological_complexity.orientation_order', f'{_MCX}:orientation_order_parameter',
+      entity='condensate', part_of='morphological_complexity.fractal')
+named('morphological_complexity.tortuosity', f'{_MCX}:tortuosity_per_object',
+      entity='condensate', part_of='morphological_complexity.fractal')
+
+# trajectory analyses read the linked tracks; the Bayesian and TrackMate linkers are variants of the linking
+named('dynamic_spatial.cluster_lifetimes', f'{_DYN}:cluster_lifetime_analysis',
+      entity='track', part_of='dynamic_spatial.link_trajectories')
+named('dynamic_spatial.growth_shrinkage', f'{_DYN}:growth_shrinkage_kinetics',
+      entity='track', part_of='dynamic_spatial.link_trajectories')
+named('dynamic_spatial.link_bayesian', f'{_DYN}:link_trajectories_bayesian',
+      entity='track', part_of='dynamic_spatial.link_trajectories')
+named('dynamic_spatial.neighbourhood_persistence', f'{_DYN}:neighbourhood_persistence',
+      entity='track', part_of='dynamic_spatial.link_trajectories')
+named('dynamic_spatial.trajectory_metrics', f'{_DYN}:trajectory_metrics',
+      entity='track', part_of='dynamic_spatial.link_trajectories')
+named('dynamic_spatial.link_trackmate', 'pycat.toolbox.trackmate_bridge:run_trackmate_lap_tracking', entity='track',
+      part_of='dynamic_spatial.link_trajectories')
+
+_FRAP = 'pycat.toolbox.frap_tools'
+named('frap.analysis', f'{_FRAP}:run_frap_analysis', part_of='frap.fit_recovery')
+named('frap.analysis_multi', f'{_FRAP}:run_frap_analysis_multi', part_of='frap.fit_recovery')
+named('frap.fit_geometry', f'{_FRAP}:frap_fit_geometry', part_of='frap.fit_recovery')
+
+_FUS = 'pycat.toolbox.fusion_tools'
+named('fusion.fit_relaxation', f'{_FUS}:fit_fusion_relaxation', part_of='condensate_physics.fit_fusion_relaxation')
+named('fusion.aspect_ratio_signal', f'{_FUS}:aspect_ratio_signal', part_of='condensate_physics.fit_fusion_relaxation')
+named('fusion.force_signal', f'{_FUS}:build_fusion_signal_from_forces',
+      part_of='condensate_physics.fit_fusion_relaxation')
+named('fusion.droplet_radii', f'{_FUS}:droplet_radii_um', part_of='condensate_physics.fit_fusion_relaxation')
+named('fusion.fit_window', f'{_FUS}:suggest_fit_window', part_of='condensate_physics.fit_fusion_relaxation')
+
+_COLOCPKG = 'pycat.toolbox.coloc'
+named('coloc.li_ica', f'{_COLOCPKG}.analysis:li_ica_histogram',
+      entity='coloc', part_of='pixel_wise_corr.pearson_manders')
+named('coloc.pwcca_methods', f'{_COLOCPKG}.analysis:process_pwcca_methods',
+      entity='coloc', part_of='pixel_wise_corr.pearson_manders')
+named('coloc.spatial_null', f'{_COLOCPKG}.nulls:spatial_null_test',
+      entity='coloc', part_of='pixel_wise_corr.pearson_manders')
+named('coloc.manders_threshold_sensitivity', f'{_COLOCPKG}.thresholding:manders_threshold_sensitivity',
+      entity='coloc', part_of='pixel_wise_corr.pearson_manders')
+
+# brightfield
+named('brightfield.texture', f'{_BF}:bf_texture_features', entity='condensate', part_of='brightfield.condensate_metrics')
+named('brightfield.frame_quality', f'{_BF}:bf_analyse_frame_quality', part_of='data_qc.assess')
+named('best_slice.select', f'{_BF}:select_best_slice', part_of='best_slice')
+
+# segmentation stages and variants
+named('rf_classifier.train_apply', 'pycat.toolbox.segmentation.cellpose:train_and_apply_rf_classifier',
+      part_of='rf_classifier')
+named('subcellular_segment.in_cells', 'pycat.toolbox.segmentation.subcellular:segment_condensates_in_cells',
+      entity='condensate', part_of='subcellular_segment')
+named('contrast_floor.measure', 'pycat.toolbox.segmentation.contrast_floor:measure_for_floor', entity='condensate',
+      part_of='subcellular_segment')
+named('contrast_floor.apply', 'pycat.toolbox.segmentation.contrast_floor:apply_floor', entity='condensate',
+      part_of='subcellular_segment')
+named('im2bw.threshold', 'pycat.toolbox.fft_bandpass_tools:im2bw', part_of='im2bw')
+named('upscale.advise', 'pycat.toolbox.segmentation_scale_advisor:advise_upscaling', part_of='upscale')
+named('upscale.object_diameter', 'pycat.toolbox.segmentation_scale_advisor:measure_object_diameter_px',
+      part_of='upscale')
+named('temporal_enhance.compete', 'pycat.toolbox.temporal_enhancement_tools:compete_methods', part_of='temporal_enhance')
+named('spatial_acf.drawn_rect', f'{_SACF}:sacf_drawn_rect_mode', part_of='spatial_acf.whole_image')
+
+_TOPO = 'pycat.toolbox.topology_tools'
+named('topology.metrics', f'{_TOPO}:topology_metrics', entity='cell', part_of='topology_envelope')
+named('topology.image_noise', f'{_TOPO}:estimate_image_noise', part_of='topology_envelope')
+named('topology.normalize_within_mask', f'{_TOPO}:normalize_within_mask', part_of='topology_envelope')
+
+# 3D: the per-object measurement of a z-stack
+named('zstack.condensate_metrics_3d', 'pycat.toolbox.zstack_segmentation_tools:condensate_metrics_3d',
+      entity='condensate', part_of='feature_analysis.cell_analysis')
+
+# methods with an op of their own (navigator.op_catalog._measure_ops)
+_SPIDA = 'pycat.toolbox.spida_tools'
+named('spida.fit', f'{_SPIDA}:fit_spida_histogram')
+named('spida.histogram', f'{_SPIDA}:build_intensity_histogram', part_of='spida.fit')
+named('spida.check_assumptions', f'{_SPIDA}:check_assumptions', part_of='spida.fit')
+named('spida.check_modality', f'{_SPIDA}:check_modality', part_of='spida.fit')
+
+named('nb.number_and_brightness', 'pycat.toolbox.nb_tools:number_and_brightness')
+
+_UNMIX = 'pycat.toolbox.unmixing_tools'
+named('unmixing.unmix', f'{_UNMIX}:unmix')
+named('unmixing.mixing_matrix', f'{_UNMIX}:estimate_mixing_matrix', part_of='unmixing.unmix')
+named('unmixing.matrix_warnings', f'{_UNMIX}:mixing_matrix_warnings', part_of='unmixing.unmix')
+named('unmixing.negative_fraction', f'{_UNMIX}:negative_fraction', part_of='unmixing.unmix')
+
+_FD = 'pycat.toolbox.fd_curve_tools'
+named('fd_curve.segment_cycles', f'{_FD}:segment_fd_cycles')
+named('fd_curve.smooth_force', f'{_FD}:smooth_force', part_of='fd_curve.segment_cycles')
+named('fd_curve.summarise_cycles', f'{_FD}:summarise_cycles', part_of='fd_curve.segment_cycles')
+named('fd_curve.rips', f'{_FD}:detect_all_rips', part_of='fd_curve.segment_cycles')
+
+_TEMP = 'pycat.toolbox.temperature_tools'
+named('temperature.turbidity', f'{_TEMP}:entropy_turbidity_curve')
+named('temperature.static_pattern_correction', f'{_TEMP}:apply_static_pattern_correction',
+      part_of='temperature.turbidity')
+named('temperature.detect_transitions', f'{_TEMP}:detect_transitions', part_of='temperature.turbidity')
+named('temperature.clear_frame', f'{_TEMP}:guess_clear_frame', part_of='temperature.turbidity')
+named('temperature.reference_subtraction', f'{_TEMP}:reference_subtraction', part_of='temperature.turbidity')
+named('temperature.folder_batch', f'{_TEMP}:run_temperature_batch', part_of='temperature.turbidity')
+named('temperature.sync_temperatures', f'{_TEMP}:sync_temperatures', part_of='temperature.turbidity')
+
+_FIB = 'pycat.toolbox.fibril_tools'
+named('fibril.morphometry', f'{_FIB}:fibril_morphometry', entity='fibril')
+named('fibril.graph', f'{_FIB}:fibril_graph_analysis', entity='fibril', part_of='fibril.morphometry')
+named('fibril.beads', f'{_FIB}:detect_beads_on_fibrils', entity='fibril', part_of='fibril.morphometry')
+named('fibril.register', f'{_FIB}:register_images', part_of='fibril.morphometry')
+
+_CC = 'pycat.toolbox.contrast_cascade_tools'
+named('contrast_cascade.bands', f'{_CC}:contrast_cascade_bands')
+named('contrast_cascade.focus_vs_growth', f'{_CC}:focus_vs_growth_diagnostic', entity='condensate',
+      part_of='contrast_cascade.bands')
+
+_CV = 'pycat.toolbox.control_validation'
+named('control_validation.validate', f'{_CV}:validate_against_controls')
+named('control_validation.recommend', f'{_CV}:recommend_parameters', part_of='control_validation.validate')

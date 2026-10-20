@@ -74,6 +74,9 @@ def replay_bf_condensate_segmentation(state: dict, image_path: Path, params: dic
     state['bf_condensate_mask'] = labeled
     state['cellpose_mask']      = labeled   # alias for downstream compatibility
     state['labeled_cells']      = labeled
+    # The detection limit, for a size fit that follows (the in-vitro steps read it -- see _ivbf_droplets).
+    state['bf_min_area_px']     = int(np.pi * (float(params.get('min_diameter_px', 3.0)) / 2) ** 2)
+    state['bf_source']          = _raw_counts(state.get('preprocessed', state['image']))
 
     _save_array(labeled.astype(np.uint16),
                 output_dir / f"{image_path.stem}_bf_condensate_mask.tiff")
@@ -229,8 +232,19 @@ def replay_bf_per_cell_summary(state: dict, image_path: Path, params: dict, outp
     print(f'[PyCAT Batch]   BF per-cell summary: {len(df)} cells.')
 
 
+def _ivbf_droplets(state):
+    """``(droplet mask, raw source, detection limit in px)``: the in-vitro BF segmentation's, or -- when the
+    Navigator ran the same ops (``bf_preprocess`` -> ``bf_segment``) under their brightfield step names -- that
+    segmentation's. ``(None, None, None)`` with neither."""
+    if state.get('ivbf_droplet_mask') is not None:
+        return state['ivbf_droplet_mask'], state.get('ivbf_source'), state.get('ivbf_min_area_px')
+    if state.get('bf_condensate_mask') is not None:
+        return state['bf_condensate_mask'], state.get('bf_source'), state.get('bf_min_area_px')
+    return None, None, None
+
+
 def replay_ivbf_field_summary(state: dict, image_path: Path, params: dict, output_dir: Path):
-    mask = state.get('ivbf_droplet_mask')
+    mask = _ivbf_droplets(state)[0]
     if mask is None:
         print(f'[PyCAT Batch]   IVBF field summary skipped for {image_path.name}: no droplet mask.')
         return
@@ -267,15 +281,15 @@ def replay_ivbf_spatial_metrology(state: dict, image_path: Path, params: dict, o
 
 def replay_ivbf_size_distribution(state: dict, image_path: Path, params: dict, output_dir: Path):
     """Size-distribution fit (truncated at the segmentation's detection limit) + one droplet's contact angle."""
-    mask = state.get('ivbf_droplet_mask')
+    mask, source, min_area_px = _ivbf_droplets(state)
     if mask is None:
         print(f'[PyCAT Batch]   IVBF size distribution skipped for {image_path.name}: no droplet mask.')
         return
     fit, fit_df, contact = OperationService.produce(
         'brightfield.invitro_size_distribution',
-        {'droplet_mask': mask, 'raw_source': state.get('ivbf_source'),
+        {'droplet_mask': mask, 'raw_source': source,
          'microns_per_pixel': _bf_mpx(state, 'batch ivbf_size_distribution'),
-         'n_bins': int(params.get('n_bins', 30) or 30), 'min_area_px': state.get('ivbf_min_area_px'),
+         'n_bins': int(params.get('n_bins', 30) or 30), 'min_area_px': min_area_px,
          'contact_label': int(params.get('contact_label', 0) or 0)})
     if fit is None:
         print(f'[PyCAT Batch]   IVBF size distribution skipped for {image_path.name}: no droplets.')

@@ -150,6 +150,17 @@ def _segmentation_params(intent, ctx, state, reviewed):
 #: fallbacks — so an unedited brightfield run is bit-for-bit the manual, and a reviewed knob reaches it.
 _BF_PREPROCESS_DEFAULTS: dict = {"bg_kernel": 50, "halo_weight": 0.35}
 _BF_CONDENSATE_SEG_DEFAULTS: dict = {"min_diameter_px": 3.0, "max_diameter_px": 50.0, "min_circularity": 0.5}
+#: The same two ops on an IN-VITRO brightfield image run with the in-vitro panel's defaults (`invitro_bf_ui`,
+#: `replay_ivbf_preprocess` / `replay_ivbf_segmentation`): droplets up to 200 px, not condensates up to 50.
+_IVBF_PREPROCESS_DEFAULTS: dict = {"bg_kernel": 60, "halo_weight": 0.3}
+_IVBF_SEG_DEFAULTS: dict = {"min_diameter_px": 4.0, "max_diameter_px": 200.0, "min_circularity": 0.5}
+
+
+def _in_vitro(ctx) -> bool:
+    try:
+        return ctx is not None and ctx.context_requirement("in_vitro") is True
+    except Exception:  # broad-ok: optional_probe — an unknown gate key is not in vitro
+        return False
 
 
 def _reviewed_or_default(reviewed, defaults):
@@ -159,11 +170,19 @@ def _reviewed_or_default(reviewed, defaults):
 
 
 def _bf_preprocess_params(intent, ctx, state, reviewed):
-    return _reviewed_or_default(reviewed, _BF_PREPROCESS_DEFAULTS)
+    return _reviewed_or_default(reviewed, _IVBF_PREPROCESS_DEFAULTS if _in_vitro(ctx) else _BF_PREPROCESS_DEFAULTS)
 
 
 def _bf_segment_params(intent, ctx, state, reviewed):
-    return _reviewed_or_default(reviewed, _BF_CONDENSATE_SEG_DEFAULTS)
+    return _reviewed_or_default(reviewed, _IVBF_SEG_DEFAULTS if _in_vitro(ctx) else _BF_CONDENSATE_SEG_DEFAULTS)
+
+
+def _no_params(intent, ctx, state, reviewed):
+    return {}
+
+
+def _ivbf_size_dist_params(intent, ctx, state, reviewed):
+    return _reviewed_or_default(reviewed, {"n_bins": 30})
 
 
 #: In-vitro fluorescence droplet segmentation knobs (`segment_ivf_droplets` via `replay_ivf_droplet_segment`),
@@ -237,6 +256,16 @@ _ADAPTERS: dict = {
     # which condensate analysis then reads as its mask). See the brightfield-preprocessing exception.
     "bf_preprocess": ExecAdapter("bf_preprocess", "bf_preprocess", _bf_preprocess_params),
     "bf_segment": ExecAdapter("bf_segment", "bf_condensate_segmentation", _bf_segment_params),
+    # Its measurements, as the brightfield panels run them (the planner picks them on brightfield since
+    # 2026-10-19; before, it planned the fluorescence analysis and this executor swapped in the OD metrics at run
+    # time, and an in-vitro 'size' plan ran the FLUORESCENCE size-distribution fit). Cellular: per-condensate OD
+    # metrics. In vitro: the field summary + per-droplet OD, then the truncated size distribution.
+    "brightfield.condensate_metrics": ExecAdapter("brightfield.condensate_metrics", "bf_condensate_analysis",
+                                                  _no_params),
+    "brightfield.invitro_field_summary": ExecAdapter("brightfield.invitro_field_summary", "ivbf_field_summary",
+                                                     _no_params),
+    "brightfield.invitro_size_distribution": ExecAdapter("brightfield.invitro_size_distribution",
+                                                         "ivbf_size_distribution", _ivbf_size_dist_params),
     # In-vitro fluorescence droplet segmentation (droplets ≡ condensates; the in-vitro CONTEXT selects it over the
     # in-cell puncta segmenter). The op runs the extracted producer `segment_ivf_droplets` → `ivf_droplet_mask`.
     "ivf_droplet_segment": ExecAdapter("ivf_droplet_segment", "ivf_droplet_segment", _ivf_segment_params),

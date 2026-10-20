@@ -110,11 +110,11 @@ def _add_contrast_cascade(ui_instance, layout=None, separate_widget=False):
         name = img_dd.currentText()
         if name not in [l.name for l in viewer.layers]:
             napari_show_warning("Select an image."); return
-        from pycat.toolbox.contrast_cascade_tools import contrast_cascade_bands
         data = np.asarray(viewer.layers[name].data)
         img2d = data.max(axis=0) if data.ndim == 3 else data
-        bands = contrast_cascade_bands(img2d, n_bands=n_bands.value(),
-                                       method=method.currentText())
+        bands = OperationService.produce(
+            'contrast_cascade.bands', {'image': img2d},
+            {'n_bands': n_bands.value(), 'method': method.currentText()})
         if not bands:
             napari_show_warning("Could not compute bands."); return
         for i, b in enumerate(bands):
@@ -181,15 +181,14 @@ def _add_contrast_cascade(ui_instance, layout=None, separate_widget=False):
         if iname not in [l.name for l in viewer.layers] or \
            lname not in [l.name for l in viewer.layers]:
             napari_show_warning("Select an image and an object-labels layer."); return
-        from pycat.toolbox.contrast_cascade_tools import focus_vs_growth_diagnostic
         data = np.asarray(viewer.layers[iname].data)
         img2d = data.max(axis=0) if data.ndim == 3 else data
         labs = np.asarray(viewer.layers[lname].data)
         if labs.ndim == 3:
             labs = labs.max(axis=0)
-        df = focus_vs_growth_diagnostic(img2d, labs,
-                                        dim_ratio=dim_thr.value(),
-                                        blur_ratio=blur_thr.value())
+        df = OperationService.produce(
+            'contrast_cascade.focus_vs_growth', {'image': img2d, 'labels': labs},
+            {'dim_ratio': dim_thr.value(), 'blur_ratio': blur_thr.value()})
         if df.empty:
             napari_show_warning("No labelled objects found."); return
         try:

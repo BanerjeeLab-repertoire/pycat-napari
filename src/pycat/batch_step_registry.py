@@ -126,7 +126,7 @@ from pycat.batch.steps.preprocessing_steps import (replay_preprocessing, replay_
 from pycat.batch.steps.segmentation_steps import (replay_cellpose_segmentation, replay_ts_cellpose_keyframe)
 from pycat.batch.steps.brightfield_steps import (replay_bf_preprocess, replay_bf_condensate_segmentation, replay_bf_condensate_analysis, replay_bf_cell_segmentation, replay_ivbf_preprocess, replay_ivbf_segmentation, replay_bf_od_metrics, replay_bf_per_cell_summary, replay_ivbf_field_summary, replay_ivbf_spatial_metrology, replay_ivbf_size_distribution)
 from pycat.batch.steps.invitro_steps import (replay_ivf_preprocess, replay_ivf_field_summary, replay_ivf_size_distribution, replay_ivf_spatial_metrology, replay_ivf_segmentation, replay_ivf_droplet_segment, replay_ivf_droplet_analysis, replay_client_enrichment)
-from pycat.batch.steps.vpt_steps import replay_vpt_microrheology
+from pycat.batch.steps.instrument_steps import INSTRUMENT_STEPS   # VPT, FRAP, fusion, FD, temperature
 from pycat.batch.steps.not_replayed import NOT_REPLAYED, _advice_only, _not_replayed  # noqa: F401  (re-exported)
 from pycat.batch.steps.fibril_steps import (replay_bilateral_filter, replay_peak_edge_enhancement, replay_morphological_gaussian, replay_local_thresholding, replay_label_binary_mask, replay_measure_binary_mask)
 from pycat.batch.steps.timeseries_cell_steps import replay_ts_cells_time_average, replay_cell_timeseries
@@ -247,7 +247,7 @@ _STEP_MAP = {
     'local_thresholding':       replay_local_thresholding,
     'label_binary_mask':        replay_label_binary_mask,
     'measure_binary_mask':      replay_measure_binary_mask,
-    'vpt_microrheology':        replay_vpt_microrheology,
+    **INSTRUMENT_STEPS,
     'client_enrichment':        replay_client_enrichment,   # headless calibrated concentration (reliability_index roadmap)
     # Recorded by the GUI but never registered until 1.7.005 (Completion Spec E2).
     'bf_od_metrics':            replay_bf_od_metrics,

@@ -177,7 +177,7 @@ def table_context_menu(position, table_view, dataframe):
     copy_action = menu.addAction("Copy")
     save_action = menu.addAction("Save as CSV")
 
-    action = menu.exec_(table_view.viewport().mapToGlobal(position))
+    action = menu.exec(table_view.viewport().mapToGlobal(position))
 
     if action == copy_action:
         copy_table_content(table_view)
@@ -346,7 +346,7 @@ def show_dataframes_dialog(window_title, tables_info, service=None):
 
     # ── Non-modal, so it does NOT freeze the rest of the app ──────────────────
     #
-    # This was ``dialog.exec_()`` — MODAL: every other interaction (scrubbing the
+    # This was ``dialog.exec()`` — MODAL: every other interaction (scrubbing the
     # movie, clicking a bead, panning the canvas) was blocked until the user hit
     # OK. A results table is reference material, not a decision the user must make
     # before doing anything else, so it should not seize the whole UI. Show it

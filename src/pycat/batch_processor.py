@@ -991,7 +991,7 @@ class BatchProcessor:
     def open_batch_dialog(self):
         """Open the Batch Run dialog (call from toolbar button)."""
         dlg = BatchDialog(self, parent=None)
-        dlg.exec_()
+        dlg.exec()
 
 
 # ---------------------------------------------------------------------------

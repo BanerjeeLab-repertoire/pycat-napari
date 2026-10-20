@@ -35,6 +35,7 @@ from qtpy.QtWidgets import (
     QScrollArea, QSizePolicy, QRadioButton,
 )
 from qtpy.QtCore import Qt
+from pycat.kernel import OperationService
 
 
 class DropletFusionUI:
@@ -258,19 +259,20 @@ class DropletFusionUI:
 
     def _on_build_signal(self):
         if self._rb_force.isChecked():
-            from pycat.toolbox.fusion_tools import build_fusion_signal_from_forces
             forces = self._dr().get('fusion_forces')
             if not forces:
                 napari_show_warning("No force traces loaded — use Step 1 to load a .h5."); return
             sr = self._sample_rate.value() or self._dr().get('fusion_sample_rate')
             try:
-                time, sig = build_fusion_signal_from_forces(
-                    forces, which=self._chan_dd.currentText(), sample_rate_hz=sr)
+                time, sig = OperationService.produce(
+                    'fusion.force_signal', {'force_traces': forces},
+                    {'which': self._chan_dd.currentText(), 'sample_rate_hz': sr})
             except Exception as e:
                 napari_show_warning(f"Could not build force signal: {e}"); return
             src = f"force {self._chan_dd.currentText()}"
+            how = {'mode': 'force', 'channel': self._chan_dd.currentText(),
+                   'sample_rate_hz': float(self._sample_rate.value() or 0.0)}
         else:
-            from pycat.toolbox.fusion_tools import aspect_ratio_signal
             name = self._img_dd.currentText()
             if name not in [l.name for l in self.viewer.layers]:
                 napari_show_warning(f"Image stack '{name}' not found."); return
@@ -290,25 +292,28 @@ class DropletFusionUI:
                 report_guarantee_failure("fusion_ui: T-vs-Z axis warning", _axis_exc)
             kind = {0: 'auto', 1: 'brightfield', 2: 'otsu'}[self._img_kind.currentIndex()]
             try:
-                time, sig, details = aspect_ratio_signal(
-                    stack, threshold_method=kind, frame_interval_s=self._frame_dt.value(),
-                    return_details=True)
+                time, sig, details = OperationService.produce(
+                    'fusion.aspect_ratio_signal', {'stack': stack},
+                    {'threshold_method': kind, 'frame_interval_s': self._frame_dt.value(), 'return_details': True})
             except Exception as e:
                 napari_show_warning(f"Could not build aspect-ratio signal: {e}"); return
             self._dr()['fusion_image_details'] = details
             src = f"image aspect ratio ({details['method']})"
+            how = {'mode': 'image', 'image_layer': name, 'threshold_method': kind,
+                   'frame_interval_s': self._frame_dt.value()}
 
         self._dr()['fusion_time'] = time
         self._dr()['fusion_signal'] = sig
         self._dr()['fusion_source'] = src
         # Pre-fill the fit window from the inflection of the transient to the end: the neck-growth
         # phase before it is not exponential (fusion_tools.suggest_fit_window).
-        from pycat.toolbox.fusion_tools import suggest_fit_window
-        win = suggest_fit_window(time, sig)
+        win = OperationService.produce('fusion.fit_window', {'time': time, 'signal': sig})
         if np.isfinite(win['t_start']):
             self._t_start.setValue(win['t_start']); self._t_end.setValue(win['t_end'])
         else:
             self._t_start.setValue(float(np.nanmin(time))); self._t_end.setValue(float(np.nanmax(time)))
+        # the suggested window as the spin boxes hold it (rounded to their decimals) -- what an untouched fit uses
+        self._dr()['fusion_suggested_window'] = {'t_start': self._t_start.value(), 't_end': self._t_end.value()}
         # Show the built signal immediately so the analysis isn't a black box —
         # the user sees the force/aspect-ratio profile they're about to fit and
         # can read off a sensible fit window.
@@ -316,9 +321,10 @@ class DropletFusionUI:
             self._plot_fusion_signal(time, sig, src)
         except Exception as e:
             print(f"[PyCAT Fusion] signal plot failed: {e}")
+        # How the signal was built, so batch builds it the same way (a sample rate of 0 = the file's own).
         self._record('fusion_build_signal', {
             'source': src,
-            'n_samples': int(len(sig))})
+            'n_samples': int(len(sig)), **how})
         napari_show_info(
             f"Built fusion signal from {src}: {len(sig)} samples, "
             f"t=[{np.nanmin(time):.4g}, {np.nanmax(time):.4g}] s. The fit window starts at the "
@@ -486,9 +492,10 @@ class DropletFusionUI:
         if not details or time is None or tau != tau:
             return {}
         try:
-            from pycat.toolbox.fusion_tools import droplet_radii_um
             onset = int(np.searchsorted(np.asarray(time), fit['t_start']))
-            r = droplet_radii_um(details, onset, float(self._mpx()))
+            r = OperationService.produce(
+                'fusion.droplet_radii',
+                {'details': details, 'onset_index': onset, 'microns_per_pixel': float(self._mpx())})
         except (ValueError, TypeError, IndexError, KeyError) as e:
             debug_log('fusion: droplet radii unavailable', e)
             return {}
@@ -499,7 +506,6 @@ class DropletFusionUI:
         return cols
 
     def _on_fit(self):
-        from pycat.toolbox.fusion_tools import fit_fusion_relaxation
         time = self._dr().get('fusion_time')
         sig  = self._dr().get('fusion_signal')
         if time is None or sig is None:
@@ -510,14 +516,23 @@ class DropletFusionUI:
         if t_end <= t_start:
             t_start, t_end = None, None  # fit whole trace
 
-        fit = fit_fusion_relaxation(time, sig, t_start=t_start, t_end=t_end)
+        fit = OperationService.produce(
+            'fusion.fit_relaxation', {'time': time, 'signal': sig},
+            {'t_start': t_start, 't_end': t_end})
         self._dr()['fusion_fit'] = fit
 
+        # Whether the window was the suggested one (batch then suggests it again on each file's own signal) or
+        # set by hand (batch reuses the numbers).
+        sug = self._dr().get('fusion_suggested_window') or {}
+        suggested = (t_start is not None and np.isfinite(sug.get('t_start', np.nan))
+                     and abs(t_start - sug['t_start']) < 1e-9 and abs(t_end - sug['t_end']) < 1e-9)
         self._record('fusion_fit', {
             'tau_s': fit.get('tau_s'),
             'r_squared': fit.get('r_squared'),
             't_start': fit.get('t_start'),
-            't_end': fit.get('t_end')})
+            't_end': fit.get('t_end'),
+            'window_source': 'suggested' if suggested else ('whole_trace' if t_start is None else 'manual'),
+            'window_decimals': self._t_start.decimals()})
 
         # Plot the fusion signal with the fitted curve overlaid, the equation, and
         # the fitted parameters labelled — a visual check of fit quality (the

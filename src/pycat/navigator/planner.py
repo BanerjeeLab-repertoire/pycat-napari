@@ -301,19 +301,37 @@ class Planner:
         caps = list(m.requires_inputs) + list(m.provides)
         return 1 if any(c.target() == tgt for c in caps) else 0
 
+    #: Contexts that select WHICH analysis runs, not merely whether a chosen one may: in vitro (no cells) and
+    #: brightfield (optical density, not fluorescence intensity). Quality/dimensionality gates (``calibrated``,
+    #: ``z_stack``, ``time_series``) only gate a chosen op — promoting those would re-order the
+    #: msd/coarsening/fusion terminals.
+    _WORKFLOW_CONTEXTS = ("in_vitro", "brightfield")
+
     def _terminal_ctx_bonus(self, m: ModuleContract, ctx: AnalysisContext) -> int:
-        """+1 for a terminal gated on the WORKFLOW-SELECTING ``in_vitro`` context when it is confirmed (so the
-        in-vitro size-distribution wins the 'size' terminal on an in-vitro plan); 0 otherwise. Restricted to
-        ``in_vitro`` on purpose: a workflow flag selects WHICH analysis to run, whereas quality/dimensionality
-        gates (``calibrated``, ``z_stack``, ``time_series``) only gate a chosen op — promoting those would
-        re-order the msd/coarsening/fusion terminals. Shared by ``_pick_terminal`` and ``explain_terminal_choice``."""
-        try:
-            if "in_vitro" in getattr(m, "requires_context", ()) \
-                    and ctx.context_requirement("in_vitro") is True:
-                return 1
-        except Exception:      # broad-ok: optional_probe — an unknown gate key just yields no bonus
-            pass
-        return 0
+        """+1 for each WORKFLOW-SELECTING context (``_WORKFLOW_CONTEXTS``) the terminal is gated on and that is
+        confirmed, so the in-vitro size distribution wins 'size' on an in-vitro plan and the brightfield OD metrics
+        win on brightfield; ``-1`` when one of those workflow contexts is violated, so an op that cannot apply
+        ranks below every one that can (a brightfield op on fluorescence; until 2026-10-19 terminal selection
+        ignored this, and a fluorescence 'optical density' plan picked a brightfield op over nothing better, while
+        brightfield 'morphology' picked the fluorescence intensity analysis). 0 otherwise. Shared by
+        ``_pick_terminal`` and ``explain_terminal_choice``."""
+        bonus, unconfirmed = 0, False
+        for key in getattr(m, "requires_context", ()) or ():
+            try:
+                met = ctx.context_requirement(key)
+            except Exception:  # broad-ok: optional_probe — an unknown gate key just yields no bonus
+                met = None
+            if key not in self._WORKFLOW_CONTEXTS:
+                continue       # a quality/dimensionality gate: it gates the chosen op; it does not rank it
+            if met is False:
+                return -1
+            if met is True:
+                bonus += 1
+            else:
+                unconfirmed = True
+        # A workflow context that is still UNKNOWN earns nothing: an in-vitro op must not win a cellular
+        # brightfield plan because 'in vitro?' has not been answered yet.
+        return 0 if unconfirmed else bonus
 
     def explain_terminal_choice(self, intent, ctx, pins=None) -> dict:
         """Anti-black-box (Method-Widget Spec 5 core): for each requested observable, the terminal ops the planner

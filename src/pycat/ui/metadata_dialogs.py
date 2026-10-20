@@ -166,7 +166,7 @@ def _show_metadata_dialog(self):
     close_btn.clicked.connect(dialog.accept)
     layout.addWidget(close_btn)
 
-    dialog.exec_()
+    dialog.exec()
 
 
 # ── metadata comparison (contradiction warning across files) — moved from MenuManager (Part 2, feature 7) ──
@@ -233,7 +233,7 @@ def _show_metadata_comparison(self, result=None):
     close.clicked.connect(dlg.accept)
     lay.addWidget(close)
     dlg.resize(600, 400)
-    dlg.exec_()
+    dlg.exec()
 
 
 def _gather_compared_metadata(self):

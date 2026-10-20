@@ -85,7 +85,7 @@ def test_run_measure_region_props_appends_the_measured_numbers(monkeypatch):
     class _FakeDialog:
         Accepted = 1
         def __init__(self, props): pass
-        def exec_(self): return 1
+        def exec(self): return 1
         def get_selected_props(self): return [('label', ''), ('area', ''), ('intensity_mean', '')]
 
     # Patch the function's OWN globals so this survives the module move unchanged.
@@ -107,7 +107,7 @@ def test_run_measure_region_props_appends_the_measured_numbers(monkeypatch):
 def test_run_measure_region_props_cancel_does_nothing(monkeypatch):
     class _CancelDialog:
         def __init__(self, props): pass
-        def exec_(self): return 0
+        def exec(self): return 0
         def get_selected_props(self): return []
 
     g = L.run_measure_region_props.__globals__

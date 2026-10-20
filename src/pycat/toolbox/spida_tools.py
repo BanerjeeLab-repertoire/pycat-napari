@@ -47,6 +47,7 @@ Author
 import numpy as np
 from scipy.optimize import curve_fit
 from scipy.special import gammaln
+from pycat.kernel import OperationService
 
 try:
     from napari.utils.notifications import show_warning as napari_show_warning
@@ -541,17 +542,22 @@ def run_spida_calibration(image_layer, roi_shapes_layer, n_bins, white_noise,
     if pixels is None:
         return
 
-    for w in check_modality(pixels, modality):
+    for w in OperationService.produce('spida.check_modality', {'pixels': pixels, 'modality': modality}):
         napari_show_warning("SpIDA calibration: " + w)
-    for w in check_assumptions(pixels, dtype_max=_dtype_max(image_layer), read_noise_sd=read_noise_sd):
+    for w in OperationService.produce(
+        'spida.check_assumptions', {'pixels': pixels},
+        {'dtype_max': _dtype_max(image_layer), 'read_noise_sd': read_noise_sd}):
         napari_show_warning("SpIDA calibration: " + w)
 
-    x, y = build_intensity_histogram(pixels, n_bins=n_bins, white_noise=white_noise,
-                                     read_noise_sd=read_noise_sd)
+    x, y = OperationService.produce(
+        'spida.histogram', {'pixels': pixels},
+        {'n_bins': n_bins, 'white_noise': white_noise, 'read_noise_sd': read_noise_sd})
     if x is None:
         napari_show_warning("SpIDA calibration: not enough valid pixels in ROI.")
         return
-    res = fit_spida_histogram(x, y, read_noise_var=float(read_noise_sd or 0.0) ** 2)
+    res = OperationService.produce(
+        'spida.fit', {'x': x, 'y': y},
+        {'read_noise_var': float(read_noise_sd or 0.0) ** 2})
     if not res.get('success'):
         if res.get('reason'):
             napari_show_warning('SpIDA: ' + res['reason'])
@@ -578,19 +584,24 @@ def run_spida_analysis(image_layer, roi_shapes_layer, n_bins, white_noise,
     if pixels is None:
         return
 
-    modality_issues = check_modality(pixels, modality)
+    modality_issues = OperationService.produce('spida.check_modality', {'pixels': pixels, 'modality': modality})
     for w in modality_issues:
         napari_show_warning("SpIDA: " + w)
-    issues = check_assumptions(pixels, dtype_max=_dtype_max(image_layer), read_noise_sd=read_noise_sd)
+    issues = OperationService.produce(
+        'spida.check_assumptions', {'pixels': pixels},
+        {'dtype_max': _dtype_max(image_layer), 'read_noise_sd': read_noise_sd})
     for w in issues:
         napari_show_warning("SpIDA: " + w)
 
-    x, y = build_intensity_histogram(pixels, n_bins=n_bins, white_noise=white_noise,
-                                     read_noise_sd=read_noise_sd)
+    x, y = OperationService.produce(
+        'spida.histogram', {'pixels': pixels},
+        {'n_bins': n_bins, 'white_noise': white_noise, 'read_noise_sd': read_noise_sd})
     if x is None:
         napari_show_warning("SpIDA: not enough valid pixels in ROI.")
         return
-    res = fit_spida_histogram(x, y, read_noise_var=float(read_noise_sd or 0.0) ** 2)
+    res = OperationService.produce(
+        'spida.fit', {'x': x, 'y': y},
+        {'read_noise_var': float(read_noise_sd or 0.0) ** 2})
     if not res.get('success'):
         if res.get('reason'):
             napari_show_warning('SpIDA: ' + res['reason'])

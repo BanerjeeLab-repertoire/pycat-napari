@@ -35,7 +35,7 @@ class _SessionActionsMixin:
         # Get layer names and dataframe names from the viewer and analysis data abd present them to the user
         dataframe_names = self.central_manager.active_data_class.get_dataframes().keys()
         dialog = LayerDataframeSelectionDialog(self.viewer.layers, dataframe_names)
-        result = dialog.exec_()
+        result = dialog.exec()
 
         # If the user chose "Clear Without Saving", discard everything now.
         if result == QDialog.Accepted and getattr(dialog, 'clear_without_saving', False):
@@ -185,7 +185,7 @@ class _SessionActionsMixin:
                     box.setDefaultButton(QMessageBox.Save)
                     _dont_ask = QCheckBox("Don't ask again this session")
                     box.setCheckBox(_dont_ask)
-                    choice = box.exec_()
+                    choice = box.exec()
                     if _dont_ask.isChecked():
                         bp._export_prompt_silenced = True
                     if choice == QMessageBox.Save:

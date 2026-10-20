@@ -98,10 +98,11 @@ CANONICAL_CASES: List[CanonicalCase] = [
              "(the measure→interpret chain). NOT the in-cell puncta segmenter."),
     CanonicalCase(
         "In Vitro Brightfield", "condensate", ["morphology"], dict(modality="brightfield", in_vitro=True),
-        required_ops={"bf_segment", "feature_analysis.cell_analysis"},
-        forbidden_ops={"subcellular_segment", "cellpose"},
-        note="in-vitro brightfield: preprocessing -> dark-blob segmentation -> cell-less OD metrics (the same "
-             "cell-less brightfield chain, which is exactly right when there are no cells)."),
+        required_ops={"bf_segment", "brightfield.invitro_field_summary"},
+        forbidden_ops={"subcellular_segment", "cellpose", "feature_analysis.cell_analysis"},
+        note="in-vitro brightfield: preprocessing -> dark-blob segmentation -> the field summary and per-droplet "
+             "OD metrics the panel and batch run. Not the fluorescence intensity analysis (which it planned "
+             "until 2026-10-19)."),
 
     # ---- need codebase-level selection or specialized ops ------------------
     CanonicalCase(

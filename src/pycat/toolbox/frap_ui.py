@@ -12,6 +12,7 @@ Steps
            pre-bleach normalization, recovery-model fit)
 """
 from __future__ import annotations
+from pycat.kernel import OperationService
 try:
     from pycat.ui.field_status import label_with_circle
 except Exception:
@@ -282,6 +283,19 @@ class FRAPUI:
             f"frame interval {data['frame_interval_s']:.4g}s"
             + (f", bleach lag {lag:.3g}s." if lag > 0 else "."))
 
+    def _roi_geometry(self):
+        """The ROIs as drawn, for the recording: the shapes (type + vertices, in order -- bleach first, reference
+        last) or the circles' centres and radius. Batch rebuilds the masks from exactly this."""
+        if self._rb_draw.isChecked():
+            name = self._shapes_dd.currentText()
+            if name not in [l.name for l in self.viewer.layers]:
+                return {}
+            layer = self.viewer.layers[name]
+            return {'shapes': [{'type': str(t), 'vertices': np.asarray(v, float).tolist()}
+                               for t, v in zip(layer.shape_type, layer.data)]}
+        return {'radius': self._radius.value(), 'bleach_center': [self._bl_cy.value(), self._bl_cx.value()],
+                'reference_center': [self._ref_cy.value(), self._ref_cx.value()]}
+
     def _build_masks(self, image_shape):
         from pycat.toolbox.frap_tools import circular_mask, masks_from_shapes
         if self._rb_draw.isChecked():
@@ -476,7 +490,7 @@ class FRAPUI:
                 "image layers are open. Stack them into a single (T, H, W) "
                 "recovery time-series (ordered by layer name)?")
             box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-            if box.exec_() != QMessageBox.Yes:
+            if box.exec() != QMessageBox.Yes:
                 return None
             arr = _np.stack([a for _, a in candidates], axis=0)
             # Add the stacked series as a new layer and select it in the dropdown.
@@ -496,8 +510,7 @@ class FRAPUI:
             return None
 
     def _on_analyze(self):
-        from pycat.toolbox.frap_tools import (
-            run_frap_analysis, run_frap_analysis_multi, masks_from_shapes_multi)
+        from pycat.toolbox.frap_tools import masks_from_shapes_multi
         name = self._rec_dd.currentText()
         if name not in [l.name for l in self.viewer.layers]:
             napari_show_warning(f"Recovery stack '{name}' not found."); return
@@ -560,12 +573,12 @@ class FRAPUI:
 
             self._record('frap_define_roi', {
                 'roi_mode': 'draw_multi', 'n_bleach': len(bleach_masks),
-                'has_reference': ref_mask is not None})
+                'has_reference': ref_mask is not None, 'n_reference': n_ref, **self._roi_geometry()})
             try:
-                multi = run_frap_analysis_multi(
-                    stack, bleach_masks, reference_mask=ref_mask,
-                    frame_interval_s=dt, time_lag_s=lag,
-                    n_spline_points=spts, normalization=norm_mode)
+                multi = OperationService.produce(
+                    'frap.analysis_multi', {'recovery_stack': stack, 'bleach_masks': bleach_masks},
+                    {'reference_mask': ref_mask, 'frame_interval_s': dt, 'time_lag_s': lag,
+                     'n_spline_points': spts, 'normalization': norm_mode})
             except Exception as e:
                 napari_show_warning(f"Multi-ROI FRAP failed: {e}")
                 import traceback; traceback.print_exc(); return
@@ -575,7 +588,7 @@ class FRAPUI:
                 'recovery_stack': name, 'frame_interval_s': dt, 'time_lag_s': lag,
                 'photofading': self._photofade.isChecked(),
                 'normalization': norm_mode, 'roi_mode': 'draw_multi',
-                'n_bleach_roi': len(bleach_masks)})
+                'n_bleach_roi': len(bleach_masks), 'n_spline_points': spts})
             try:
                 from pycat.ui.ui_utils import show_dataframes_dialog
                 show_dataframes_dialog(
@@ -596,7 +609,7 @@ class FRAPUI:
             napari_show_warning("Bleach ROI is empty — check the drawn shape or circle coordinates."); return
         self._record('frap_define_roi', {
             'roi_mode': 'draw' if self._rb_draw.isChecked() else 'circle',
-            'has_reference': ref_mask is not None})
+            'has_reference': ref_mask is not None, **self._roi_geometry()})
         if not self._photofade.isChecked():
             ref_mask = None
         elif ref_mask is None:
@@ -623,33 +636,19 @@ class FRAPUI:
             fit_model = 'circular'
         else:
             fit_model = 'empirical'
-        roi_dims_um = None
-        bleach_radius_um = None
-        if use_rd:
-            ys, xs = np.where(bleach_mask)
-            px = self._pixel_um.value()
-            d_y = (ys.max() - ys.min() + 1) * px
-            d_x = (xs.max() - xs.min() + 1) * px
-            roi_dims_um = (d_x, d_y)
-        elif use_circ:
-            # Use the entered radius, but if left at default (1.0) and a mask
-            # exists, estimate the equivalent radius from the ROI area:
-            # area = π·r²  →  r = sqrt(area/π), converted to µm by pixel size.
-            px = self._pixel_um.value() if self._pixel_um.value() > 0 else 1.0
-            entered = self._bleach_radius.value()
-            area_px = float(bleach_mask.sum())
-            r_from_area = (area_px / np.pi) ** 0.5 * px
-            bleach_radius_um = entered if abs(entered - 1.0) > 1e-6 else r_from_area
+        # The ROI geometry the model needs (bounding box for reaction-diffusion; the entered radius, or the ROI's
+        # area-equivalent radius when left at the 1.0 default, for the circular model) -- shared with batch.
+        roi_dims_um, bleach_radius_um = OperationService.produce(
+            'frap.fit_geometry', {'bleach_mask': bleach_mask, 'fit_model': fit_model},
+            {'pixel_um': self._pixel_um.value(), 'entered_radius_um': self._bleach_radius.value()})
 
         try:
-            result = run_frap_analysis(
-                stack, bleach_mask, reference_mask=ref_mask,
-                frame_interval_s=dt, time_lag_s=lag,
-                prebleach_stack=prebleach_stack,
-                n_spline_points=spts, normalization=norm_mode,
-                fit_model=fit_model, roi_dims_um=roi_dims_um,
-                fit_koff=self._fit_koff.isChecked(),
-                bleach_radius_um=bleach_radius_um)
+            result = OperationService.produce(
+                'frap.analysis', {'recovery_stack': stack, 'bleach_mask': bleach_mask},
+                {'reference_mask': ref_mask, 'frame_interval_s': dt, 'time_lag_s': lag,
+                 'prebleach_stack': prebleach_stack, 'n_spline_points': spts, 'normalization': norm_mode,
+                 'fit_model': fit_model, 'roi_dims_um': roi_dims_um, 'fit_koff': self._fit_koff.isChecked(),
+                 'bleach_radius_um': bleach_radius_um})
         except Exception as e:
             napari_show_warning(f"FRAP analysis failed: {e}")
             import traceback; traceback.print_exc()
@@ -665,6 +664,9 @@ class FRAPUI:
             'normalization': norm_mode, 'fit_model': fit_model,
             'prebleach_stack': pbname if prebleach_stack is not None else None,
             'roi_mode': 'draw' if self._rb_draw.isChecked() else 'circle',
+            # every knob the analysis read, so batch replays this run
+            'n_spline_points': spts, 'fit_koff': self._fit_koff.isChecked(), 'pixel_um': self._pixel_um.value(),
+            'entered_radius_um': self._bleach_radius.value(),
             'tau_half_s': fit.get('half_time_s'),
             'mobile_fraction': fit.get('mobile_fraction')}
         if rd is not None:

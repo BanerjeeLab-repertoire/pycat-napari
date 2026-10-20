@@ -49,6 +49,23 @@ corpus is unchanged, and the route-equivalence tests still pin each kernel to th
   Navigator plans them as (`coloc.manders_k1` of `pixel_wise_corr.pearson_manders`, condensate analysis of
   `feature_analysis.cell_analysis`). `feature_analysis.cell_analysis` and `spatial_metrology.ripley` now name the
   functions they run (`cell_analysis_func`, `run_all_spatial_metrics`). `_STEP_OPERATIONS` declares 44 steps (was 26).
+- **The last panel-only science is in the catalog** (the 88-function ratchet is empty). 92 call sites in 25 files
+  now run through `OperationService`: SpIDA, N&B, unmixing, FRAP, fusion, force-distance, temperature, fibril,
+  topology, contrast cascade, control validation, the organizational / morphological / trajectory metrics, the
+  spatial-metrology statistics, the colocalization extras, the contrast floor and the z-stack metrics.
+  - Most are `part_of` components of an op the Navigator already plans (the spatial statistics of
+    `spatial_metrology.ripley`, FRAP of `frap.fit_recovery`, fusion of `condensate_physics.fit_fusion_relaxation`).
+  - Eight methods with no op got one, each under an observable of its own so no existing plan changes:
+    `spida.fit`, `nb.number_and_brightness`, `unmixing.unmix`, `fd_curve.segment_cycles`, `temperature.turbidity`,
+    `fibril.morphometry`, `contrast_cascade.bands`, `control_validation.validate`.
+  - Nine helpers that compute nothing from data were listed as non-operations with the reason (the WLC overlay,
+    the slider-to-k mapping, annotation strings, the plot-column picker, the floor-count label, the four pipeline
+    diagnostic step viewers).
+  - Force-distance rip detection, which ran through the background runner and so escaped the check, is
+    `fd_curve.rips`.
+- `.exec_()` renamed to `.exec()` (28 sites; both Qt6 bindings and PyQt5 have it).
+- The CuPy "CUDA path" warning filter moved into the worker-process initializer: it was set inside per-frame
+  functions that also run in the main process on the serial path, leaving a process-wide filter behind.
 
 ### Fixed
 - **MSD on a movie shorter than the minimum track length: a stated lag window, not a crash.** The Dynamics panels
@@ -73,8 +90,41 @@ corpus is unchanged, and the route-equivalence tests still pin each kernel to th
 
   Three tests now skip when their package is absent: h5py (force traces), bioio (opening an image in batch)
   and napari (the VPT display layers).
+- **Brightfield plans measure what the brightfield panels measure.** The Navigator measured every brightfield
+  condensate with the fluorescence intensity analysis (`feature_analysis.cell_analysis`); the executor swapped in
+  the OD metrics at run time, but an in-vitro brightfield 'size' plan then ran the FLUORESCENCE size-distribution
+  fit on a brightfield image, and the in-vitro panel's field summary never ran. Final-measurement selection now
+  ranks by the workflow contexts (in vitro, brightfield): in-vitro brightfield plans the field summary and its
+  truncated size distribution, cellular brightfield the per-condensate OD metrics, and an op whose workflow context
+  is violated ranks below every applicable one (an optical-density plan on fluorescence is refused as not
+  executable rather than run). The executor runs the three brightfield ops, and on an in-vitro image the review
+  seeds the in-vitro panel's defaults (bg kernel 60, halo 0.3, droplets 4-200 px). All 650 question paths plan
+  exactly as before; fluorescence plans are unchanged.
+- **Recordings carry every knob the step read**, so a batch replay is the session, not a guess:
+  - VPT bead detection now records the host mode, bead size, template type, de-dup radius and strictness;
+    linking the stable-track promotion; host inference its detection thresholds; rheology the lag window.
+  - FRAP records the ROI geometry (drawn shape vertices or circle centres), spline points, k_off fit, pixel size
+    and entered radius.
+  - Fusion records the signal source (force channel and rate, or image method and frame interval) and whether
+    the fit window was the suggested one.
+  - Force-distance records channel changes, both smoothing windows and the WLC constants.
+  - Temperature records the temperature folder, CSV column and header rows, histogram bins, reference frame,
+    transition method and onset fraction.
+- **Batch reads a time series as the movie the panel saw**: an RGB time series (read by the image library as one
+  frame with N channels) and a one-page-per-frame TIFF (a MicroManager per-page-timed file) now load as (T, H, W);
+  an RGB frame left by `open_image` is no longer taken for a three-frame movie.
+- **The force-distance panel loads a C-Trap .h5 without `lumicks.pylake`** (a plain h5py read of the same Distance
+  and Force channels, as the fusion loader already did). `file_io/frap_io.py` no longer imports napari at module
+  scope (it notifies through `pycat.utils.notify`), so the force-distance replay also runs in a headless batch.
 
 ### Added
+- **VPT, FRAP, fusion, force-distance and temperature replay in batch.** Every analysis step of these five
+  pipelines was registered 'skipped in headless mode'. Each now has a replay running the panel's operations with
+  the recorded knobs (`batch/steps/{vpt,frap,fusion,fd_curve,temperature}_steps.py`). VPT's linking step (population
+  split, drift, stable-track promotion, aggregates) moved out of the panel's worker closure into
+  `vpt/link_step.py` (`vpt.link_beads`), and the FRAP fit geometry into `frap_tools.frap_fit_geometry`, so both
+  launchers run one implementation. A recording made before these steps recorded their geometry / source says so
+  instead of replaying a guess. `tests/test_instrument_replays.py` pins each replay to the direct computation.
 - `tests/test_kernel_contract.py`: every kernel is a catalog/measure op and wraps that op's catalog function; no
   launcher (batch replay, panel function, UI module) calls a kernel's function directly; a step's declared
   operations include every op its replay sends to the kernel (`_STEP_OPERATIONS` is now checked, not just

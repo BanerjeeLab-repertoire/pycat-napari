@@ -367,7 +367,7 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
                             "measured object size, cell diameter, and ball radius?")
                 box.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
                 box.setDefaultButton(QMessageBox.Cancel)
-                return box.exec_() == QMessageBox.Ok
+                return box.exec() == QMessageBox.Ok
             except Exception:
                 return True
 

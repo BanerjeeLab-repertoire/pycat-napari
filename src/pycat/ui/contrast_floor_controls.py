@@ -11,6 +11,7 @@ from qtpy.QtCore import Qt, QTimer
 from qtpy.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QSlider, QVBoxLayout, QWidget
 
 from pycat.toolbox.segmentation.contrast_floor import CONTRAST_FLOOR_DEFAULT
+from pycat.kernel import OperationService
 
 _STEP = 0.05          # CNR per slider tick
 _MAX_CNR = 8.0
@@ -64,10 +65,11 @@ class ContrastFloorControls(QWidget):
 
     def refilter(self):
         """Apply the current floor to the stored objects and update both layers and the count."""
-        from pycat.toolbox.segmentation.contrast_floor import apply_floor, floor_counts
+        from pycat.toolbox.segmentation.contrast_floor import floor_counts
         from pycat.toolbox.segmentation.subcellular import show_below_floor
         data = self._data_getter()
-        above, below = apply_floor(data, self.floor(), self.on()) if data is not None else (None, None)
+        above, below = OperationService.produce(
+            'contrast_floor.apply', {'data_instance': data, 'floor': self.floor(), 'apply': self.on()}) if data is not None else (None, None)
         if above is None:
             return
         if REFINED_LAYER in self._viewer.layers:

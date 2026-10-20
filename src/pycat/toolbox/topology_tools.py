@@ -325,7 +325,7 @@ def run_chromatin_topology(image_layer, data_instance, viewer,
             "No 'Labeled Cell Mask' — topology metrics need cells; adding layers only.")
 
     # Normalised envelope layer (shape comparable across cells).
-    norm_env = normalize_within_mask(envelope, any_mask)
+    norm_env = OperationService.produce('topology.normalize_within_mask', {'field': envelope, 'mask': any_mask})
     add_image_with_default_colormap(
         norm_env, viewer, name=f"Chromatin Topology (norm) {image_layer.name}")
 
@@ -344,14 +344,10 @@ def run_chromatin_topology(image_layer, data_instance, viewer,
     labels = [l for l in np.unique(cell_masks) if l != 0]
     for label in labels:
         cell_mask = (cell_masks == label)
-        m = topology_metrics(envelope, cell_mask,
-                             connectivity_percentile=connectivity_percentile,
-                             ball_radius=ball_radius,
-                             # The noise is a property of the IMAGE, and the envelope has
-                             # smoothed it away. Without it, a FLAT field cannot be told from a
-                             # real one at all — its persistence distribution is the same shape,
-                             # only smaller. See estimate_image_noise.
-                             image_noise=estimate_image_noise(image))
+        m = OperationService.produce(
+            'topology.metrics', {'envelope': envelope, 'cell_mask': cell_mask},
+            {'connectivity_percentile': connectivity_percentile, 'ball_radius': ball_radius,
+             'image_noise': OperationService.produce('topology.image_noise', {'image': image})})
         for k, v in m.items():
             cell_df.loc[cell_df['label'] == label, k] = v
 

@@ -1010,7 +1010,7 @@ def run_obca(mask_layer1, mask_layer2, roi_mask_layer, data_instance):
     # needed for the Accepted/Rejected constants below, not just for the class.
     from qtpy.QtWidgets import QDialog
     dialog = _make_obca_dialog_class()()
-    result = dialog.exec_()
+    result = dialog.exec()
 
     if result == QDialog.Accepted:
         # User accepted the dialog; proceed with the selected methods.

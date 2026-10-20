@@ -73,6 +73,39 @@ _CONDENSATE_THRESHOLDS = (
               help="A punctum covering more than this fraction of its cell is rejected as over-segmentation. "
                    "Default 0.25."),
 )
+def _bf_preprocess_params(ctx=None) -> tuple:
+    """The brightfield preprocessing knobs, defaulted from the executor's grounded defaults for THIS context: an
+    in-vitro brightfield image takes the in-vitro panel's (bg 60, halo 0.3), a cellular one the cellular panel's.
+    One source of truth with ``executor._bf_preprocess_params`` -- the review seeds every value it passes."""
+    from .executor import _BF_PREPROCESS_DEFAULTS, _IVBF_PREPROCESS_DEFAULTS, _in_vitro
+    d = _IVBF_PREPROCESS_DEFAULTS if _in_vitro(ctx) else _BF_PREPROCESS_DEFAULTS
+    return (
+        StepParam("bg_kernel", "Background kernel (px)", "int", d["bg_kernel"], minimum=1,
+                  help="Size of the smoothing kernel that estimates the slowly-varying brightfield background. "
+                       f"Should be a few times the largest condensate. Default {d['bg_kernel']} px."),
+        StepParam("halo_weight", "Halo suppression", "float", d["halo_weight"], minimum=0.0, maximum=1.0,
+                  help="Strength of the halo-ring suppression around dark spots. 0 = none, 0.5 = aggressive. "
+                       f"Default {d['halo_weight']}."),
+    )
+
+
+def _bf_segment_params(ctx=None) -> tuple:
+    """The dark-blob size/shape gates, defaulted for this context (in vitro: droplets up to 200 px)."""
+    from .executor import _BF_CONDENSATE_SEG_DEFAULTS, _IVBF_SEG_DEFAULTS, _in_vitro
+    d = _IVBF_SEG_DEFAULTS if _in_vitro(ctx) else _BF_CONDENSATE_SEG_DEFAULTS
+    return (
+        StepParam("min_diameter_px", "Min diameter (px)", "float", d["min_diameter_px"], minimum=0.0,
+                  help="Smallest condensate diameter kept, in pixels. Larger drops small/noise blobs. "
+                       f"Default {d['min_diameter_px']:g}."),
+        StepParam("max_diameter_px", "Max diameter (px)", "float", d["max_diameter_px"], minimum=0.0,
+                  help="Largest condensate diameter kept, in pixels. Smaller rejects merged/oversized blobs. "
+                       f"Default {d['max_diameter_px']:g}."),
+        StepParam("min_circularity", "Min circularity", "float", d["min_circularity"], minimum=0.0, maximum=1.0,
+                  help="Minimum circularity (1 = perfect circle) a blob must have to be kept. "
+                       f"Default {d['min_circularity']:g}."),
+    )
+
+
 _MATERIAL: dict = {
     "image_processing_tools": (
         StepParam("ball_radius", "Rolling-ball radius (px)", "int", 50, minimum=1,
@@ -81,27 +114,12 @@ _MATERIAL: dict = {
     ),
     # segmentation_tools is TARGET-VARYING: a cell target surfaces the cellpose diameter, a condensate target the
     # six puncta thresholds — the same target branch the executor's `_segmentation_params` dispatches on.
-    "segmentation_tools": lambda intent: (
+    "segmentation_tools": lambda intent, ctx=None: (
         _CONDENSATE_THRESHOLDS if getattr(intent, "target", None) == "condensate" else (_CELL_DIAMETER,)),
     # The brightfield condensate chain (op-id-keyed): the preprocessing knobs and the dark-blob size/shape gates,
     # each read by its batch handler's `params.get(k, default)`, so a reviewed edit reaches the run.
-    "bf_preprocess": (
-        StepParam("bg_kernel", "Background kernel (px)", "int", 50, minimum=1,
-                  help="Size of the smoothing kernel that estimates the slowly-varying brightfield background. "
-                       "Should be a few times the largest condensate. Default 50 px."),
-        StepParam("halo_weight", "Halo suppression", "float", 0.35, minimum=0.0, maximum=1.0,
-                  help="Strength of the halo-ring suppression around dark spots. 0 = none, 0.5 = aggressive. "
-                       "Default 0.35."),
-    ),
-    "bf_segment": (
-        StepParam("min_diameter_px", "Min diameter (px)", "float", 3.0, minimum=0.0,
-                  help="Smallest condensate diameter kept, in pixels. Larger drops small/noise blobs. Default 3."),
-        StepParam("max_diameter_px", "Max diameter (px)", "float", 50.0, minimum=0.0,
-                  help="Largest condensate diameter kept, in pixels. Smaller rejects merged/oversized blobs. "
-                       "Default 50."),
-        StepParam("min_circularity", "Min circularity", "float", 0.5, minimum=0.0, maximum=1.0,
-                  help="Minimum circularity (1 = perfect circle) a blob must have to be kept. Default 0.5."),
-    ),
+    "bf_preprocess": lambda intent, ctx=None: _bf_preprocess_params(ctx),
+    "bf_segment": lambda intent, ctx=None: _bf_segment_params(ctx),
     # In-vitro fluorescence droplet segmentation: the threshold method + the small-object cutoff.
     "ivf_droplet_segment": (
         StepParam("method", "Segmentation method", "choice", "droplet",
@@ -121,14 +139,15 @@ _MATERIAL: dict = {
 _PRESET_WORKFLOW: dict = {}
 
 
-def material_params(step_name: str, intent=None) -> tuple:
+def material_params(step_name: str, intent=None, ctx=None) -> tuple:
     """The declared material parameters of ``step_name`` (empty if none/unknown), resolved through the same
     op-id → module translation the adapters use so a production op-id step (``cellpose``, ``subcellular_segment``)
     finds its set. Where a module's material set depends on the target — segmentation surfaces the cellpose
-    diameter for a cell and the six puncta thresholds for a condensate — ``intent`` selects the right one."""
+    diameter for a cell and the six puncta thresholds for a condensate — ``intent`` selects the right one; the
+    brightfield chain's DEFAULTS depend on the context (in vitro or cellular), which ``ctx`` selects."""
     from .executor import adapter_module_for
     entry = _MATERIAL.get(adapter_module_for(step_name), ())
-    return entry(intent) if callable(entry) else entry
+    return entry(intent, ctx) if callable(entry) else entry
 
 
 def _coerce(param: StepParam, value):
@@ -273,7 +292,7 @@ def build_param_review(plan, ctx=None) -> ParamReview:
         # (its batch step resolves to None) must not surface a parameter for a step that won't execute.
         if resolve_batch_step(es.name, intent) is None:
             continue
-        params = material_params(es.name, intent)
+        params = material_params(es.name, intent, ctx)
         if not params:
             continue
         reviewed.append(ReviewedStep(es.name, params, preset=_applicable_preset(es.name), ctx=ctx))

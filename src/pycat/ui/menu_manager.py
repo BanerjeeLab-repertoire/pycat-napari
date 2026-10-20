@@ -147,7 +147,7 @@ class _FileDropFilter(QObject):
             add_btn = box.addButton("Add", QMessageBox.AcceptRole)
             cancel_btn = box.addButton(QMessageBox.Cancel)
             box.setDefaultButton(add_btn)
-            box.exec_()
+            box.exec()
             clicked = box.clickedButton()
             if clicked is clear_btn:
                 return 'clear'

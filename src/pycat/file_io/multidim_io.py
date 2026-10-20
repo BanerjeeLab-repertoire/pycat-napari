@@ -334,6 +334,6 @@ def show_position_selection_dialog(positions: list[dict], title: str,
     buttons.rejected.connect(dlg.reject)
     layout.addWidget(buttons)
 
-    if dlg.exec_() == QDialog.Accepted:
+    if dlg.exec() == QDialog.Accepted:
         return [i for i, cb in enumerate(checkboxes) if cb.isChecked()]
     return []

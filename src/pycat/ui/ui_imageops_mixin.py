@@ -19,6 +19,7 @@ from qtpy.QtWidgets import (
 from pycat.toolbox.image_processing_tools import (
     run_apply_rescale_intensity, run_invert_image, run_upscaling_func,
     run_rb_gaussian_background_removal)
+from pycat.kernel import OperationService
 
 
 class _ImageOpsWidgetsMixin:
@@ -94,8 +95,6 @@ class _ImageOpsWidgetsMixin:
         _advice.setStyleSheet("font-size:9pt; padding:4px;")
 
         def _on_advise():
-            from pycat.toolbox.segmentation_scale_advisor import (
-                advise_upscaling, measure_object_diameter_px)
             import napari as _np_
             method = self._upscale_method_dd.currentText()
 
@@ -121,11 +120,11 @@ class _ImageOpsWidgetsMixin:
                             except Exception:
                                 fi = 0
                         plane = extract_2d_plane(lay.data, frame_index=fi, dtype=None)
-                        d = measure_object_diameter_px(plane)
+                        d = OperationService.produce('upscale.object_diameter', {'image': plane})
                 except Exception:
                     d = 0.0
 
-            r = advise_upscaling(d, method)
+            r = OperationService.produce('upscale.advise', {'object_diameter_px': d, 'method': method})
             colour = {'ok': '#5cb85c', 'suggest': '#f0a500',
                       'warn': '#d9534f'}.get(r['level'], '#aaa')
             txt = r['reason'].replace('**', '')
@@ -294,15 +293,13 @@ class _ImageOpsWidgetsMixin:
             return stack, reference, mode, rebuild, iname
 
         def _apply(add_layer=True):
-            from pycat.toolbox.temperature_tools import reference_subtraction
             r = _resolve_inputs()
             if r is None:
                 return None
             stack, reference, mode, rebuild, iname = r
-            corrected, info = reference_subtraction(
-                stack, reference, mode=mode,
-                clip_fraction=clip_pct.value() / 100.0,
-                rebuild_reference_index=rebuild)
+            corrected, info = OperationService.produce(
+                'temperature.reference_subtraction', {'stack': stack, 'reference': reference},
+                {'mode': mode, 'clip_fraction': clip_pct.value() / 100.0, 'rebuild_reference_index': rebuild})
             if add_layer:
                 nm = f"{iname} (ref-subtracted, {mode})"
                 self.viewer.add_image(corrected, name=nm)
@@ -397,8 +394,7 @@ class _ImageOpsWidgetsMixin:
         import numpy as np
         from qtpy.QtWidgets import QDoubleSpinBox
         from napari.utils.notifications import show_info as _info, show_warning as _warn
-        from pycat.toolbox.unmixing_tools import (
-            estimate_mixing_matrix, unmix, negative_fraction, clip_for_display, mixing_matrix_warnings)
+        from pycat.toolbox.unmixing_tools import clip_for_display
         from pycat.utils.errors import ScientificAssumptionError
 
         lay = QVBoxLayout()
@@ -447,13 +443,17 @@ class _ImageOpsWidgetsMixin:
                       "give one control per channel."); return
             bg = float(bg_sp.value())
             try:
-                M = estimate_mixing_matrix(controls, background=bg)
-                for _w in mixing_matrix_warnings(M):
+                M = OperationService.produce(
+                    'unmixing.mixing_matrix', {'single_label_controls': controls},
+                    {'background': bg})
+                for _w in OperationService.produce('unmixing.matrix_warnings', {'M': M}):
                     _warn("Unmixing: " + _w)
-                unmixed = unmix(mixed, M, background=bg)
+                unmixed = OperationService.produce(
+                    'unmixing.unmix', {'channels': mixed, 'M': M},
+                    {'background': bg})
             except ScientificAssumptionError as e:
                 _warn(f"Unmixing refused: {e}"); return
-            neg = negative_fraction(unmixed)
+            neg = OperationService.produce('unmixing.negative_fraction', {'unmixed': unmixed})
             disp = clip_for_display(unmixed)
             for i in range(k):
                 self.viewer.add_image(disp[i], name=f"Unmixed C{i}")

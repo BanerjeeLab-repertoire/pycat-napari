@@ -154,6 +154,44 @@ def _load_stack(image_path: Path, channel: int = 0):
     return np.stack(planes)
 
 
+def _load_time_stack(image_path: Path, channel: int = 0):
+    """A (T, H, W) movie of one channel in raw counts, for the time-series panels' replays: the image reader's
+    T axis, or -- for a TIFF whose pages ARE the frames but the reader does not call them T (an RGB time series
+    reads as T=1, C=frames, S=3) -- the TIFF's own series, one sample/channel of it. None if neither is a movie."""
+    stack = _load_stack(image_path, channel)
+    if stack is not None:
+        return stack
+    if Path(image_path).suffix.lower() not in ('.tif', '.tiff'):
+        return None
+    import tifffile
+    with tifffile.TiffFile(str(image_path)) as tif:
+        series = tif.series[0]
+        axes, arr = series.axes, series.asarray()
+        pages = tif.pages
+        if arr.ndim == 2 and len(pages) > 1 and all(p.shape == pages[0].shape for p in pages):
+            # one page per frame, each its own series (a MicroManager per-page-timed TIFF): the pages ARE the
+            # movie, as the GUI's page stack reads them
+            return np.stack([p.asarray() for p in pages])
+    if 'S' in axes:                           # RGB samples: the panel analyses one colour of the movie
+        arr = np.take(arr, channel, axis=axes.index('S'))
+        axes = axes.replace('S', '')
+    if 'C' in axes and arr.ndim > 3:
+        arr = np.take(arr, channel, axis=axes.index('C'))
+        axes = axes.replace('C', '')
+    return arr if arr.ndim == 3 and arr.shape[0] > 1 else None
+
+
+def _session_time_stack(state: dict, image_path: Path, channel: int = 0):
+    """The (T, H, W) movie a time-series panel analysed: the stack ``open_stack`` loaded (it records the frame
+    count), else the file's own frames. A 3-D ``state['image']`` is NOT enough on its own -- ``open_image`` of an
+    RGB frame leaves (H, W, 3) there, and taking that for a three-frame movie measured the wrong pixels."""
+    image = state.get('image')
+    dr = getattr(state.get('data_instance'), 'data_repository', {}) or {}
+    if image is not None and np.asarray(image).ndim == 3 and dr.get('timeseries_n_frames') == np.asarray(image).shape[0]:
+        return np.asarray(image)
+    return _load_time_stack(image_path, channel)
+
+
 def _resolve_channel_for_layer(channel_assignment, layer_name_substring: str, default: int = 0) -> int:
     """
     Look up which channel was assigned to a given layer name during the
