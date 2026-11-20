@@ -140,7 +140,7 @@ class TagCollision(ImportError):
 def register_operation(op: str, *, role: str, summary: str,
                        target: str | None = None, produces: str | None = None,
                        aliases: tuple = (), inputs: tuple = (),
-                       requirements: tuple = ()):
+                       requirements: tuple = (), module: str | None = None):
     """Declare an operation in the vocabulary. **Raises on a duplicate.**
 
     Parameters
@@ -163,6 +163,9 @@ def register_operation(op: str, *, role: str, summary: str,
         — values from the controlled ``REQUIREMENTS`` vocabulary (``z_stack``, ``time_axis``, …). It
         exists so a consumer can gate the op with a STATED REASON ("needs a 3D z-stack") instead of
         letting it fail at run time. Optional; declare only unambiguous preconditions (increment 5).
+    module : the dotted module of the code declaring the op (``@tags_layer`` passes the function's). An op
+        declared from an installed plugin's package while that plugin loads belongs to the plugin
+        (``pycat.plugins``).
     """
     op = str(op).strip().lower()
 
@@ -221,6 +224,11 @@ def register_operation(op: str, *, role: str, summary: str,
             raise TagCollision(
                 f"the alias '{alias}' (for '{op}') is already a registered OPERATION")
 
+    # An op declared in a plugin's package while that plugin loads belongs to the plugin (its '<plugin>.'
+    # namespace is enforced there), so the catalog can keep plugin ops out of PyCAT's committed snapshot.
+    from pycat.plugins.registry import claim_operation
+    claim_operation(op, module)
+
     _OPERATIONS[op] = dict(
         op=op, role=role, summary=summary, target=target,
         produces=produces or role,
@@ -256,7 +264,7 @@ def tags_layer(op: str, *, role: str, summary: str,
     def _decorate(fn):
         register_operation(op, role=role, summary=summary, target=target,
                            produces=produces, aliases=aliases, inputs=inputs,
-                           requirements=requirements)
+                           requirements=requirements, module=fn.__module__)
         _OPERATIONS[op.strip().lower()]['registered_by'] = (
             f"{fn.__module__}.{fn.__qualname__}")
 

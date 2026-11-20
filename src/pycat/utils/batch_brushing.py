@@ -14,19 +14,20 @@ import pathlib
 
 import pandas as pd
 
-from pycat.utils.consolidated_table import DEFAULT_OBJECT_TABLES, records_from_output_dir
+from pycat.utils.consolidated_table import records_from_output_dir
 
 SOURCE_PATH_COLUMN = '_pycat_source_path'
 
 
-def assemble_batch_object_tables(output_dir, source_paths, object_tables=DEFAULT_OBJECT_TABLES):
+def assemble_batch_object_tables(output_dir, source_paths, object_tables=None):
     """Read every image's per-image object CSVs from ``output_dir/<stem>/`` and concatenate them by object
     type, tagging each row with the image it came from.
 
     ``source_paths`` are the batch's input image paths (``BatchWorker.files``) — the stem locates the
     per-image folder and the full path is what makes the row resolve offline. Returns
     ``{object_type: DataFrame}`` (``'cell'``, ``'puncta'``, …); an image that produced no objects simply
-    contributes no rows. Pure — point it at a temp dir in a test.
+    contributes no rows. Pure — point it at a temp dir in a test. ``object_tables=None``: PyCAT's object tables
+    and the loaded plugins' (``consolidated_table.object_table_keys``).
     """
     out = pathlib.Path(output_dir)
     by_type: dict = {}

@@ -92,11 +92,14 @@ def step_operations(step_name: str) -> tuple[str, ...]:
 
     The declared composition (see ``_STEP_OPERATIONS``). ``()`` means either the step invokes no
     registered operation (file I/O, save/clear, a skip-stub) or its mapping is not yet declared —
-    the coverage guard, not this accessor, distinguishes the two.
+    the coverage guard, not this accessor, distinguishes the two. A loaded plugin's steps declare theirs
+    when they register (``PluginAPI.add_batch_step(..., operations=)``).
     """
-    return _STEP_OPERATIONS.get(step_name, ())
+    from pycat.plugins.registry import plugin_step_operations
+    return _STEP_OPERATIONS.get(step_name) or plugin_step_operations().get(step_name, ())
 
 
 def all_step_operations() -> dict:
-    """The whole declared step → operations composition (a copy)."""
-    return {k: tuple(v) for k, v in _STEP_OPERATIONS.items()}
+    """The whole declared step → operations composition (a copy), loaded plugins' steps included."""
+    from pycat.plugins.registry import plugin_step_operations
+    return {k: tuple(v) for k, v in {**_STEP_OPERATIONS, **plugin_step_operations()}.items()}

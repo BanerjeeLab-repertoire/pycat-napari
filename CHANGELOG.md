@@ -2,7 +2,24 @@
 **OperationService adopted: one task, one place.** No numbers change: every batch golden master on the real-data
 corpus is unchanged, and the route-equivalence tests still pin each kernel to the direct call bit for bit.
 
+### Added
+- **Plugins: extend PyCAT from a separately installed package** (`pycat.plugins`, plugin API 1.0). A package that
+  declares a `pycat.plugins` entry point is loaded at startup and, through `register(api)`, can add operations to
+  the catalog the Navigator plans over (with execution kernels and Navigator adapters), batch steps, per-object
+  tables in `consolidated_long.csv`, analysis methods with a workflow checklist, toolbox tools, menu actions, Home
+  cards, and new targets / requirements to the controlled vocabularies. Everything a plugin registers is named
+  `<plugin>.<name>`. A plugin that fails to import, declares another API major, or raises is listed with the
+  reason and skipped, and what it registered is removed. A new **✦ Plugins** menu holds each plugin's items and
+  **Installed plugins…**. `PYCAT_DISABLE_PLUGINS=1` loads none; the test suite sets it. Guide:
+  `docs/source/development/plugins.rst`.
+- **Plugin operations never enter PyCAT's committed `operation_catalog.json`.** `build_catalog_document` leaves them
+  out unless `include_plugins=True` (the Navigator's registry passes it), so the snapshot and its regeneration
+  guard describe PyCAT alone whatever is installed.
+
 ### Changed
+- **The consolidated table's object tables are read when used** (`consolidated_table.object_table_keys()`), not
+  fixed at import as a default argument, so a plugin's table is included. Passing `object_tables=` explicitly is
+  unchanged.
 - **Batch replays and panels run their science through `OperationService`.** 39 launcher call sites that reached the
   toolbox directly (14 batch replays, 25 panel / UI functions) now call `OperationService.execute` / `.produce` with
   the operation's catalog id: background removal, Cellpose, bilateral, peak & edge, morphological Gaussian, local

@@ -48,6 +48,11 @@ if 'QT_API' not in os.environ and importlib.util.find_spec('PySide6') is not Non
 if 'QT_API' in os.environ:
     os.environ.setdefault('PYTEST_QT_API', os.environ['QT_API'])
 
+# ── Installed PyCAT plugins do not load in the suite ─────────────────────────────────────────────────────────
+# A developer's installed plugin would otherwise add operations, steps and menu items to every test that builds
+# the catalog, the batch registry or a CentralManager. tests/test_plugins.py loads its own fake entry points.
+os.environ['PYCAT_DISABLE_PLUGINS'] = '1'
+
 import pytest
 
 # Packages the headless (`core`) CI deliberately does not install. A test module needing

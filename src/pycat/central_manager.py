@@ -152,6 +152,14 @@ class CentralManager:
         except Exception as exc:      # broad-ok: ui_cleanup — the reopen action must never break startup
             from pycat.utils.general_utils import debug_log
             debug_log("show-results: install failed", exc)
+        # Installed plugins (pycat.plugins): load them, add the ✦ Plugins menu, wire their methods into the
+        # checklist / session restore / Home dock. A plugin's own failure is recorded per plugin by the loader.
+        try:
+            from pycat.ui.plugins_menu import install_plugins
+            self._plugins_menu = install_plugins(self)
+        except Exception as exc:      # broad-ok: ui_cleanup — the plugin menu must never break startup
+            from pycat.utils.general_utils import debug_log
+            debug_log("plugins: install failed", exc)
 
         # Connect viewer layer selection changes to update the UI tools appropriately
         self.viewer.layers.selection.events.changed.connect(self.toolbox_functions_ui.update_tool)

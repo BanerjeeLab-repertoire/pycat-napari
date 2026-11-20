@@ -171,23 +171,25 @@ def iter_operation_specs(live: bool = False) -> list[OperationSpec]:
 
     _populate_registry()
 
-    specs: list[OperationSpec] = []
-    for op, entry in list_operations().items():   # list_operations() already returns id-sorted
-        module, function = _module_function_from_registered_by(entry.get("registered_by"))
-        specs.append(OperationSpec(
-            id=op,
-            role=entry["role"],
-            summary=entry.get("summary", ""),
-            target=entry.get("target"),
-            produces=entry.get("produces", entry["role"]),
-            aliases=tuple(entry.get("aliases", ())),
-            registered_by=entry.get("registered_by"),
-            inputs=tuple(entry.get("inputs", ())),
-            requirements=tuple(entry.get("requirements", ())),
-            module=module,
-            function=function,
-        ))
-    return specs
+    # list_operations() already returns id-sorted
+    return [_spec_from_live(op, entry) for op, entry in list_operations().items()]
+
+
+def _spec_from_live(op: str, entry: dict) -> OperationSpec:
+    module, function = _module_function_from_registered_by(entry.get("registered_by"))
+    return OperationSpec(
+        id=op,
+        role=entry["role"],
+        summary=entry.get("summary", ""),
+        target=entry.get("target"),
+        produces=entry.get("produces", entry["role"]),
+        aliases=tuple(entry.get("aliases", ())),
+        registered_by=entry.get("registered_by"),
+        inputs=tuple(entry.get("inputs", ())),
+        requirements=tuple(entry.get("requirements", ())),
+        module=module,
+        function=function,
+    )
 
 
 def _specs_from_catalog() -> list[OperationSpec]:
@@ -210,6 +212,16 @@ def _specs_from_catalog() -> list[OperationSpec]:
             module=_dotted_module_from_source(entry.get("source")),
             function=entry.get("function"),
         ))
+    # A loaded plugin's operations are never in PyCAT's committed file; they are live by construction (the
+    # plugin's import registered them), so they are read from the registry — which the plugin load imported.
+    from pycat.plugins.registry import plugin_operations
+    if plugin_operations():
+        from pycat.utils.tag_registry import get_operation
+        listed = {s.id for s in specs}
+        for op in plugin_operations():
+            entry = get_operation(op)
+            if entry is not None and op not in listed:
+                specs.append(_spec_from_live(op, entry))
     specs.sort(key=lambda s: s.id)
     return specs
 

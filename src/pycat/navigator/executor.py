@@ -324,8 +324,16 @@ _OP_TO_ADAPTER_MODULE: dict = {
 
 def _adapter_for(step_name: str):
     """The ExecAdapter for a plan step, whether it is named by module (`segmentation_tools`, from the
-    workbook registry / hand-built plans) or by op-id (`cellpose`, from the production op-catalog session)."""
-    return _ADAPTERS.get(step_name) or _ADAPTERS.get(_OP_TO_ADAPTER_MODULE.get(step_name, ""))
+    workbook registry / hand-built plans) or by op-id (`cellpose`, from the production op-catalog session). A
+    loaded plugin's op runs through the batch step its adapter names (``PluginAPI.add_navigator_adapter``)."""
+    found = _ADAPTERS.get(step_name) or _ADAPTERS.get(_OP_TO_ADAPTER_MODULE.get(step_name, ""))
+    if found is None:
+        from pycat.plugins.registry import plugin_adapters
+        spec = plugin_adapters().get(step_name)
+        if spec is not None:
+            found = ExecAdapter(spec.plan_step, spec.batch_step,
+                                spec.params_from or (lambda intent, ctx, state, reviewed: {}))
+    return found
 
 
 def has_adapter(step_name: str) -> bool:

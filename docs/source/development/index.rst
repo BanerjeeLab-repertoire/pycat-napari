@@ -21,6 +21,7 @@ Development Resources
    :titlesonly:
 
    contributing
+   plugins
    support
    roadmap
 

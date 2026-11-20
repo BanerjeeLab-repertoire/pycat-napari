@@ -573,7 +573,8 @@ def build_operation_registry(catalog_path: Optional[str] = None,
         provides=[cap(R.INTENSITY_FIELD, "target:*")], preference=0.9,
         public_api="file_io.load()", source="synthetic"))
 
-    layer_ops = (build_catalog_document(catalog_path)["operations"] if from_spec
+    # The live spec includes the loaded plugins' operations; the committed file is PyCAT's own.
+    layer_ops = (build_catalog_document(catalog_path, include_plugins=True)["operations"] if from_spec
                  else load_operation_catalog(catalog_path))
 
     seen = {"acquisition"}
@@ -602,7 +603,7 @@ def build_operation_registry(catalog_path: Optional[str] = None,
 #     python -m pycat.navigator.op_catalog --regenerate                        #
 # The fix for legitimate drift is therefore "run the regen, commit the JSON".  #
 # --------------------------------------------------------------------------- #
-def _provenance_from_registered_by(registered_by: Optional[str]) -> dict:
+def _provenance_from_registered_by(registered_by: Optional[str], plugin: Optional[str] = None) -> dict:
     """Derive the snapshot's ``module`` / ``function`` / ``source`` / ``kind`` from a live op's
     ``registered_by`` (``module.qualname`` for a decorated fn, or the UI-op registrar marker).
 
@@ -614,13 +615,16 @@ def _provenance_from_registered_by(registered_by: Optional[str]) -> dict:
         return dict(module="tag_registry", function="_register_ui_operations",
                     source="src/pycat/utils/tag_registry.py", kind="ui")
     parts = rb.split(".")
+    if plugin is not None:            # an installed plugin's op: its source is the plugin, not PyCAT's tree
+        return dict(module=parts[-2] if len(parts) >= 2 else "", function=parts[-1],
+                    source=f"plugin:{plugin}", kind="plugin")
     if len(parts) >= 2:
         return dict(module=parts[-2], function=parts[-1],
                     source="src/" + "/".join(parts[:-1]) + ".py", kind="toolbox")
     return dict(module="", function=rb, source="", kind="toolbox")
 
 
-def build_catalog_document(path: Optional[str] = None) -> dict:
+def build_catalog_document(path: Optional[str] = None, include_plugins: bool = False) -> dict:
     """Build the catalog document **purely from the live spec** — ``iter_operation_specs()`` — with no
     file write. This is the "generate from the spec" half of OperationSpec increment 4: the document is
     a **deterministic function of the ``@tags_layer``/UI decorators**, not a hand-maintained file.
@@ -631,7 +635,12 @@ def build_catalog_document(path: Optional[str] = None) -> dict:
     of the file, and it is idempotent, so ``build_catalog_document() == the committed JSON`` once
     regenerated (this is what the regeneration guard checks). Measure/interpret ops are NOT written: they
     are injected at build time by ``_measure_ops()`` and were never part of this JSON.
+
+    ``include_plugins``: also the operations installed plugins registered (``kind='plugin'``). Off by default,
+    so the committed snapshot and its regeneration guard describe PyCAT alone whatever is installed; the
+    Navigator's registry turns it on.
     """
+    from pycat.plugins.registry import plugin_of_operation
     from .operation_spec import iter_operation_specs
 
     p = path or os.path.join(_DATA, CATALOG)
@@ -648,7 +657,10 @@ def build_catalog_document(path: Optional[str] = None) -> dict:
 
     operations = []
     for spec in iter_operation_specs(live=True):   # the GENERATOR reads the live decorators, never the JSON
-        prov = _provenance_from_registered_by(spec.registered_by)
+        plugin = plugin_of_operation(spec.id)
+        if plugin is not None and not include_plugins:
+            continue
+        prov = _provenance_from_registered_by(spec.registered_by, plugin)
         operations.append({
             "op": spec.id,
             "role": spec.role,

@@ -504,7 +504,8 @@ def analysis_results_for_step(step_name, state):
     identity (a non-empty operation_id / entity_type, a real DataFrame) — so the step's outcome carries the
     STRUCTURED result, not just a status. Additive: it reads the table the step already wrote (from the
     ``data_instance`` or ``state``), changes nothing, and never raises into the run."""
-    spec = _ANALYSIS_STEP_TABLES.get(step_name)
+    from pycat.plugins.registry import plugin_step_tables
+    spec = _ANALYSIS_STEP_TABLES.get(step_name) or plugin_step_tables().get(step_name)
     if spec is None:
         return ()
     entity_type, key = spec

@@ -279,15 +279,23 @@ DEFAULT_OBJECT_TABLES = ('cell_df', 'puncta_df', 'droplet_df',   # droplet_df: i
                          'tsivf_kinetics_df')                        # in-vitro time series (1.7.004)
 
 
-def records_from_data_repository(repo, object_tables=DEFAULT_OBJECT_TABLES):
+def object_table_keys():
+    """``DEFAULT_OBJECT_TABLES`` plus the ones loaded plugins declared (``PluginAPI.add_object_table``). Read
+    at call time, so a table a plugin added after this module imported is not missed."""
+    from pycat.plugins.registry import plugin_object_tables
+    return DEFAULT_OBJECT_TABLES + tuple(t for t in plugin_object_tables() if t not in DEFAULT_OBJECT_TABLES)
+
+
+def records_from_data_repository(repo, object_tables=None):
     """``(object_type, dataframe)`` records for the per-object tables present in a data repository.
 
     ``object_type`` is the key with ``_df`` stripped (``puncta_df`` → ``punctum``... no — ``puncta``;
     the key's stem is used verbatim, so the label matches what the rest of PyCAT calls it). Absent or
     empty tables are skipped. Pure — feed it a plain dict in a test, no batch loop required.
+    ``object_tables=None`` reads :func:`object_table_keys`.
     """
     records = []
-    for key in object_tables:
+    for key in (object_table_keys() if object_tables is None else object_tables):
         df = (repo or {}).get(key)
         if isinstance(df, pd.DataFrame) and not df.empty:
             object_type = key[:-3] if key.endswith('_df') else key
@@ -295,18 +303,19 @@ def records_from_data_repository(repo, object_tables=DEFAULT_OBJECT_TABLES):
     return records
 
 
-def records_from_output_dir(output_dir, image_stem, object_tables=DEFAULT_OBJECT_TABLES):
+def records_from_output_dir(output_dir, image_stem, object_tables=None):
     """``(object_type, dataframe)`` records read from an image's per-image batch output folder.
 
     Reads ``<stem>_<key>.csv`` (``<stem>_cell_df.csv``, ``<stem>_puncta_df.csv``) — the files the replay
     steps already wrote — so the consolidated writer STREAMS from disk rather than holding each image's
     data repository open. Absent, empty, or unreadable files are skipped (an image that produced no
-    objects simply contributes no rows). Pure: point it at a temp dir in a test.
+    objects simply contributes no rows). Pure: point it at a temp dir in a test. ``object_tables=None`` reads
+    :func:`object_table_keys`.
     """
     import pathlib
     out = pathlib.Path(output_dir)
     records = []
-    for key in object_tables:
+    for key in (object_table_keys() if object_tables is None else object_tables):
         csv = out / f"{image_stem}_{key}.csv"
         if not csv.exists():
             continue

@@ -266,14 +266,13 @@ from pycat.batch.step_operations import _STEP_OPERATIONS, all_step_operations, s
 
 
 def register_all_steps(bp: "BatchProcessor"):
-    # A duplicate key in _STEP_MAP is silently swallowed by Python (the later
-    # entry wins), which makes it a latent trap: someone implements a real
-    # replay handler, a stale skip-stub further down the dict overrides it, and
-    # they debug a handler that never runs. `morphological_complexity` was
-    # registered twice for exactly this reason. The dict literal cannot report
-    # it, so check the SOURCE for repeated keys at import time and say so.
+    # A duplicate key in _STEP_MAP is silently swallowed by Python (the later entry wins), which makes it a
+    # latent trap: someone implements a real replay handler, a stale skip-stub further down the dict overrides
+    # it, and they debug a handler that never runs. `morphological_complexity` was registered twice for exactly
+    # this reason. The dict literal cannot report it, so check the SOURCE for repeated keys and say so.
     _warn_on_duplicate_step_keys()
-    for name, fn in _STEP_MAP.items():
+    from pycat.plugins.loader import plugin_batch_steps   # installed plugins' steps ('<plugin>.<step>' keys)
+    for name, fn in {**_STEP_MAP, **plugin_batch_steps()}.items():
         bp.register_step(name, fn)
     print(f"[PyCAT Batch] Registered {len(_STEP_MAP)} headless replay steps.")
 
